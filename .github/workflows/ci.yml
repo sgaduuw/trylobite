@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+      - run: uv sync
+      - name: Lint
+        run: uv run ruff check tests
+      - name: Format
+        run: uv run ruff format --check tests
+      - name: Test
+        run: uv run pytest
+      - name: Boot the demo
+        run: uv run detrytus run demo.s --ram-pages 20
