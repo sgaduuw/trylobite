@@ -1,0 +1,28 @@
+# Process 1: spin first, with no system calls, so only the timer can let
+# ping run; then receive three messages.
+
+        .section user1, P_USER1 * PAGE         # also runs at virtual V_USER
+
+        .equ  SPIN, 1500
+
+pong:   li    s1, 0
+1:      addi  s1, s1, 1
+        li    t0, SPIN
+        blt   s1, t0, 1b
+        li    s0, 0
+2:      li    a0, SYS_RECV
+        sys
+        la    a1, pong_msg
+        addi  t0, a0, '0'
+        st    t0, PONG_DIGIT(a1)
+        li    a0, SYS_PUTS
+        sys
+        addi  s0, s0, 1
+        li    t0, 3
+        blt   s0, t0, 2b
+        li    a0, SYS_EXIT
+        li    a1, 0
+        sys
+
+        .equ  PONG_DIGIT, 10
+pong_msg: .string "pong: got ?\n"
