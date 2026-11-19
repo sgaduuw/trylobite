@@ -1,6 +1,7 @@
-# The firmware and the kernel, without user programs. Include this from a
-# file that adds programs in sections user0 and user1, each loaded at its
-# physical page and run at V_USER (see demo.s and user/).
+# The firmware and the kernel, without programs. Include it from a file
+# that first defines RAM_PAGES and then adds programs in sections prog0 to
+# prog2, each loaded at P_PROGn * PAGE and run at V_USER (see demo.s).
+# The kernel starts program 0; programs start others with SYS_SPAWN.
 
         .include "include/layout.s"
         .include "firmware/boot.s"               # the boot page, from address 0
@@ -13,6 +14,7 @@
         .include "kernel/syscall.s"
         .include "kernel/sched.s"
         .include "kernel/console.s"
+        .include "kernel/mm.s"
 
         .include "kernel/data.s"
         .include "kernel/pagetables.s"

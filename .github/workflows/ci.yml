@@ -19,4 +19,4 @@ jobs:
       - name: Test
         run: uv run pytest
       - name: Boot the demo
-        run: uv run detrytus run demo.s --ram-pages 20
+        run: uv run detrytus run demo.s --ram-pages 40

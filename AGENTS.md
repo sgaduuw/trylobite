@@ -20,7 +20,7 @@ uv sync
 uv run pytest
 uv run ruff check tests
 uv run ruff format --check tests
-uv run detrytus run demo.s --ram-pages 20
+uv run detrytus run demo.s --ram-pages 40
 ```
 
 detrytus comes from its `main` branch, pinned to a commit in `uv.lock`.
@@ -42,8 +42,16 @@ pipe.
   sees at run time: `li label`, `la label` and the debugger all agree.
   Keep that true for any new section.
 - **Register discipline in the kernel**: `s0` is the current process's
-  record from trap entry to `resume`, `s1` another process's. Helpers in
-  `kernel/console.s` clobber only `a0` and `t0`..`t5`.
+  record from trap entry to `resume`, `s1` another process's. Each helper
+  says what it clobbers in its header comment; helpers that call others
+  save `ra` on the kernel stack.
+- **Physical memory is reached through the direct map**
+  (`physical + DMAP`). Never free a page while it is part of the active
+  address space: switch `ptbr` away first, as `release` does.
+- **A reused ASID needs a `fence.vm`.** A process's ASID is its slot
+  number plus 1, so spawning into a slot flushes that ASID.
+- **`RAM_PAGES` belongs to the build**, not to `include/layout.s`: each
+  top-level file (demo, tests) states the machine it targets.
 - **User memory is only read with `SUA` on, and only after checking the
   address lies in the process's page.**
 - **Comments explain why.** No em-dashes or double hyphens in prose.

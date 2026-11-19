@@ -1,8 +1,11 @@
-# The first milestone: two processes, preempted by the timer, passing
-# messages through the kernel.
+# Milestone 2: the kernel starts init, which spawns pong and ping; they
+# pass messages, preempted by the timer, and their memory is reclaimed.
 #
-#   uv run detrytus run demo.s
+#   uv run detrytus run demo.s --ram-pages 40
+
+        .equ  RAM_PAGES, 40            # the machine this build is for
 
         .include "kernel.s"
+        .include "user/init.s"
         .include "user/ping.s"
         .include "user/pong.s"

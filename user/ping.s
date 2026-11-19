@@ -1,16 +1,19 @@
-# Process 0: send 1, 2 and 3 to process 1. A full mailbox means pong has
-# not caught up, so yield and try again.
+# Program 1: learn pong's process number from a message, then send it 1, 2
+# and 3. A full mailbox means pong has not caught up: yield and retry.
 
-        .section user0, P_USER0 * PAGE, V_USER   # loaded here, runs at V_USER
+        .section prog1, P_PROG1 * PAGE, V_USER
 
-ping:   li    s0, 1
+ping:   li    a0, SYS_RECV
+        sys
+        mv    s1, a0                   # s1: pong
+        li    s0, 1
 1:      la    a1, ping_msg
         addi  t0, s0, '0'
-        st    t0, PING_DIGIT(a1)               # patch the number into the line
+        st    t0, PING_DIGIT(a1)       # patch the number into the line
         li    a0, SYS_PUTS
         sys
 2:      li    a0, SYS_SEND
-        li    a1, 1
+        mv    a1, s1
         mv    a2, s0
         sys
         beqz  a0, 3f

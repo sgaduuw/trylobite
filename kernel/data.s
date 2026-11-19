@@ -3,6 +3,12 @@
         .section kdata, P_KDATA * PAGE - 9840, P_KDATA * PAGE - 9840 - KOFF
 
 ticks:  .word 0                        # timer interrupts taken
+free_head:  .word 0                    # first free page, or 0 for none
+free_count: .word 0                    # how many pages are free
+next_slot:  .word 0                    # where spawn starts looking (set at boot)
+
+# Where each program image was loaded.
+programs:   .word P_PROG0, P_PROG1, P_PROG2
 
 procs:  .words NPROC * PCB_SIZE / 3     # the process table
 
@@ -21,3 +27,4 @@ msg_done:     .string "trylobite: all processes exited after "
 msg_ticks:    .string " timer interrupts\n"
 msg_deadlock: .string "trylobite: deadlock, every process is waiting\n"
 msg_panic:    .string "trylobite: panic, trap in the kernel, cause "
+msg_noinit:   .string "trylobite: cannot start init\n"
