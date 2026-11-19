@@ -15,7 +15,7 @@ package = false  # the kernel is assembly; Python only builds and tests it
 
 [tool.uv.sources]
 # uv.lock pins the exact commit; `uv lock --upgrade-package detrytus` moves it.
-detrytus = { git = "https://github.com/sgaduuw/detrytus", branch = "main" }
+detrytus = { git = "https://github.com/sgaduuw/detrytus", branch = "claude/great-hawking-c50u40" }
 
 [tool.ruff]
 line-length = 88
