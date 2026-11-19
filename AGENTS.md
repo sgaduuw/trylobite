@@ -27,6 +27,12 @@ detrytus comes from its `main` branch, pinned to a commit in `uv.lock`.
 Move the pin with `uv lock --upgrade-package detrytus`, in its own
 commit, and run the tests.
 
+The tests run on either of detrytus' cores: Python by default, Rust with
+`tools/install-rust-backend` and `DETRYTUS_BACKEND=rust` (about ten
+times faster). CI runs both. Python is detrytus' reference core, so a
+test that passes on one and fails on the other is a detrytus bug to
+report there, not something to work around here.
+
 Judge each check by its exit status, run on its own, never through a
 pipe.
 

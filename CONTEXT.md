@@ -137,3 +137,14 @@ moved to it, the 21 tests take 23.1 s instead of about 60 s (measured on
 the same machine). A Rust emulator core is planned in detrytus for the
 next big step.
 
+### 2026-11-19 · Tests run on detrytus' Rust core too
+
+detrytus now has a Rust core, reached from Python through an optional
+package (`detrytus-rs`). The test helper builds machines with
+`detrytus.machine.create`, so `DETRYTUS_BACKEND=rust` runs the suite on
+it: 21 tests in 1.5 s against 17.3 s on the Python core (measured on
+the same machine). `tools/install-rust-backend` installs the package at
+the detrytus commit `uv.lock` pins, so the two cores never come from
+different versions. CI runs the tests on both cores; the Python job
+stays, as detrytus' reference.
+

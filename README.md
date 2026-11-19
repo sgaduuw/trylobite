@@ -51,8 +51,22 @@ says 40): the kernel hands out the pages it was told exist.
 
 `uv run pytest` runs the tests, which build the kernel with small test
 programs and check isolation, preemption, faults, messages, process
-creation, memory reclamation and every system call. They take about 25
-seconds: the emulator is much slower with paging on (see `CONTEXT.md`).
+creation, memory reclamation and every system call. They take about 17
+seconds on detrytus' Python core. Its Rust core runs them in under 2:
+
+```bash
+tools/install-rust-backend
+```
+
+```bash
+DETRYTUS_BACKEND=rust uv run pytest
+```
+
+The script installs the optional `detrytus-rs` package at the detrytus
+commit `uv.lock` pins, and needs a Rust toolchain. `uv sync` removes the
+package, so run the script again after syncing. `DETRYTUS_BACKEND=rust`
+also makes `detrytus run` use the Rust core; the debugger needs the
+Python one.
 
 ## Layout
 
