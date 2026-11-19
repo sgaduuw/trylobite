@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from detrytus.asm import Image, assemble
-from detrytus.machine import Machine, StepLimit
+from detrytus.machine import Machine, StepLimit, create
+from detrytus.rust import RustMachine
 
 ROOT = Path(__file__).parent.parent
 RAM_PAGES = 40
@@ -68,7 +69,7 @@ def build(
 class Run:
     console: str
     exit_code: int | None  # None if it was still running at the step limit
-    machine: Machine
+    machine: Machine | RustMachine
 
     def exits(self) -> list[tuple[int, int]]:
         """(process, exit code) from the kernel's messages, in order."""
@@ -89,7 +90,9 @@ class Run:
 def run_image(
     image: Image, ram_pages: int = RAM_PAGES, max_steps: int = 2_000_000
 ) -> Run:
-    m = Machine(ram_pages=ram_pages, seed=1)
+    # Python's core unless DETRYTUS_BACKEND=rust picks detrytus' Rust
+    # core (the optional detrytus-rs package), which is much faster.
+    m = create(ram_pages=ram_pages, seed=1)
     m.load(image)
     try:
         code: int | None = m.run(max_steps).exit_code

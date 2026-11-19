@@ -20,3 +20,20 @@ jobs:
         run: uv run pytest
       - name: Boot the demo
         run: uv run detrytus run demo.s --ram-pages 40
+
+  rust-core:
+    runs-on: ubuntu-latest
+    env:
+      DETRYTUS_BACKEND: rust
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+      - name: Toolchain
+        run: rustup toolchain install stable --profile minimal
+      - run: uv sync
+      - name: Install detrytus' Rust core
+        run: tools/install-rust-backend
+      - name: Test
+        run: uv run pytest
+      - name: Boot the demo
+        run: uv run detrytus run demo.s --ram-pages 40
