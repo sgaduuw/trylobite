@@ -1,7 +1,7 @@
 # Process 1: spin first, with no system calls, so only the timer can let
 # ping run; then receive three messages.
 
-        .section user1, P_USER1 * PAGE         # also runs at virtual V_USER
+        .section user1, P_USER1 * PAGE, V_USER   # also runs at V_USER
 
         .equ  SPIN, 1500
 

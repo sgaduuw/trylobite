@@ -59,13 +59,14 @@ The firmware delegates causes +1 to +9. Anything that still reaches ring
 +1 powers the machine off with the cause as the exit code, so a missing
 delegation cannot pass silently.
 
-### 2026-11-18 · Noted for detrytus
+### 2026-11-19 · Labels are virtual, through section run addresses
 
-- **Sections need a run address apart from their load address**, as a
-  linker's VMA and LMA. The kernel is loaded at physical pages 1 and 2
-  but runs four pages lower, so its labels are physical: code must reach
-  them pc-relatively, and the debugger cannot name kernel addresses.
-  With `.section kernel, LOAD, RUN` the labels would be virtual.
-- **A word-aligned zero-fill directive** would remove the `procs_raw + 1`
-  adjustment in `kernel/data.s`: `.zero` starts at the next free tryte,
-  one below the next word's centre.
+The kernel used to be assembled at physical addresses, so its labels
+were physical: code reached its own data pc-relatively, the firmware
+entered it with `kentry - KOFF`, and the debugger could not name kernel
+addresses. detrytus now lets a section load at one address and run at
+another (sgaduuw/detrytus#7), so the kernel and user sections carry
+their virtual run addresses and every label is what the code sees. The
+same change brought `.words`, which replaced a `+1` adjustment that the
+process table needed because `.zero` starts one tryte below a word's
+centre.
