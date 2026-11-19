@@ -130,3 +130,10 @@ mostly zeroing three tables and copying a page, so the test suite takes
 about a minute. A
 faster translation path in detrytus is the fix, rather than fewer tests.
 
+### 2026-11-19 · The detrytus speed-up arrived
+
+sgaduuw/detrytus#8 made translation about 2.5 times faster. With the pin
+moved to it, the 21 tests take 23.1 s instead of about 60 s (measured on
+the same machine). A Rust emulator core is planned in detrytus for the
+next big step.
+

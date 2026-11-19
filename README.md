@@ -51,8 +51,8 @@ says 40): the kernel hands out the pages it was told exist.
 
 `uv run pytest` runs the tests, which build the kernel with small test
 programs and check isolation, preemption, faults, messages, process
-creation, memory reclamation and every system call. They take about a
-minute: the emulator is much slower with paging on (see `CONTEXT.md`).
+creation, memory reclamation and every system call. They take about 25
+seconds: the emulator is much slower with paging on (see `CONTEXT.md`).
 
 ## Layout
 
