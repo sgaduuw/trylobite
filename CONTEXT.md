@@ -24,8 +24,9 @@ address range.
 ### 2026-11-18 · Page tables built at assembly time, for now
 
 Milestone 1 has a fixed set of processes, so their page tables are
-assembled as data (`kernel/pagetables.s`). A page allocator and tables
-built at run time come with process creation.
+assembled as data (`kernel/pagetables.s`). Superseded in milestone 2:
+only the boot address space is assembled now; processes get their
+tables at run time.
 
 ### 2026-11-18 · Process records and the zero-sscratch convention
 
@@ -70,3 +71,62 @@ their virtual run addresses and every label is what the code sees. The
 same change brought `.words`, which replaced a `+1` adjustment that the
 process table needed because `.zero` starts one tryte below a word's
 centre.
+
+### 2026-11-19 · Three regions, so address spaces share almost everything
+
+Every address space has a direct map of physical memory (mid entry −1,
+one superpage), the kernel (mid entry 0, a leaf table shared by all),
+and the process (mid entry +1). Moving user programs to their own
+mid-level region, at 3¹⁷, is what lets the kernel's leaf table be shared
+instead of copied: a new address space differs from the boot one only in
+its root, its mid table's entry +1, and the leaf table under it. A
+process costs four pages.
+
+### 2026-11-19 · The page allocator is a free list in the free pages
+
+Each free page's centre word holds the next free page's number, reached
+through the direct map; page 0, the boot page, means "none". A count of
+free pages lets `spawn` check it has all four before taking any, so it
+never has to undo a half-built process. Tables are zeroed when allocated;
+the process's own page is not, since the program copy overwrites it.
+
+Freeing a page writes its centre word, which in a root table is entry 0.
+The first version freed a process's pages while still running on its
+address space, corrupting the live table; `release` now switches to the
+boot address space first.
+
+### 2026-11-19 · spawn copies program images loaded at boot
+
+There is no file system, so programs are images the loader places in
+fixed physical pages. `spawn(n)` copies image `n` into a fresh page, so
+the same program can run several times, each copy with its own data. The
+kernel starts only program 0, `init`, which starts the rest.
+
+### 2026-11-19 · Process numbers are handed out round-robin
+
+`spawn` searches for a free slot starting after the last one it used.
+Taking the lowest free slot reused a number at once: a spawn is slow
+enough that a child could exit before its parent's next spawn, which
+then got the same number, so a message meant for the old process could
+reach the new one. A process's ASID is its number plus 1, and spawning
+into a slot runs `fence.vm` for that ASID; the emulator's never-evicting
+TLB makes a missing fence visible at once, and a test checks it.
+
+### 2026-11-19 · RAM size is a build parameter
+
+The kernel cannot probe how much memory the machine has, so each build
+states it (`.equ RAM_PAGES, 40` in `demo.s`) and the emulator must be
+run with at least that many pages. Tests use small values to exhaust
+memory on purpose.
+
+### 2026-11-19 · Paging makes the emulator slow; noted for detrytus
+
+With translation on, detrytus runs about 100,000 instructions a second
+against about 600,000 without (measured on `demo.s`: 293,517 steps in
+3.1 s). Every access rebuilds a `Ptbr` object and rechecks the leaf's
+permission trits. A spawn costs 92,499 instructions (measured: the
+difference between an init that spawns once and one that spawns twice),
+mostly zeroing three tables and copying a page, so the test suite takes
+about a minute. A
+faster translation path in detrytus is the fix, rather than fewer tests.
+

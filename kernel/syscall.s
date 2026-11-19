@@ -22,6 +22,8 @@ on_syscall:
         beq   a0, t0, sys_getpid
         li    t0, SYS_PUTS
         beq   a0, t0, sys_puts
+        li    t0, SYS_SPAWN
+        beq   a0, t0, sys_spawn
         li    a0, -1                   # no such call
 
 sys_return:                            # a0: the result
@@ -119,5 +121,8 @@ sys_exit:
         call  kputn
         li    a0, 10
         call  kputc
-        sw    zero, PCB_STATE(s0)
-        j     schedule
+        j     release
+
+sys_spawn:
+        call  do_spawn                 # a1: the program
+        j     sys_return

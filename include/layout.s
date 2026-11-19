@@ -1,28 +1,40 @@
 # Constants shared by the firmware, the kernel and user programs.
 # Everything that has to agree on an address or a number lives here.
+#
+# RAM_PAGES is not here: it describes the machine the kernel is built
+# for, so the build defines it before including kernel.s (see demo.s).
 
         .equ  PAGE, 19683                 # trytes in a page (3^9)
+        .equ  SUPER, 129140163            # trytes in a mid-level superpage (3^17)
 
 # --- physical memory -----------------------------------------------------------
 # Page 0 is the boot page; positive pages are RAM; negative ones devices.
 
-        .equ  P_KCODE,  1                 # kernel code
-        .equ  P_KDATA,  2                 # kernel data and stack
-        .equ  P_AS0,    4                 # process 0: root, mid, leaf tables
-        .equ  P_AS1,    7                 # process 1: root, mid, leaf tables
-        .equ  P_USER0, 10                 # process 0's code, data and stack
-        .equ  P_USER1, 11                 # process 1's code, data and stack
+        .equ  P_KCODE,    1               # kernel code
+        .equ  P_KDATA,    2               # kernel data and stack
+        .equ  P_BOOTROOT, 3               # the boot address space's root table
+        .equ  P_BOOTMID,  4               # ... and its mid table
+        .equ  P_KLEAF,    5               # the kernel's leaf table, shared by all
+        .equ  P_PROG0,    6               # program images, as loaded: the kernel
+        .equ  P_PROG1,    7               # copies one into a fresh page for
+        .equ  P_PROG2,    8               # each process it spawns
+        .equ  NPROG,      3
+        .equ  P_FREE,     9               # pages from here to RAM_PAGES are free
         .equ  POWER_PA, -2 * PAGE         # power-off register, for firmware
 
 # --- virtual memory ------------------------------------------------------------
-# The kernel sits in negative addresses, user programs in positive ones,
-# and virtual page 0 stays unmapped so null pointers fault.
+# Every address space has the same three regions, by mid-table entry:
+#   -1  the direct map: kernel virtual = physical + DMAP, every page
+#    0  the kernel, through the shared leaf table; page 0 left unmapped
+#   +1  the process's own leaf table
+# so a new address space shares everything but its mid table entry +1.
 
-        .equ  KOFF, 4 * PAGE              # kernel virtual = physical - KOFF
+        .equ  DMAP, -SUPER                # direct map offset
+        .equ  KOFF, 4 * PAGE              # kernel code and data: physical - KOFF
         .equ  V_POWER,   -5 * PAGE        # power-off register
         .equ  V_CONSOLE, -4 * PAGE        # console output register
-        .equ  V_USER, PAGE                # every process starts here
-        .equ  USER_SP, PAGE + 9843        # just above its page; the first push
+        .equ  V_USER, SUPER               # every process runs from here
+        .equ  USER_SP, V_USER + 9843      # just above its page; the first push
                                           # lands at the page's top word
 
 # --- page-table entries (detrytus isa.md 9.3), as values ----------------------
@@ -37,9 +49,12 @@
         .equ  PTE_A,    729
         .equ  PTE_D,    2187
 
-        # ptbr: mode +, an ASID per process, the root table's page
-        .equ  PTBR0, 1 + 3 * 1 + P_AS0 * PAGE
-        .equ  PTBR1, 1 + 3 * 2 + P_AS1 * PAGE
+        .equ  DMAP_PTE, PTE_LEAF + PTE_R + PTE_W + PTE_G + PTE_A + PTE_D   # PPN 0
+        .equ  KLEAF_PTR, PTE_PTR + P_KLEAF * PAGE
+        .equ  USER_FLAGS, PTE_LEAF + PTE_R + PTE_W + PTE_X + PTE_U + PTE_A + PTE_D
+
+        .equ  PTBR_BOOT, 1 + P_BOOTROOT * PAGE     # mode +, ASID 0
+        # A process's ASID is its number plus 1, so ASID 0 stays the boot space's.
 
 # --- traps ---------------------------------------------------------------------
 
@@ -59,22 +74,30 @@
         .equ  SYS_GETPID, 5               # a0 = this process's number
         .equ  SYS_PUTS,   6               # print the string at a1, whole: 0 done,
                                           # -2 the address is outside the process
+        .equ  SYS_SPAWN,  7               # start program a1: its process number,
+                                          # -1 no free slot, -2 no such program,
+                                          # -3 not enough memory
 
 # --- the process table ---------------------------------------------------------
 # One record per process, in words. Register r is saved at 3 * (r + 13), so
 # sp (r-13) is at 0 and t6 (r13) at 78; r0 has a slot that is never used.
 
-        .equ  NPROC, 2
-        .equ  PCB_A0,    42               # saved a0: system-call number and result
-        .equ  PCB_A1,    45
-        .equ  PCB_A2,    48
-        .equ  PCB_PC,    81
-        .equ  PCB_PTBR,  84
-        .equ  PCB_STATE, 87               # one of the ST_ values
-        .equ  PCB_MAIL,  90               # a waiting message
-        .equ  PCB_FULL,  93               # 1 when PCB_MAIL holds one
-        .equ  PCB_SIZE,  96
+        .equ  NPROC, 6
+        .equ  PCB_A0,     42              # saved a0: system-call number and result
+        .equ  PCB_A1,     45
+        .equ  PCB_A2,     48
+        .equ  PCB_PC,     81
+        .equ  PCB_PTBR,   84
+        .equ  PCB_STATE,  87              # one of the ST_ values
+        .equ  PCB_MAIL,   90              # a waiting message
+        .equ  PCB_FULL,   93              # 1 when PCB_MAIL holds one
+        .equ  PCB_ROOTPG, 96              # the four pages the process owns
+        .equ  PCB_MIDPG,  99
+        .equ  PCB_LEAFPG, 102
+        .equ  PCB_USERPG, 105
+        .equ  PCB_SIZE,   108
+        .equ  PAGES_PER_PROCESS, 4
 
-        .equ  ST_EXITED, 0
+        .equ  ST_EXITED, 0                # also: a free slot
         .equ  ST_READY,  1
         .equ  ST_RECV,   -1               # blocked in SYS_RECV

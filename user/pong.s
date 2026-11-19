@@ -1,7 +1,7 @@
-# Process 1: spin first, with no system calls, so only the timer can let
+# Program 2: spin first, with no system calls, so only the timer can let
 # ping run; then receive three messages.
 
-        .section user1, P_USER1 * PAGE, V_USER   # also runs at V_USER
+        .section prog2, P_PROG2 * PAGE, V_USER
 
         .equ  SPIN, 1500
 

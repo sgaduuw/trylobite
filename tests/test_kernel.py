@@ -1,41 +1,47 @@
-"""trylobite's first milestone: boot, isolation, preemption, messages."""
+"""Boot, isolation, preemption, faults and messages."""
 
 import re
 
 from detrytus import isa
 from detrytus.asm import assemble_file
 
-from tests.kernel import EXIT, ROOT, build, exit_with, run, run_image
+from tests.kernel import (
+    DONE,
+    ROOT,
+    SPAWN_BOTH,
+    build,
+    exit_with,
+    run,
+    run_image,
+    send_to_2,
+)
 
-DONE = f"li a1, 0\n        {EXIT}"
 
-
-def test_demo_boots_passes_messages_and_powers_off():
+def test_demo_boots_spawns_passes_messages_and_powers_off():
     result = run_image(assemble_file(ROOT / "demo.s"))
     assert result.exit_code == 0
     lines = result.console.splitlines()
-    assert lines[0] == "trylobite: booting"
+    assert lines[:2] == ["trylobite: booting", "init: starting pong and ping"]
     sent = [ln for ln in lines if ln.startswith("ping: sending")]
     got = [ln for ln in lines if ln.startswith("pong: got")]
     assert sent == [f"ping: sending {n}" for n in (1, 2, 3)]
     assert got == [f"pong: got {n}" for n in (1, 2, 3)]  # in order, none lost
-    assert result.exits() == {0: 0, 1: 0}
+    assert sorted(result.exits()) == [(0, 0), (1, 0), (2, 0)]
     assert result.ticks() > 0  # pong's spin was preempted
     assert lines[-1].startswith("trylobite: all processes exited")
 
 
 def test_the_timer_preempts_a_process_that_never_yields():
-    # Process 0 spins forever without a system call. Process 1 can only
+    # Program 1 spins forever without a system call. Program 2 can only
     # run if the timer takes the processor away from it.
-    spin = "1: j 1b"
-    result = run(spin, DONE, max_steps=50_000)
+    result = run(SPAWN_BOTH, "1: j 1b", DONE, max_steps=400_000)
     assert result.exit_code is None  # the spinner keeps the machine alive
-    assert result.exits() == {1: 0}
+    assert result.code_of(2) == 0
 
 
 def test_processes_share_virtual_addresses_but_not_memory():
-    # Both processes use virtual address V_USER + 3000; process 0 writes 42
-    # there and exits, then process 1 reads the same address.
+    # Both use virtual address V_USER + 3000; program 1 writes 42 there and
+    # exits, then program 2 reads the same address.
     writer = f"""
         li    t0, V_USER + 3000
         li    t1, 42
@@ -44,37 +50,38 @@ def test_processes_share_virtual_addresses_but_not_memory():
         {exit_with("t2")}
     """
     reader = f"""
-        li    a0, SYS_YIELD          # let the writer go first
+        li    a0, SYS_YIELD
         sys
         li    t0, V_USER + 3000
         lw    t2, 0(t0)
         {exit_with("t2")}
     """
-    assert run(writer, reader).exits() == {0: 42, 1: 0}
+    result = run(SPAWN_BOTH, writer, reader)
+    assert (result.code_of(1), result.code_of(2)) == (42, 0)
 
 
-def test_a_faulting_process_is_ended_and_the_other_carries_on():
+def test_a_faulting_process_is_ended_and_the_others_carry_on():
     poke = "li t0, V_CONSOLE\n        lw t1, 0(t0)\n        " + DONE
-    result = run(poke, DONE)
+    result = run(SPAWN_BOTH, poke, DONE)
     assert result.exit_code == 0
     m = re.search(
-        r"process 0 faulted, cause (-?\d+) at address (-?\d+)", result.console
+        r"process 1 faulted, cause (-?\d+) at address (-?\d+)", result.console
     )
     assert m, result.console
     assert int(m.group(1)) == isa.LOAD_PAGE_FAULT  # a kernel page, from ring -1
     assert int(m.group(2)) == -4 * 19683
-    assert result.exits() == {1: 0}
+    assert result.code_of(2) == 0
 
 
 def test_every_exception_reaches_the_kernel_not_the_firmware():
-    result = run("brk", DONE)
+    result = run(SPAWN_BOTH, "brk", DONE)
     assert result.exit_code == 0  # the firmware would power off with cause 5
     assert f"cause {isa.BREAKPOINT} " in result.console
 
 
 def test_waiting_forever_is_reported_as_deadlock():
     recv = "li a0, SYS_RECV\n        sys\n        " + DONE
-    result = run(recv, recv)
+    result = run(SPAWN_BOTH, recv, recv)
     assert result.exit_code == 1
     assert "deadlock" in result.console
 
@@ -83,32 +90,25 @@ def test_a_message_reaches_a_process_already_waiting():
     sender = f"""
         li    a0, SYS_YIELD          # let the receiver block first
         sys
-        li    a0, SYS_SEND
-        li    a1, 1
-        li    a2, 77
-        sys
+        {send_to_2(77)}
         {exit_with("a0")}
     """
     receiver = f"li a0, SYS_RECV\n        sys\n        {exit_with('a0')}"
-    assert run(sender, receiver).exits() == {0: 0, 1: 77}
+    result = run(SPAWN_BOTH, sender, receiver)
+    assert (result.code_of(1), result.code_of(2)) == (0, 77)
 
 
 def test_a_full_mailbox_is_reported():
-    sender = """
+    sender = f"""
+        {send_to_2(1)}
         li    a0, SYS_SEND
-        li    a1, 1
-        li    a2, 1
-        sys
-        li    a0, SYS_SEND
-        li    a1, 1
+        li    a1, 2
         li    a2, 2
         sys                      # the first is still unread
-        mv    a1, a0
-        li    a0, SYS_EXIT
-        sys
+        {exit_with("a0")}
     """
     receiver = "1: li a0, SYS_YIELD\n        sys\n        j 1b"
-    assert run(sender, receiver, max_steps=50_000).exits()[0] == -1
+    assert run(SPAWN_BOTH, sender, receiver, max_steps=400_000).code_of(1) == -1
 
 
 def test_system_call_errors():
@@ -116,12 +116,14 @@ def test_system_call_errors():
         "a0"
     )
     unknown = "li a0, 99\n        sys\n        " + exit_with("a0")
-    assert run(bad_pid, unknown).exits() == {0: -2, 1: -1}
+    result = run(SPAWN_BOTH, bad_pid, unknown)
+    assert (result.code_of(1), result.code_of(2)) == (-2, -1)
 
 
 def test_getpid():
     getpid = "li a0, SYS_GETPID\n        sys\n        " + exit_with("a0")
-    assert run(getpid, getpid).exits() == {0: 0, 1: 1}
+    result = run(SPAWN_BOTH, getpid, getpid)
+    assert (result.code_of(1), result.code_of(2)) == (1, 2)
 
 
 def test_puts_prints_whole_strings_and_refuses_kernel_addresses():
@@ -140,15 +142,15 @@ msg:    .string "hello from user space\\n"
         sys
         {exit_with("a0")}
     """
-    result = run(hello, snoop)
+    result = run(SPAWN_BOTH, hello, snoop)
     assert "hello from user space\n" in result.console
-    assert result.exits() == {0: 0, 1: -2}
+    assert (result.code_of(1), result.code_of(2)) == (0, -2)
 
 
 def test_layout_matches_the_register_numbering():
     # The process record stores register r at 3 * (r + 13); the kernel's
     # named offsets must agree with detrytus's register numbers.
-    symbols = build(DONE, DONE).symbols
+    symbols = build(DONE).symbols
     for name, register in (("PCB_A0", "a0"), ("PCB_A1", "a1"), ("PCB_A2", "a2")):
         assert symbols[name] == 3 * (isa.REG_NAMES[register] + 13)
     assert symbols["PCB_PC"] == 3 * 27  # the first slot after the registers
@@ -156,7 +158,7 @@ def test_layout_matches_the_register_numbering():
 
 
 def test_labels_are_the_addresses_code_runs_at():
-    image = build(DONE, DONE)
+    image = build(DONE)
     k = image.symbols
     # The kernel loads into physical page P_KCODE but runs KOFF lower.
     assert image.labels["kentry"] < 0

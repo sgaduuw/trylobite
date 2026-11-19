@@ -1,13 +1,13 @@
 # Ring +1 firmware, in the boot page. It hands every exception to the
-# kernel, points translation at process 0's page table (which also maps
-# the kernel), and enters the kernel in ring 0.
+# kernel, points translation at the boot address space, and enters the
+# kernel in ring 0.
 
 boot:
         li    t0, EDELEG_ALL
         csrw  edeleg, t0
         la    t0, fw_trap
         csrw  mtvec, t0
-        li    t0, PTBR0
+        li    t0, PTBR_BOOT            # the boot address space: kernel only
         csrw  ptbr, t0
         li    t0, kentry               # a virtual address: the kernel's run address
         csrw  mtpc, t0

@@ -112,8 +112,7 @@ on_fault:
         call  kputn
         li    a0, 10
         call  kputc
-        sw    zero, PCB_STATE(s0)
-        j     schedule
+        j     release
 
 # A trap inside the kernel: nothing to save, nowhere to return to.
 kpanic:
