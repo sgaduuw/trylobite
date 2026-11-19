@@ -14,7 +14,7 @@ wheels = [
 [[package]]
 name = "detrytus"
 version = "0.1.0"
-source = { git = "https://github.com/sgaduuw/detrytus?branch=claude%2Fgreat-hawking-c50u40#c909541b7c6a40e46129d49294ce7e58ab756f8b" }
+source = { git = "https://github.com/sgaduuw/detrytus?branch=main#2f13017e2525e5a2db3a49545882faf57ebc0dc3" }
 
 [[package]]
 name = "iniconfig"
@@ -109,7 +109,7 @@ dev = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "detrytus", git = "https://github.com/sgaduuw/detrytus?branch=claude%2Fgreat-hawking-c50u40" },
+    { name = "detrytus", git = "https://github.com/sgaduuw/detrytus?branch=main" },
     { name = "pytest", specifier = ">=8" },
     { name = "ruff", specifier = ">=0.8" },
 ]
