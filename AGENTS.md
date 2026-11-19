@@ -36,9 +36,11 @@ pipe.
   numbers, page-table flags, system-call numbers, process-record offsets.
   The firmware, the kernel, user programs and tests all read them from
   there; never repeat one as a literal.
-- **Kernel addresses are virtual.** The kernel is assembled at physical
-  addresses and runs at `physical - KOFF`, so reach kernel code and data
-  with `la` and `call`, which are pc-relative, never with `li label`.
+- **Labels are run addresses.** Each kernel and user section is loaded
+  at a physical address and runs at a virtual one
+  (`.section NAME, LOAD, RUN`), so every label is the address the code
+  sees at run time: `li label`, `la label` and the debugger all agree.
+  Keep that true for any new section.
 - **Register discipline in the kernel**: `s0` is the current process's
   record from trap entry to `resume`, `s1` another process's. Helpers in
   `kernel/console.s` clobber only `a0` and `t0`..`t5`.

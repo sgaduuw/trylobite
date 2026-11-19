@@ -14,7 +14,7 @@ wheels = [
 [[package]]
 name = "detrytus"
 version = "0.1.0"
-source = { git = "https://github.com/sgaduuw/detrytus?branch=main#1772245f923c047c2d0a474ba3edca60e826913e" }
+source = { git = "https://github.com/sgaduuw/detrytus?branch=main#2f13017e2525e5a2db3a49545882faf57ebc0dc3" }
 
 [[package]]
 name = "iniconfig"

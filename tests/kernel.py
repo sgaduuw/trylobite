@@ -15,9 +15,9 @@ def build(prog0: str, prog1: str) -> Image:
     """The kernel with prog0 and prog1 as processes 0 and 1."""
     source = f"""
         .include "kernel.s"
-        .section user0, P_USER0 * PAGE
+        .section user0, P_USER0 * PAGE, V_USER
 {prog0}
-        .section user1, P_USER1 * PAGE
+        .section user1, P_USER1 * PAGE, V_USER
 {prog1}
 """
     # The file name only sets where .include starts looking: the repo root.

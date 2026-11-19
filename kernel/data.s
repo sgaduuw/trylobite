@@ -1,19 +1,15 @@
 # Kernel data, from the bottom of its page; the stack grows down from the top.
 
-        .section kdata, P_KDATA * PAGE - 9840
+        .section kdata, P_KDATA * PAGE - 9840, P_KDATA * PAGE - 9840 - KOFF
 
 ticks:  .word 0                        # timer interrupts taken
 
-# The process table. .zero starts one tryte below the first word's centre,
-# so the table's address is one above where the trytes begin.
-procs_raw:
-        .zero NPROC * PCB_SIZE
-        .equ  procs, procs_raw + 1
+procs:  .words NPROC * PCB_SIZE / 3     # the process table
 
 numbuf: .zero 16
 numbuf_end:
 
-        .equ  kstack_top, P_KDATA * PAGE + 9843
+        .equ  kstack_top, P_KDATA * PAGE + 9843 - KOFF   # top of the data page
 
 msg_boot:     .string "trylobite: booting\n"
 msg_proc:     .string "trylobite: process "

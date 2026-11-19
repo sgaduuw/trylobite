@@ -1,7 +1,7 @@
 # Process 0: send 1, 2 and 3 to process 1. A full mailbox means pong has
 # not caught up, so yield and try again.
 
-        .section user0, P_USER0 * PAGE         # runs at virtual V_USER
+        .section user0, P_USER0 * PAGE, V_USER   # loaded here, runs at V_USER
 
 ping:   li    s0, 1
 1:      la    a1, ping_msg

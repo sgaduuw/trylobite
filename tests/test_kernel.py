@@ -153,3 +153,14 @@ def test_layout_matches_the_register_numbering():
         assert symbols[name] == 3 * (isa.REG_NAMES[register] + 13)
     assert symbols["PCB_PC"] == 3 * 27  # the first slot after the registers
     assert symbols["PCB_SIZE"] % 3 == 0
+
+
+def test_labels_are_the_addresses_code_runs_at():
+    image = build(DONE, DONE)
+    k = image.symbols
+    # The kernel loads into physical page P_KCODE but runs KOFF lower.
+    assert image.labels["kentry"] < 0
+    assert image.labels["kentry"] == k["P_KCODE"] * k["PAGE"] - 9840 - k["KOFF"]
+    load = image.labels["kentry"] + k["KOFF"]
+    assert load in image.trytes  # the code itself sits at the load address
+    assert image.labels["procs"] % 3 == 0  # .words: a word-aligned table

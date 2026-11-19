@@ -9,7 +9,7 @@ boot:
         csrw  mtvec, t0
         li    t0, PTBR0
         csrw  ptbr, t0
-        li    t0, kentry - KOFF        # the kernel's virtual entry point
+        li    t0, kentry               # a virtual address: the kernel's run address
         csrw  mtpc, t0
         li    t0, 0                    # PR = 0: tret enters ring 0
         csrw  mtstatus, t0
