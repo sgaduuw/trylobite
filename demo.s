@@ -5,7 +5,7 @@
 
         .equ  RAM_PAGES, 40            # the machine this build is for
 
-        .include "kernel.s"
+        .include "include/kernel.s"
         .include "user/init.s"
         .include "user/ping.s"
         .include "user/pong.s"

@@ -203,3 +203,13 @@ and in the process record while a process runs, so a trap can reload it.
 The cost on one hart: each trap now takes and gives the lock and checks
 the slot's epoch, so the demo runs about 5% more kernel instructions.
 The tests run every case on one hart and on three.
+
+### 2026-11-20 · kernel.s moved to include/, and says how to build it
+
+Running `kernel.s` on its own failed with "undefined symbol
+'RAM_PAGES'" from deep inside `kernel/mm.s`, which reads as a bug rather
+than "this is not the file to run". It now lives at `include/kernel.s`,
+beside the other files meant only to be included, and its first line
+uses `RAM_PAGES` with a comment saying what to run instead: the
+assembler prints the failing line, comment and all. A real `.error`
+directive would need a detrytus assembler change; this needs none.

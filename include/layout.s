@@ -2,7 +2,7 @@
 # Everything that has to agree on an address or a number lives here.
 #
 # RAM_PAGES is not here: it describes the machine the kernel is built
-# for, so the build defines it before including kernel.s (see demo.s).
+# for, so the build defines it before including include/kernel.s (see demo.s).
 
         .equ  PAGE, 19683                 # trytes in a page (3^9)
         .equ  SUPER, 129140163            # trytes in a mid-level superpage (3^17)
