@@ -88,7 +88,9 @@ it, or else the one on the PATH is used.
 | `kernel/console.s` | kernel console output |
 | `kernel/data.s` | the process table, buffers, messages |
 | `kernel/pagetables.s` | the boot address space and the kernel's shared leaf table |
-| `kernel.s` | firmware and kernel together, without programs |
+| `kernel/lock.s` | the kernel lock |
+| `kernel/harts.s` | starting the other harts, waking an idle one |
+| `include/kernel.s` | firmware and kernel together, without programs: included by a build such as `demo.s`, not run on its own |
 | `user/` | `init` (program 0), `ping` (1) and `pong` (2) |
 | `demo.s` | the kernel for a 40-page machine, with the three programs |
 | `tests/` | the tests, and a harness that builds the kernel with test programs |

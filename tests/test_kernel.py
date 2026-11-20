@@ -11,6 +11,7 @@ from tests.kernel import (
     SPAWN_BOTH,
     assemble_file,
     build,
+    detrytus,
     exit_with,
     run,
     run_image,
@@ -167,3 +168,12 @@ def test_labels_are_the_addresses_code_runs_at():
     load = image.labels["kentry"] + k["KOFF"]
     assert load in image.trytes  # the code itself sits at the load address
     assert image.labels["procs"] % 3 == 0  # .words: a word-aligned table
+
+
+def test_the_kernel_alone_says_how_to_build_it():
+    # include/kernel.s has no RAM_PAGES and no programs: assembled on its
+    # own, the first error should point at a file to run instead.
+    done = detrytus("asm", "include/kernel.s")
+    assert done.returncode != 0
+    assert "undefined symbol 'RAM_PAGES'" in done.stderr
+    assert "such as demo.s" in done.stderr
