@@ -1,7 +1,7 @@
 # Milestone 2: the kernel starts init, which spawns pong and ping; they
 # pass messages, preempted by the timer, and their memory is reclaimed.
 #
-#   uv run detrytus run demo.s --ram-pages 40
+#   detrytus run demo.s --ram-pages 40 --harts 3
 
         .equ  RAM_PAGES, 40            # the machine this build is for
 

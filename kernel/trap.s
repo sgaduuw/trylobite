@@ -1,7 +1,9 @@
 # Trap entry and exit. While a process runs, sscratch holds its process
 # record; in the kernel it holds 0. Swapping sp with sscratch on entry
 # therefore yields the record to save into, or 0 for a trap taken inside
-# the kernel itself, which is a kernel bug.
+# the kernel itself, which is a kernel bug. sscratch is per hart, and the
+# process's record is this hart's alone while the process is ST_RUNNING,
+# so saving needs no lock.
 
 ktrap:
         csrrw sp, sscratch, sp         # sp = process record, sscratch = user sp
@@ -37,7 +39,9 @@ ktrap:
         sw    t0, PCB_PC(sp)
         csrw  sscratch, zero
         mv    s0, sp                   # s0: the current process, from here on
-        la    sp, kstack_top
+        lw    tp, PCB_HART(s0)         # tp: this hart's number (see resume)
+        call  klock_take
+        la    sp, kstack_top           # the one kernel stack: ours while we hold the lock
 
         csrr  t0, stcause
         li    t1, CAUSE_TIMER
@@ -47,16 +51,47 @@ ktrap:
         j     on_fault
 
 # Run the process whose record is in s0: switch to its page table (the
-# kernel is mapped, globally, in every one), restore its registers and
-# return to ring -1.
+# kernel is mapped, globally, in every one), let the kernel lock go,
+# restore its registers and return to ring -1.
+#
+# Each process has its own ASID, its slot number plus 1, so switching
+# needs no fence.vm, except when the slot has been reused since this hart
+# last ran it: then this hart's TLB may still hold the old tenant's
+# translations for that ASID. spawn counts each slot's tenants in epochs;
+# each hart flushes an ASID when it first sees a new epoch for it.
 resume:
+        la    t0, procs
+        sub   t0, s0, t0
+        li    t1, PCB_SIZE
+        div   t2, t0, t1               # t2: the slot
+        la    t0, epochs
+        li    t1, 3
+        mul   t3, t2, t1
+        add   t0, t0, t3
+        lw    t4, 0(t0)                # t4: its epoch
+        mv    t0, tp
+        addi  t0, t0, HART_MAX
+        li    t1, NPROC
+        mul   t0, t0, t1
+        add   t0, t0, t2
+        li    t1, 3
+        mul   t0, t0, t1
+        la    t1, seen
+        add   t0, t0, t1               # t0: the epoch this hart last saw
+        lw    t1, 0(t0)
+        beq   t1, t4, 1f
+        sw    t4, 0(t0)
+        addi  t2, t2, 1                # the ASID
+        fence.vm zero, t2
+1:      sw    tp, PCB_HART(s0)         # for ktrap, which cannot read hartid
         lw    t0, PCB_PTBR(s0)
-        csrw  ptbr, t0                 # each process has its own ASID: no fence.vm
+        csrw  ptbr, t0
         lw    t0, PCB_PC(s0)
         csrw  stpc, t0
         li    t0, -1                   # PR = -1: tret returns to user mode
         csrw  ststatus, t0
         csrw  sscratch, s0
+        call  klock_give               # the record is ours: restoring needs no lock
         mv    sp, s0
         lw    ra, 3(sp)
         lw    tp, 6(sp)

@@ -12,6 +12,11 @@ programs:   .word P_PROG0, P_PROG1, P_PROG2
 
 procs:  .words NPROC * PCB_SIZE / 3     # the process table
 
+klock:  .word 0                        # the kernel lock: 1 while a hart holds it
+idle_harts: .words NHART               # 1: the hart waits for work, by index
+epochs: .words NPROC                   # tenants each slot has had (see resume)
+seen:   .words NHART * NPROC           # the epoch each hart last flushed, by slot
+
 numbuf: .zero 16
 numbuf_end:
 

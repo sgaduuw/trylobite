@@ -1,6 +1,15 @@
-# Round-robin scheduling. s0 is the process that just stopped running.
+# Round-robin scheduling, under the kernel lock. s0 is the process that
+# just stopped running on this hart.
 
 schedule:
+        lw    t0, PCB_STATE(s0)
+        li    t1, ST_RUNNING
+        bne   t0, t1, pick             # it blocked or exited
+        li    t0, ST_READY             # preempted or yielded: it can run again
+        sw    t0, PCB_STATE(s0)
+
+# pick: run the next ready process after s0, any record: s0's turn last.
+pick:
         la    t2, procs
         li    t0, NPROC * PCB_SIZE
         add   t3, t2, t0               # t3: just past the table
@@ -15,7 +24,17 @@ schedule:
         addi  t4, t4, -1
         bnez  t4, 1b
 
-        # Nobody can run. Someone still waiting means nobody will wake them.
+        # Nobody is ready. A process running on another hart can still
+        # send or spawn: wait for work.
+        mv    s1, t2
+6:      lw    t0, PCB_STATE(s1)
+        li    t1, ST_RUNNING
+        beq   t0, t1, idle
+        addi  s1, s1, PCB_SIZE
+        blt   s1, t3, 6b
+
+        # Nothing runs anywhere. Someone still waiting means nobody will
+        # wake them.
         mv    s1, t2
 4:      lw    t0, PCB_STATE(s1)
         li    t1, ST_RECV
@@ -36,8 +55,36 @@ schedule:
         li    a0, 1
         j     halt
 
-3:      mv    s0, s1
+3:      li    t0, ST_RUNNING
+        sw    t0, PCB_STATE(s1)
+        mv    s0, s1
         j     resume
+
+# idle: offer this hart for work (wake_one rings its doorbell), let the
+# lock go and wait. The doorbell stays rung while a word waits in this
+# hart's mailbox, so a wake-up sent between giving the lock and the wfi
+# is not lost. Only the doorbell is enabled meanwhile: a pending timer
+# would end every wait at once.
+idle:
+        mv    t0, tp
+        addi  t0, t0, HART_MAX
+        li    t1, 3
+        mul   t0, t0, t1
+        la    t1, idle_harts
+        add   s1, t0, t1               # s1: this hart's entry
+        li    t0, 1
+        sw    t0, 0(s1)
+        li    t0, IE_SOFT
+        csrw  sie, t0
+        call  klock_give
+        wfi
+        call  klock_take
+        sw    zero, 0(s1)              # in case nobody woke it on purpose
+        li    t0, V_HART
+1:      lw    t1, HC_RECEIVE(t0)       # empty the mailbox: no wake-up can
+        bnez  t1, 1b                   # arrive now, with the entry cleared
+        call  timer_on
+        j     pick
 
 # a0 = the number of the process in s0.
 current_pid:

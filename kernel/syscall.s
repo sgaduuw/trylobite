@@ -24,6 +24,8 @@ on_syscall:
         beq   a0, t0, sys_puts
         li    t0, SYS_SPAWN
         beq   a0, t0, sys_spawn
+        li    t0, SYS_HART
+        beq   a0, t0, sys_hart
         li    a0, -1                   # no such call
 
 sys_return:                            # a0: the result
@@ -38,6 +40,10 @@ sys_putc:
 
 sys_getpid:
         call  current_pid
+        j     sys_return
+
+sys_hart:
+        mv    a0, tp
         j     sys_return
 
 # puts(address): print a 0-terminated string from the caller's page in one
@@ -90,6 +96,7 @@ sys_send:
 2:      sw    a2, PCB_A0(s1)           # its recv returns the value
         li    t0, ST_READY
         sw    t0, PCB_STATE(s1)
+        call  wake_one                 # a hart waiting for work can run it
         li    a0, 0
         j     sys_return
 3:      li    a0, -1                   # mailbox full

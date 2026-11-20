@@ -19,6 +19,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
 RAM_PAGES = 40
+# Harts the machine has when a test does not say: the suite runs once
+# with each of these (tests/conftest.py sets it).
+HARTS = 1
 STEP_LIMIT = 124  # detrytus run's exit status when the program never powered off
 
 # From docs/isa.md in the detrytus repository: trap causes (8.5) and the
@@ -140,6 +143,8 @@ class Run:
     exit_code: int | None  # None if it was still running at the step limit
     image: Image
     ram_pages: int
+    harts: int
+    steps: int | None  # None if it was still running at the step limit
 
     def words(self, addresses: list[int]) -> list[int | None]:
         """Words of physical memory once the program has stopped, each
@@ -152,6 +157,8 @@ class Run:
             str(self.image.path),
             "--ram-pages",
             str(self.ram_pages),
+            "--harts",
+            str(self.harts),
             "-x",
             str(script),
             "--batch",
@@ -180,8 +187,12 @@ class Run:
 
 
 def run_image(
-    image: Image, ram_pages: int = RAM_PAGES, max_steps: int = 2_000_000
+    image: Image,
+    ram_pages: int = RAM_PAGES,
+    max_steps: int = 2_000_000,
+    harts: int | None = None,
 ) -> Run:
+    harts = HARTS if harts is None else harts
     done = detrytus(
         "run",
         "--stats",
@@ -189,16 +200,19 @@ def run_image(
         str(ram_pages),
         "--max-steps",
         str(max_steps),
+        "--harts",
+        str(harts),
         str(image.path),
     )
     code: int | None = None
+    steps: int | None = None
     if done.returncode != STEP_LIMIT:
         # The full exit code is in the stats line; the status is only its
         # low byte.
-        m = re.search(r"detrytus: \d+ steps, exit (-?\d+)", done.stderr)
+        m = re.search(r"detrytus: (\d+) steps, exit (-?\d+)", done.stderr)
         assert m, done.stderr
-        code = int(m.group(1))
-    return Run(done.stdout, code, image, ram_pages)
+        steps, code = int(m.group(1)), int(m.group(2))
+    return Run(done.stdout, code, image, ram_pages, harts, steps)
 
 
 def run(
@@ -207,5 +221,7 @@ def run(
     prog2: str = DONE,
     ram_pages: int = RAM_PAGES,
     max_steps: int = 2_000_000,
+    harts: int | None = None,
 ) -> Run:
-    return run_image(build(init, prog1, prog2, ram_pages), ram_pages, max_steps)
+    image = build(init, prog1, prog2, ram_pages)
+    return run_image(image, ram_pages, max_steps, harts)

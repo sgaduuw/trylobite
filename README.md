@@ -15,11 +15,16 @@ only `init`, which spawns the other programs. Processes run in their own
 address spaces, are switched on the timer, pass messages through system
 calls, and give their memory back when they exit.
 
+The kernel runs on several harts at once: up to nine, detrytus harts
+−4 to +4. Hart 0 boots and starts the others; processes run on whichever
+hart is free, and a hart with nothing to do waits until another wakes it
+through its mailbox. On three harts:
+
 ```text
 trylobite: booting
 init: starting pong and ping
-trylobite: process 0 exited with code 0
 ping: sending 1
+trylobite: process 0 exited with code 0
 ping: sending 2
 pong: got 1
 ping: sending 3
@@ -27,7 +32,7 @@ pong: got 2
 trylobite: process 2 exited with code 0
 pong: got 3
 trylobite: process 1 exited with code 0
-trylobite: all processes exited after 27 timer interrupts
+trylobite: all processes exited after 28 timer interrupts
 ```
 
 ## Running it
@@ -40,20 +45,23 @@ tools/install-detrytus
 ```
 
 ```bash
-detrytus run demo.s --ram-pages 40
+detrytus run demo.s --ram-pages 40 --harts 3
 ```
 
 ```bash
-detrytus debug demo.s --ram-pages 40
+detrytus debug demo.s --ram-pages 40 --harts 3
 ```
+
+Without `--harts` the machine has one hart, and everything runs on it.
 
 `--ram-pages` must match the `RAM_PAGES` the build declares (`demo.s`
 says 40): the kernel hands out the pages it was told exist.
 
 The tests need [uv](https://docs.astral.sh/uv/) as well. They build the
 kernel with small test programs and check isolation, preemption,
-faults, messages, process creation, memory reclamation and every system
-call, in about 2 seconds:
+faults, messages, process creation, memory reclamation, every system
+call and running on several harts. Each runs on a machine with one hart
+and on one with three, in about 10 seconds:
 
 ```bash
 uv sync
@@ -92,7 +100,7 @@ Every address space has three regions, one per mid-table entry:
 | Region | Virtual pages | Contents |
 |--------|---------------|----------|
 | direct map | around −6561 | all of physical memory, kernel only: kernel virtual = physical − 3¹⁷ |
-| kernel | −5 to −2 | power off, console, kernel code, kernel data and stack; page 0 unmapped |
+| kernel | −7 to −2 | the hart controller (its slots, and this hart's own), power off, console, kernel code, kernel data and stack; page 0 unmapped |
 | process | 6561 (`V_USER`) | the process's code, data and stack |
 
 The first two regions are shared by every address space. A new process
@@ -122,6 +130,7 @@ result comes back in `a0`.
 | 5 | `getpid()` | this process's number |
 | 6 | `puts(address)` | 0; −2 if the string is outside the process |
 | 7 | `spawn(program)` | the new process's number; −1 no free slot, −2 no such program, −3 not enough memory |
+| 8 | `hart()` | the number of the hart running the caller |
 
 Process numbers are handed out round-robin, so a number is not reused
 until the table of 6 wraps around.
