@@ -16,22 +16,21 @@ unclear, that is a detrytus change, made there, not worked around here.
 ## Tooling
 
 ```sh
+tools/install-detrytus
 uv sync
 uv run pytest
 uv run ruff check tests
 uv run ruff format --check tests
-uv run detrytus run demo.s --ram-pages 40
+detrytus run demo.s --ram-pages 40
 ```
 
-detrytus comes from its `main` branch, pinned to a commit in `uv.lock`.
-Move the pin with `uv lock --upgrade-package detrytus`, in its own
-commit, and run the tests.
-
-The tests run on either of detrytus' cores: Python by default, Rust with
-`tools/install-rust-backend` and `DETRYTUS_BACKEND=rust` (about ten
-times faster). CI runs both. Python is detrytus' reference core, so a
-test that passes on one and fails on the other is a detrytus bug to
-report there, not something to work around here.
+The `detrytus` command is detrytus' Rust tool, installed with cargo at
+the commit `detrytus.rev` pins. Move the pin by writing a newer commit
+of detrytus' `main` there, in its own commit, reinstall, and run the
+tests. The tests are Python but drive the binary as a subprocess
+(`tests/kernel.py`): `asm` builds a kernel, `run` runs it, and a
+`debug` script reads memory afterwards with `xp`. If something about
+the machine looks wrong, that is a detrytus change, made there.
 
 Judge each check by its exit status, run on its own, never through a
 pipe.

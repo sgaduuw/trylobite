@@ -1,15 +1,84 @@
-"""Build the kernel with chosen programs and run it."""
+"""Build the kernel with chosen programs and run it on the detrytus
+command, the `detrytus` binary (tools/install-detrytus installs it).
 
+Programs are assembled with `detrytus asm`, run with `detrytus run`, and
+memory after a run is read with `detrytus debug` and its `xp` command.
+DETRYTUS names the binary; without it, `detrytus` on the PATH is used.
+"""
+
+import itertools
+import json
+import os
 import re
+import shutil
+import struct
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from detrytus.asm import Image, assemble
-from detrytus.machine import Machine, StepLimit, create
-from detrytus.rust import RustMachine
-
 ROOT = Path(__file__).parent.parent
 RAM_PAGES = 40
+STEP_LIMIT = 124  # detrytus run's exit status when the program never powered off
+
+# From docs/isa.md in the detrytus repository: trap causes (8.5) and the
+# numbers of the argument registers (3.1).
+LOAD_PAGE_FAULT = 7
+BREAKPOINT = 5
+REGISTERS = {"a0": 1, "a1": 2, "a2": 3}
+
+_WORK = Path(tempfile.mkdtemp(prefix="trylobite-"))
+_names = itertools.count()
+
+
+def detrytus(*args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+    binary = os.environ.get("DETRYTUS") or shutil.which("detrytus")
+    if binary is None:
+        raise RuntimeError(
+            "no detrytus command: run tools/install-detrytus, or set DETRYTUS"
+        )
+    return subprocess.run(
+        [binary, *args], input=stdin, capture_output=True, text=True, cwd=ROOT
+    )
+
+
+@dataclass
+class Image:
+    """An assembled image: where it is, and what its metadata names."""
+
+    path: Path
+    symbols: dict[str, int]
+    labels: dict[str, int]
+    trytes: set[int]  # the addresses it fills
+
+
+def read_image(path: Path) -> Image:
+    """Read a .dti file's metadata and the addresses its segments fill."""
+    data = path.read_bytes()
+    assert data[:4] == b"DTI\x01", path
+    (meta_len,) = struct.unpack_from("<I", data, 4)
+    meta = json.loads(data[8 : 8 + meta_len])
+    pos = 8 + meta_len
+    (count,) = struct.unpack_from("<I", data, pos)
+    pos += 4
+    trytes: set[int] = set()
+    for _ in range(count):
+        start, n = struct.unpack_from("<qI", data, pos)
+        pos += 12 + -(-9 * n // 5)  # five trits to a byte
+        trytes.update(range(start, start + n))
+    return Image(path, meta["symbols"], meta["labels"], trytes)
+
+
+def _assemble(args: list[str], stdin: str | None = None) -> Image:
+    out = _WORK / f"build{next(_names)}.dti"
+    done = detrytus("asm", *args, "-o", str(out), stdin=stdin)
+    assert done.returncode == 0, done.stderr
+    return read_image(out)
+
+
+def assemble_file(path: Path) -> Image:
+    return _assemble([str(path)])
+
 
 EXIT = "li a0, SYS_EXIT\n        sys"
 DONE = f"li a1, 0\n        {EXIT}"
@@ -61,15 +130,38 @@ def build(
         .section prog2, P_PROG2 * PAGE, V_USER
 {prog2}
 """
-    # The file name only sets where .include starts looking: the repo root.
-    return assemble(source, str(ROOT / "test-build.s"))
+    # On stdin, .include paths start from the working directory: the root.
+    return _assemble(["-"], stdin=source)
 
 
 @dataclass
 class Run:
     console: str
     exit_code: int | None  # None if it was still running at the step limit
-    machine: Machine | RustMachine
+    image: Image
+    ram_pages: int
+
+    def words(self, addresses: list[int]) -> list[int | None]:
+        """Words of physical memory once the program has stopped, each
+        centred on an address; None where nothing is mapped. The debugger
+        runs the image to the same end and reads them with xp."""
+        script = _WORK / f"read{next(_names)}.txt"
+        script.write_text("continue\n" + "".join(f"xp {a} 1\n" for a in addresses))
+        done = detrytus(
+            "debug",
+            str(self.image.path),
+            "--ram-pages",
+            str(self.ram_pages),
+            "-x",
+            str(script),
+            "--batch",
+        )
+        assert done.returncode == 0, done.stderr
+        found = re.findall(
+            r"^ *(-?\d+)  +(?:(-?\d+)  0t[-0+]{27}|<unmapped>)$", done.stdout, re.M
+        )
+        assert [int(a) for a, _ in found] == addresses, done.stdout[-500:]
+        return [int(v) if v else None for _, v in found]
 
     def exits(self) -> list[tuple[int, int]]:
         """(process, exit code) from the kernel's messages, in order."""
@@ -90,15 +182,23 @@ class Run:
 def run_image(
     image: Image, ram_pages: int = RAM_PAGES, max_steps: int = 2_000_000
 ) -> Run:
-    # Python's core unless DETRYTUS_BACKEND=rust picks detrytus' Rust
-    # core (the optional detrytus-rs package), which is much faster.
-    m = create(ram_pages=ram_pages, seed=1)
-    m.load(image)
-    try:
-        code: int | None = m.run(max_steps).exit_code
-    except StepLimit:
-        code = None
-    return Run(m.console.text, code, m)
+    done = detrytus(
+        "run",
+        "--stats",
+        "--ram-pages",
+        str(ram_pages),
+        "--max-steps",
+        str(max_steps),
+        str(image.path),
+    )
+    code: int | None = None
+    if done.returncode != STEP_LIMIT:
+        # The full exit code is in the stats line; the status is only its
+        # low byte.
+        m = re.search(r"detrytus: \d+ steps, exit (-?\d+)", done.stderr)
+        assert m, done.stderr
+        code = int(m.group(1))
+    return Run(done.stdout, code, image, ram_pages)
 
 
 def run(

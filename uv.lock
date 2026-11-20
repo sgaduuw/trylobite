@@ -12,11 +12,6 @@ wheels = [
 ]
 
 [[package]]
-name = "detrytus"
-version = "0.1.0"
-source = { git = "https://github.com/sgaduuw/detrytus?branch=main#c4b78e7d8333036370e8d18cc697c5a49504c889" }
-
-[[package]]
 name = "iniconfig"
 version = "2.3.1"
 source = { registry = "https://pypi.org/simple" }
@@ -100,7 +95,6 @@ source = { virtual = "." }
 
 [package.dev-dependencies]
 dev = [
-    { name = "detrytus" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -109,7 +103,6 @@ dev = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "detrytus", git = "https://github.com/sgaduuw/detrytus?branch=main" },
     { name = "pytest", specifier = ">=8" },
     { name = "ruff", specifier = ">=0.8" },
 ]
