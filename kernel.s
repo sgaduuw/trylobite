@@ -15,6 +15,8 @@
         .include "kernel/sched.s"
         .include "kernel/console.s"
         .include "kernel/mm.s"
+        .include "kernel/lock.s"
+        .include "kernel/harts.s"
 
         .include "kernel/data.s"
         .include "kernel/pagetables.s"

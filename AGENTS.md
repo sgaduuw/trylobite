@@ -47,14 +47,21 @@ pipe.
   sees at run time: `li label`, `la label` and the debugger all agree.
   Keep that true for any new section.
 - **Register discipline in the kernel**: `s0` is the current process's
-  record from trap entry to `resume`, `s1` another process's. Each helper
-  says what it clobbers in its header comment; helpers that call others
-  save `ra` on the kernel stack.
+  record from trap entry to `resume`, `s1` another process's, and `tp`
+  this hart's number (the kernel cannot read `hartid`, a ring +1 CSR).
+  Each helper says what it clobbers in its header comment; helpers that
+  call others save `ra` on the kernel stack.
+- **One kernel lock.** Every path from trap entry to `resume` runs
+  holding it (`kernel/lock.s`), and so may touch any kernel data,
+  including the one kernel stack. Code before `klock_take` touches only
+  the trapping process's own record.
 - **Physical memory is reached through the direct map**
   (`physical + DMAP`). Never free a page while it is part of the active
   address space: switch `ptbr` away first, as `release` does.
-- **A reused ASID needs a `fence.vm`.** A process's ASID is its slot
-  number plus 1, so spawning into a slot flushes that ASID.
+- **A reused ASID needs a `fence.vm` on every hart.** A process's ASID
+  is its slot number plus 1. Spawning into a slot starts a new epoch for
+  it, and each hart flushes the ASID in `resume` the first time it runs
+  that slot in the new epoch.
 - **`RAM_PAGES` belongs to the build**, not to `include/layout.s`: each
   top-level file (demo, tests) states the machine it targets.
 - **User memory is only read with `SUA` on, and only after checking the

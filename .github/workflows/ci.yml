@@ -24,3 +24,5 @@ jobs:
         run: uv run pytest
       - name: Boot the demo
         run: detrytus run demo.s --ram-pages 40
+      - name: Boot the demo on three harts
+        run: detrytus run demo.s --ram-pages 40 --harts 3

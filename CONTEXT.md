@@ -162,3 +162,44 @@ installed with `cargo install` at the commit `detrytus.rev` pins,
 replacing the `uv.lock` pin. The 21 tests take about 2 seconds,
 against about 17 on detrytus' Python core.
 
+
+### 2026-11-20 · Several harts, under one kernel lock
+
+detrytus gained several harts (its isa.md 5.6), so the kernel runs on up
+to nine, harts −4 to +4: enough for a triad or the middle nine, with
+per-hart tables of fixed size. Hart 0 boots and starts the others
+through the hart controller; each enters the firmware like hart 0, with
+the kernel entry in `a0`, and the firmware passes the hart's number in
+`a1`, because `hartid` is a ring +1 CSR. The kernel keeps it in `tp`,
+and in the process record while a process runs, so a trap can reload it.
+
+- **One lock for the whole kernel.** Taken after a trap has saved the
+  process's registers, given back just before `resume` restores them.
+  The kernel is small and its paths are short, so this costs little and
+  makes every structure safe at once; finer locks can come if a
+  measurement asks for them. It also keeps a `puts` line whole. With the
+  lock held whenever the kernel stack is used, one stack serves every
+  hart.
+- **`ST_RUNNING`.** A process on a hart is no longer marked ready, so
+  two harts cannot pick it. Preemption and `yield` turn it back to ready.
+- **Idle harts wait on their mailbox.** A hart with nothing to run, while
+  something runs elsewhere, marks itself idle, gives the lock back and
+  waits in `wfi` with only the doorbell enabled. `spawn` and a `send`
+  that wakes a receiver ring one idle hart's doorbell. The doorbell stays
+  rung while a word waits, so a wake-up just before the `wfi` is not
+  lost; the woken hart empties its mailbox under the lock. The firmware
+  delegates the doorbell to ring 0 (`ideleg`). Deadlock is now "every
+  live process waits and none runs anywhere"; "all exited" is unchanged.
+- **Reused ASIDs are flushed lazily.** A `fence.vm` in `spawn` only
+  cleared the spawning hart's TLB, and another hart may have run the
+  slot's last tenant. Rather than interrupting every hart, each slot
+  counts its tenants (an epoch), and a hart flushes the ASID in `resume`
+  when it first runs a slot in a new epoch. Stale entries for an ASID
+  can only matter once that ASID runs again, and the kernel's own
+  mappings never change, so this is enough.
+- **`SYS_HART`** returns the running hart's number: useful to programs,
+  and how the tests show work really ran on several harts.
+
+The cost on one hart: each trap now takes and gives the lock and checks
+the slot's epoch, so the demo runs about 5% more kernel instructions.
+The tests run every case on one hart and on three.

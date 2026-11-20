@@ -200,8 +200,16 @@ do_spawn:
         addi  t0, s1, PCB_SIZE         # the next spawn looks after this slot
         la    t1, next_slot
         sw    t0, 0(t1)
-        # The slot's last tenant had this ASID: drop its translations.
-        fence.vm zero, t2
+        # The slot's last tenant had this ASID: a new epoch makes each hart
+        # drop its translations before running the new one (see resume).
+        la    t1, epochs
+        li    t3, 3
+        mul   t3, a0, t3
+        add   t1, t1, t3
+        lw    t3, 0(t1)
+        addi  t3, t3, 1
+        sw    t3, 0(t1)
+        call  wake_one                 # a hart waiting for work can run it
         j     7f
 
 8:      li    a0, -2

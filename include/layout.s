@@ -31,6 +31,8 @@
 
         .equ  DMAP, -SUPER                # direct map offset
         .equ  KOFF, 4 * PAGE              # kernel code and data: physical - KOFF
+        .equ  V_HARTS,   -7 * PAGE        # hart controller: every hart's slot
+        .equ  V_HART,    -6 * PAGE        # ... and this hart's own
         .equ  V_POWER,   -5 * PAGE        # power-off register
         .equ  V_CONSOLE, -4 * PAGE        # console output register
         .equ  V_USER, SUPER               # every process runs from here
@@ -61,7 +63,24 @@
         .equ  CAUSE_SYSCALL, 4
         .equ  CAUSE_TIMER, -1
         .equ  EDELEG_ALL, 29523           # trits 1..9: every exception to ring 0
+        .equ  IDELEG_SOFT, 27             # trit 3: the mailbox doorbell to ring 0
+        .equ  IE_TIMER, 3                 # sie trit 1
+        .equ  IE_SOFT, 27                 # sie trit 3
         .equ  QUANTUM, 500                # timer slice, in emulator ticks
+
+# --- harts (detrytus isa.md 5.6, platform.md Harts) ---------------------------
+# The kernel runs on harts -HART_MAX .. HART_MAX, the middle nine; others
+# the platform may have are left stopped. A slot register of hart h is at
+# V_HARTS + 27*h + HC_*, and V_HART + HC_* is the running hart's own.
+
+        .equ  HART_MAX, 4
+        .equ  NHART, 2 * HART_MAX + 1
+        .equ  HC_STATE, -12               # -1 absent, 0 stopped, +1 running
+        .equ  HC_START_PC, -9
+        .equ  HC_START_ARG, -6
+        .equ  HC_CONTROL, -3              # +1 starts a stopped hart
+        .equ  HC_SEND, 0                  # queue a word: rings its doorbell
+        .equ  HC_RECEIVE, 3               # own slot: take a word, 0 if none
 
 # --- system calls: number in a0, arguments in a1 and a2, result in a0 -------
 
@@ -77,6 +96,7 @@
         .equ  SYS_SPAWN,  7               # start program a1: its process number,
                                           # -1 no free slot, -2 no such program,
                                           # -3 not enough memory
+        .equ  SYS_HART,   8               # a0 = the hart running the caller
 
 # --- the process table ---------------------------------------------------------
 # One record per process, in words. Register r is saved at 3 * (r + 13), so
@@ -95,9 +115,11 @@
         .equ  PCB_MIDPG,  99
         .equ  PCB_LEAFPG, 102
         .equ  PCB_USERPG, 105
-        .equ  PCB_SIZE,   108
+        .equ  PCB_HART,   108             # the hart running it (see resume)
+        .equ  PCB_SIZE,   111
         .equ  PAGES_PER_PROCESS, 4
 
         .equ  ST_EXITED, 0                # also: a free slot
-        .equ  ST_READY,  1
+        .equ  ST_READY,  1                # waiting for a hart
+        .equ  ST_RUNNING, 2               # on a hart, or in the kernel for it
         .equ  ST_RECV,   -1               # blocked in SYS_RECV
