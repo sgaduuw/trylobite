@@ -148,3 +148,17 @@ the detrytus commit `uv.lock` pins, so the two cores never come from
 different versions. CI runs the tests on both cores; the Python job
 stays, as detrytus' reference.
 
+### 2026-11-20 · The tests drive the detrytus binary
+
+detrytus is retiring its Python tools (its rust-plan, phase 6), so the
+tests no longer import a Python package. They stay in Python and pytest,
+as the owner preferred, but call the `detrytus` command: `asm -` with
+the source on stdin builds a kernel (the image's labels and symbols are
+read from its metadata), `run --stats` runs it (the exit code is read
+from the stats line, since the process status is only its low byte),
+and the one test that inspects memory afterwards runs a `debug` script
+using `xp`, which reads physical memory untranslated. The binary is
+installed with `cargo install` at the commit `detrytus.rev` pins,
+replacing the `uv.lock` pin. The 21 tests take about 2 seconds,
+against about 17 on detrytus' Python core.
+

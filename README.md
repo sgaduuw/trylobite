@@ -32,41 +32,39 @@ trylobite: all processes exited after 27 timer interrupts
 
 ## Running it
 
-Requires [uv](https://docs.astral.sh/uv/), which also fetches detrytus.
+Requires the `detrytus` command, built with a Rust toolchain (1.88 or
+later): this installs it at the commit `detrytus.rev` pins.
+
+```bash
+tools/install-detrytus
+```
+
+```bash
+detrytus run demo.s --ram-pages 40
+```
+
+```bash
+detrytus debug demo.s --ram-pages 40
+```
+
+`--ram-pages` must match the `RAM_PAGES` the build declares (`demo.s`
+says 40): the kernel hands out the pages it was told exist.
+
+The tests need [uv](https://docs.astral.sh/uv/) as well. They build the
+kernel with small test programs and check isolation, preemption,
+faults, messages, process creation, memory reclamation and every system
+call, in about 2 seconds:
 
 ```bash
 uv sync
 ```
 
 ```bash
-uv run detrytus run demo.s --ram-pages 40
+uv run pytest
 ```
 
-```bash
-uv run detrytus debug demo.s --ram-pages 40
-```
-
-`--ram-pages` must match the `RAM_PAGES` the build declares (`demo.s`
-says 40): the kernel hands out the pages it was told exist.
-
-`uv run pytest` runs the tests, which build the kernel with small test
-programs and check isolation, preemption, faults, messages, process
-creation, memory reclamation and every system call. They take about 17
-seconds on detrytus' Python core. Its Rust core runs them in under 2:
-
-```bash
-tools/install-rust-backend
-```
-
-```bash
-DETRYTUS_BACKEND=rust uv run pytest
-```
-
-The script installs the optional `detrytus-rs` package at the detrytus
-commit `uv.lock` pins, and needs a Rust toolchain. `uv sync` removes the
-package, so run the script again after syncing. `DETRYTUS_BACKEND=rust`
-also makes `detrytus run` use the Rust core; the debugger needs the
-Python one.
+They drive the `detrytus` binary (`tests/kernel.py`): `DETRYTUS` names
+it, or else the one on the PATH is used.
 
 ## Layout
 

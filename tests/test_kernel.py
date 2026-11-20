@@ -2,13 +2,14 @@
 
 import re
 
-from detrytus import isa
-from detrytus.asm import assemble_file
-
 from tests.kernel import (
+    BREAKPOINT,
     DONE,
+    LOAD_PAGE_FAULT,
+    REGISTERS,
     ROOT,
     SPAWN_BOTH,
+    assemble_file,
     build,
     exit_with,
     run,
@@ -68,7 +69,7 @@ def test_a_faulting_process_is_ended_and_the_others_carry_on():
         r"process 1 faulted, cause (-?\d+) at address (-?\d+)", result.console
     )
     assert m, result.console
-    assert int(m.group(1)) == isa.LOAD_PAGE_FAULT  # a kernel page, from ring -1
+    assert int(m.group(1)) == LOAD_PAGE_FAULT  # a kernel page, from ring -1
     assert int(m.group(2)) == -4 * 19683
     assert result.code_of(2) == 0
 
@@ -76,7 +77,7 @@ def test_a_faulting_process_is_ended_and_the_others_carry_on():
 def test_every_exception_reaches_the_kernel_not_the_firmware():
     result = run(SPAWN_BOTH, "brk", DONE)
     assert result.exit_code == 0  # the firmware would power off with cause 5
-    assert f"cause {isa.BREAKPOINT} " in result.console
+    assert f"cause {BREAKPOINT} " in result.console
 
 
 def test_waiting_forever_is_reported_as_deadlock():
@@ -152,7 +153,7 @@ def test_layout_matches_the_register_numbering():
     # named offsets must agree with detrytus's register numbers.
     symbols = build(DONE).symbols
     for name, register in (("PCB_A0", "a0"), ("PCB_A1", "a1"), ("PCB_A2", "a2")):
-        assert symbols[name] == 3 * (isa.REG_NAMES[register] + 13)
+        assert symbols[name] == 3 * (REGISTERS[register] + 13)
     assert symbols["PCB_PC"] == 3 * 27  # the first slot after the registers
     assert symbols["PCB_SIZE"] % 3 == 0
 

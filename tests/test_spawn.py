@@ -164,17 +164,17 @@ def test_a_recycled_page_table_starts_empty():
     result = run_image(image)
     assert result.exit_code == 1  # deadlock: program 2 waits forever
     k = image.symbols
-    bus = result.machine.bus
+    procs = image.labels["procs"] + k["KOFF"]  # physical address
 
     def record(slot: int, offset: int) -> int:
-        procs = image.labels["procs"] + k["KOFF"]  # physical address
-        return bus.read(procs + slot * k["PCB_SIZE"] + offset, 3)
+        return procs + slot * k["PCB_SIZE"] + offset
 
     pages = ("PCB_ROOTPG", "PCB_MIDPG", "PCB_LEAFPG", "PCB_USERPG")
-    first_pages = {record(1, k[p]) for p in pages}
-    leaf = record(2, k["PCB_LEAFPG"])
+    first_pages = set(result.words([record(1, k[p]) for p in pages]))
+    (leaf,) = result.words([record(2, k["PCB_LEAFPG"])])
+    assert leaf is not None
     assert leaf in first_pages  # precondition: the table really was recycled
     centre = leaf * k["PAGE"]
-    entries = [bus.read(centre + 3 * i, 3) for i in range(-3280, 3281)]
+    entries = result.words([centre + 3 * i for i in range(-3280, 3281)])
     assert sum(1 for e in entries if e) == 1
     assert entries[3280] != 0  # index 0: the process's page
