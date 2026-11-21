@@ -4,10 +4,8 @@
 # at P_PROGn * PAGE and run at V_USER (see demo.s). The kernel starts
 # program 0; programs start others with SYS_SPAWN.
 
-        # Assembled on its own, this is the first error, and the assembler
-        # prints the line with its comment.
-        .equ  KERNEL_RAM_PAGES, RAM_PAGES   # run a file that sets RAM_PAGES and includes this one, such as demo.s
-        .equ  KERNEL_NPROG, NPROG           # the build says how many programs it adds, from 1 to 6
+        .assert defined(RAM_PAGES) * defined(NPROG), "include/kernel.s is not run on its own: run a file that sets RAM_PAGES and NPROG and includes it, such as demo.s or shell.s"
+        .assert (NPROG >= 1) * (NPROG <= 6), "NPROG says how many programs the build adds, from 1 to 6"
 
         .include "layout.s"
         .include "../firmware/boot.s"            # the boot page, from address 0
