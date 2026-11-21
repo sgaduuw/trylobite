@@ -97,7 +97,7 @@ idle:
         sw    zero, 0(s1)              # in case nobody woke it on purpose
         li    t0, V_HART
 1:      lw    t1, HC_RECEIVE(t0)       # empty the mailbox: no wake-up can
-        bnez  t1, 1b                   # arrive now, with the entry cleared
+        bgez  t1, 1b                   # arrive now, with the entry cleared
         bnez  tp, 3f
         call  hotplug_events
         call  device_irqs
