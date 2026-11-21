@@ -132,6 +132,8 @@ it, or else the one on the PATH is used.
 | `user/` | `init` (program 0 of the demo), `ping` (1) and `pong` (2); `sh` (program 0 of the shell build), `hello` (3), `fail` (4) and `pingpong` (5) |
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
 | `shell.s` | the same machine, starting the shell, with all six programs |
+| `docs/filesystem.md` | the on-disk format of the filesystem |
+| `tools/fs.py` | builds and reads filesystem images on the host |
 | `tests/` | the tests, and a harness that builds the kernel with test programs |
 
 ## Memory
@@ -200,6 +202,14 @@ when it ends. `bread` fills it from a block and `bwrite` copies it to one,
 by DMA, sleeping until the disk interrupts; one command runs at a time and
 the rest wait their turn. Run with `detrytus run --disk FILE --disk-blocks
 N`; the file keeps what was written for the next run.
+
+The disk can hold a filesystem: a flat directory and a FAT in block 0
+(`docs/filesystem.md`). `tools/fs.py` makes one and reads it back:
+
+```bash
+tools/fs.py new disk.img 100 notes.txt
+tools/fs.py ls disk.img
+```
 
 Process numbers are handed out round-robin, so a number is not reused
 until the table of 6 wraps around.

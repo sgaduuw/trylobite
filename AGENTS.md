@@ -19,8 +19,8 @@ unclear, that is a detrytus change, made there, not worked around here.
 tools/install-detrytus
 uv sync
 uv run pytest
-uv run ruff check tests
-uv run ruff format --check tests
+uv run ruff check tests tools
+uv run ruff format --check tests tools
 detrytus run demo.s --ram-pages 40
 ```
 

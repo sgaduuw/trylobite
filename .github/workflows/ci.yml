@@ -17,9 +17,9 @@ jobs:
         run: tools/install-detrytus
       - run: uv sync
       - name: Lint
-        run: uv run ruff check tests
+        run: uv run ruff check tests tools
       - name: Format
-        run: uv run ruff format --check tests
+        run: uv run ruff format --check tests tools
       - name: Test
         run: uv run pytest
       - name: Boot the demo

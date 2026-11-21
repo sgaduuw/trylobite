@@ -210,3 +210,32 @@
                                           # command in its saved a2 and block in a1
         .equ  NO_PARENT, -1               # PCB_PARENT of init and of orphans:
                                           # process numbers are never negative
+
+# --- the filesystem (docs/filesystem.md) ----------------------------------------
+# Block 0 holds a header, a flat directory and the FAT; every other block
+# holds file data. Offsets are in trytes from a block's centre, as a
+# program addresses them through its block window at V_BLOCK. Memory is
+# centred (detrytus isa.md 5.2): a block's words sit at -9840, -9837, ...,
+# 9840, and its trytes run from -9841 to 9841.
+
+        .equ  BLOCK_W0, -9840             # a block's first word
+        .equ  BLOCK_T0, -9841             # ... and its first tryte, where
+                                          # a data block's text starts
+        .equ  FS_HEAD_MAGIC, BLOCK_W0     # word 0: FS_MAGIC
+        .equ  FS_HEAD_VERSION, BLOCK_W0 + 3   # word 1: FS_VERSION
+        .equ  FS_HEAD_BLOCKS, BLOCK_W0 + 6    # word 2: blocks in the filesystem
+        .equ  FS_MAGIC, 20261121          # any word but 0: a blank disk is not one
+        .equ  FS_VERSION, 1
+        .equ  FS_DIR, BLOCK_W0 + 27       # word 9: the directory, FS_FILES entries
+        .equ  FS_FILES, 64
+        .equ  FS_DIRENT, 24               # trytes per entry, which has three
+        .equ  DE_NAME, -1                 # fields from its first word: the name,
+                                          # 18 trytes, zero-padded, unused when 0
+        .equ  DE_SIZE, 18                 # the size, in trytes
+        .equ  DE_FIRST, 21                # its first block, FAT_END when empty
+        .equ  FS_NAME_MAX, 17             # code points in a name; one is left for 0
+        .equ  FS_FAT, BLOCK_W0 + 2187     # word 729: the FAT, one word per block
+        .equ  FS_MAX_BLOCKS, 5832         # as many as fit after it
+        .equ  FAT_FREE, 0                 # a block in no file; block 0 never is
+        .equ  FAT_END, -1                 # the last block of its file (and of
+                                          # block 0): there is no next one
