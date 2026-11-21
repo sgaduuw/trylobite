@@ -78,8 +78,10 @@ pipe.
   is its slot number plus 1. Spawning into a slot starts a new epoch for
   it, and each hart flushes the ASID in `resume` the first time it runs
   that slot in the new epoch.
-- **`RAM_PAGES` belongs to the build**, not to `include/layout.s`: each
-  top-level file (demo, tests) states the machine it targets.
+- **`RAM_PAGES` and `NPROG` belong to the build**, not to
+  `include/layout.s`: each top-level file (demo, shell, tests) states the
+  machine it targets and how many programs it adds. Program images sit
+  in pages from `P_PROG0`, and the free pages start after the last.
 - **Writing zero to a CSR needs a register holding 0.** A CSR
   instruction whose source is `r0` only reads (detrytus isa.md 7.12), so
   `csrw sie, zero` changes nothing: `li t0, 0` first.

@@ -7,9 +7,6 @@ free_head:  .word 0                    # first free page, or 0 for none
 free_count: .word 0                    # how many pages are free
 next_slot:  .word 0                    # where spawn starts looking (set at boot)
 
-# Where each program image was loaded.
-programs:   .word P_PROG0, P_PROG1, P_PROG2
-
 procs:  .words NPROC * PCB_SIZE / 3     # the process table
 
 klock:  .word 0                        # the kernel lock: 1 while a hart holds it

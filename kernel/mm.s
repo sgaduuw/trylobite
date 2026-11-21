@@ -101,11 +101,7 @@ do_spawn:
         bltz  a1, 8f
         li    t0, NPROG
         bge   a1, t0, 8f
-        la    t0, programs
-        li    t1, 3
-        mul   t1, a1, t1
-        add   t0, t0, t1
-        lw    s5, 0(t0)                # s5: the program image's page
+        addi  s5, a1, P_PROG0          # s5: the program image's page
 
         # Find a free slot, starting after the last one handed out, so a
         # process number is not reused until the table wraps: a message

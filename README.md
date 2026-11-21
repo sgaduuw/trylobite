@@ -8,7 +8,7 @@ It is written in detrytus assembly and runs on the detrytus emulator.
 
 ## Status
 
-Milestone 2 works. Firmware hands every exception to the kernel and
+Milestone 2 works, and milestone 3 (below). Firmware hands every exception to the kernel and
 starts it in ring 0. The kernel manages physical memory with a page
 allocator, builds each process's page tables at run time, and starts
 only `init`, which spawns the other programs. Processes run in their own
@@ -36,6 +36,33 @@ pong: got 3
 trylobite: process 1 exited with code 0
 trylobite: all processes exited after 28 timer interrupts
 ```
+
+Milestone 3 works too: the kernel can start a shell instead. `shell.s`
+builds it with `sh` as program 0, which reads a line from the console,
+runs the program it names, waits for it and says how it ended. It knows
+`hello`, `fail` (which exits with 3), `pingpong` (the demo above, as a
+program) and the built-in `exit`, and stops at the end of its input:
+
+```bash
+printf 'hello\nfail\nexit\n' > session.txt
+detrytus run shell.s --ram-pages 40 --input session.txt
+```
+
+```text
+trylobite: booting
+$ hello
+hello from a balanced-ternary machine
+trylobite: process 1 exited with code 0
+$ fail
+trylobite: process 2 exited with code 3
+sh: exit 3
+$ exit
+trylobite: process 0 exited with code 0
+trylobite: all processes exited after 17 timer interrupts
+```
+
+Input is read from the file up front, so a run is the same every time;
+the debugger's `input` command adds more by hand.
 
 ## Running it
 
@@ -102,8 +129,9 @@ it, or else the one on the PATH is used.
 | `kernel/lock.s` | the kernel lock |
 | `kernel/harts.s` | starting the other harts, waking an idle one |
 | `include/kernel.s` | firmware and kernel together, without programs: included by a build such as `demo.s`, not run on its own |
-| `user/` | `init` (program 0), `ping` (1) and `pong` (2) |
-| `demo.s` | the kernel for a 40-page machine, with the three programs |
+| `user/` | `init` (program 0 of the demo), `ping` (1) and `pong` (2); `sh` (program 0 of the shell build), `hello` (3), `fail` (4) and `pingpong` (5) |
+| `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
+| `shell.s` | the same machine, starting the shell, with all six programs |
 | `tests/` | the tests, and a harness that builds the kernel with test programs |
 
 ## Memory
@@ -125,8 +153,8 @@ into which `spawn` copies the program image loaded at boot.
 | 0 | firmware |
 | 1, 2 | kernel code; kernel data |
 | 3, 4, 5 | the boot address space; the kernel's shared leaf table |
-| 6, 7, 8 | program images 0, 1 and 2 |
-| 9 .. `RAM_PAGES` | free pages, handed out by the allocator |
+| 6 .. 5 + `NPROG` | program images 0 to `NPROG` − 1 (the demo has 3, the shell build 6) |
+| 6 + `NPROG` .. `RAM_PAGES` | free pages, handed out by the allocator |
 
 ## System calls
 

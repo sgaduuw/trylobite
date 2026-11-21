@@ -320,3 +320,33 @@ A shell runs a program and then needs to know how it went, so `wait`
   or in `recv`. So when nothing can run, someone is in `recv`, and the
   existing check finds it. A test covers a parent waiting on a child
   stuck in `recv`.
+
+### 2026-11-21 · A shell, in a build of its own
+
+Milestone 3's goal: a person types at trylobite. `shell.s` builds the
+kernel with `sh` as program 0. It reads a line with `getc`, echoing it,
+runs the program the first word names, `wait`s for it, and reports a
+nonzero exit code or a fault. It stops at the end of input, so a
+session is a file fed with `detrytus run --input`, the same every run.
+
+- **A build of its own.** `demo.s` stays as it was, the multi-hart
+  showcase the README describes; the owner chose that over making
+  `init` start the shell everywhere. `pingpong` is the demo's `init`
+  as a program the shell runs, except that it waits for ping and pong,
+  so the prompt comes back once they are done.
+- **`NPROG` belongs to the build**, like `RAM_PAGES`: the shell needs
+  six programs and the demo three, and fixing six for both would take
+  three pages from the demo's free memory for nothing. The kernel finds
+  image `n` at page `P_PROG0 + n`, so the table of image pages went.
+- **Names are looked up in `sh` itself**, in a table of name and program
+  number. `spawn` takes a number, and there is no file system to look a
+  name up in.
+- **No arguments yet.** Only the first word counts. Passing the rest
+  needs `spawn` to copy a string into the child's page.
+- **Backspace and delete erase**, echoed as back, blank, back. The
+  assembler has no `\b` escape and turns one into a plain `b` without a
+  word, so the rubout string is written with `.tryte`; detrytus should
+  refuse escapes it does not know.
+- **Not tested:** the shell's report of a faulting program, since none
+  of the six programs faults. The kernel side, `wait` returning
+  `WAIT_FAULTED`, has its own test.

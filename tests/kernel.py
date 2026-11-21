@@ -131,6 +131,7 @@ def build(
     """The kernel with init as program 0 and prog1, prog2 to spawn."""
     source = f"""
         .equ  RAM_PAGES, {ram_pages}
+        .equ  NPROG, 3
         .include "include/kernel.s"
         .section prog0, P_PROG0 * PAGE, V_USER
 {init}
