@@ -239,3 +239,26 @@ while idle; idle, it takes the events as soon as it wakes.
 
 The tests schedule events with `--plug` and `--unplug` at times after
 the kernel has booted (user code starts at about time 93000).
+
+### 2026-11-21 · Lock waiters sleep in `wrs`, and CSR writes from zero
+
+`klock_take` waits with `lr` and `wrs` (detrytus 81b2b5a) instead of
+spinning on `amoswap`: a hart that finds the lock held sleeps until the
+holder's release breaks its reservation, then takes it with `sc.aq`. It
+clears `sie` while waiting, because a pending enabled interrupt ends a
+`wrs` at once, and a hart entering on a timer trap has its timer pending
+until `on_timer` moves `stimecmp`, under the lock; an idle hart coming
+back from `wfi` has its doorbell pending until it empties its mailbox,
+also under the lock. With the demo's workload on three harts the kernel
+runs 594,000 instructions instead of 677,000; the lock itself 18,000
+instead of 106,000. On one hart the longer lock costs under 2%. Steps
+barely change: the machine counts rounds, and a sleeping hart still sits
+through them.
+
+Getting there found a mistake older than the lock. `csrw X, zero` reads
+X and writes nothing, since a CSR instruction whose source is `r0` only
+reads. Trap entry meant to zero `sscratch` that way, so in the kernel it
+still held the user's stack pointer, and a trap inside the kernel would
+have saved registers there instead of reaching `kpanic`. `puts` meant to
+turn SUA off the same way (harmless: `resume` rewrites `ststatus`). Each
+now writes from a register holding 0, and AGENTS.md says so.
