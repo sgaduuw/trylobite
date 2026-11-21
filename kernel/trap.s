@@ -89,6 +89,9 @@ resume:
         addi  t2, t2, 1                # the ASID
         fence.vm zero, t2
 1:      sw    tp, PCB_HART(s0)         # for ktrap, which cannot read hartid
+        csrr  t0, time                 # a whole slice from now: time the
+        addi  t0, t0, QUANTUM          # kernel spent on others is not its
+        csrw  stimecmp, t0
         lw    t0, PCB_PTBR(s0)
         csrw  ptbr, t0
         lw    t0, PCB_PC(s0)

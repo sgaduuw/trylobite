@@ -468,3 +468,13 @@ extended.
 `tools/fs.py` builds and reads images on the host. It reads the format's
 numbers from `include/layout.s`, and a test checks it agrees with the
 assembler about each of them.
+
+### 2026-11-21 · A timer slice starts when a process is resumed
+
+`on_timer` used to be the only place that armed the next slice, so the
+kernel's time between that interrupt and the next `resume` (other
+processes' system calls on the same hart) came out of the next
+process's slice. With a busy neighbour making a system call after every
+step, a process could be resumed with its slice already over, take the
+timer at once and never advance. `resume` now gives every process a
+whole `QUANTUM` from the moment it runs.
