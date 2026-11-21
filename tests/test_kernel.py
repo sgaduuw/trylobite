@@ -175,5 +175,5 @@ def test_the_kernel_alone_says_how_to_build_it():
     # own, the first error should point at a file to run instead.
     done = detrytus("asm", "include/kernel.s")
     assert done.returncode != 0
-    assert "undefined symbol 'RAM_PAGES'" in done.stderr
-    assert "such as demo.s" in done.stderr
+    assert "include/kernel.s is not run on its own" in done.stderr
+    assert "such as demo.s or shell.s" in done.stderr

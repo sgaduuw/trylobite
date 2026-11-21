@@ -402,3 +402,10 @@ on its first `bread` or `bwrite` and freed when it ends.
   them, along with a window that can hold more than one block.
 - **`puts` reaches the window**, once there is one, so a program can
   print what it read.
+
+### 2026-11-21 · kernel.s checks what it needs with `.assert`
+
+detrytus gained `.assert E, "MESSAGE"` with `defined(NAME)`, so
+`include/kernel.s` now says in its own words that it is included by a
+build rather than run, instead of relying on the first undefined symbol
+and the comment beside it. It also checks that `NPROG` is 1 to 6.
