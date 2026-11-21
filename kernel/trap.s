@@ -12,6 +12,7 @@ ktrap:
         sw    ra, 3(sp)
         sw    tp, 6(sp)
         sw    gp, 9(sp)
+        la    gp, kgp                  # the kernel's gp, before any global
         sw    s8, 12(sp)
         sw    s7, 15(sp)
         sw    s6, 18(sp)
@@ -129,10 +130,9 @@ on_timer:
         csrr  t0, time
         addi  t0, t0, QUANTUM
         csrw  stimecmp, t0
-        la    t0, ticks
-        lw    t1, 0(t0)
+        lw    t1, ticks
         addi  t1, t1, 1
-        sw    t1, 0(t0)
+        sw    t1, ticks
         j     schedule                 # the current process stays ready
 
 # Devices and hot-plug events, on hart 0; the interrupted process carries
@@ -166,6 +166,7 @@ on_fault:
 
 # A trap inside the kernel: nothing to save, nowhere to return to.
 kpanic:
+        la    gp, kgp                  # in case the trap came before ktrap set it
         la    sp, kstack_top
         la    a0, msg_panic
         call  kputs

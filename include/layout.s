@@ -45,6 +45,7 @@
         .equ  CONSOLE_CLOSED, -2          # nothing more will come
         .equ  V_USER, SUPER               # every process runs from here
         .equ  V_BLOCK, V_USER + PAGE      # its block window, once it uses the disk
+        .equ  USER_GP, V_USER             # every process starts with gp here
         .equ  USER_SP, V_USER + 9843      # just above its page; the first push
                                           # lands at the page's top word
 
@@ -177,6 +178,7 @@
 # sp (r-13) is at 0 and t6 (r13) at 78; r0 has a slot that is never used.
 
         .equ  NPROC, 6
+        .equ  PCB_GP,      9              # saved gp
         .equ  PCB_A0,     42              # saved a0: system-call number and result
         .equ  PCB_A1,     45
         .equ  PCB_A2,     48

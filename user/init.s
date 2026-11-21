@@ -3,6 +3,7 @@
 
         .compress
         .section prog0, P_PROG0 * PAGE, V_USER
+        .gp   USER_GP                  # set by spawn
 
 init:   la    a1, init_msg
         li    a0, SYS_PUTS

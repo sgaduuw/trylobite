@@ -3,6 +3,7 @@
 
         .compress
         .section prog1, P_PROG1 * PAGE, V_USER
+        .gp   USER_GP                  # set by spawn
 
 ping:   li    a0, SYS_RECV
         sys

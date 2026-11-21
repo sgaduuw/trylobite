@@ -424,3 +424,24 @@ which is wrong when the `sys` sits in a bundle, so it returns to
 looked for the letter c in a debugger session to find echoed input;
 the debugger's lines now show `c.` instructions, so it looks for a line
 that starts with c.
+
+### 2026-11-21 · Globals through gp
+
+detrytus (ISA 0.11) gave `gp` a meaning: set once, then `la` is one
+`addi` from it and a global is one `lw` or `sw`, each fitting a slot
+(`c.lagp`, `c.lwgp`, `c.swgp`) within 363 trytes. Code in `shell.s`
+went from 977 words to 880 (10% smaller).
+
+The kernel points `gp` at `kgp`, 363 trytes above its first global,
+and keeps its small globals ahead of the process table so that all of
+them and the table's start are in a slot's reach; an `.assert` in
+`kernel/data.s` holds the table there. `ktrap` saves the process's `gp`
+before loading the kernel's, as it already saved the register.
+
+A process starts with `gp` at `USER_GP` (its page's centre, where its
+code begins), set by `spawn` in its saved registers, rather than each
+program setting it: a program with one `la` would spend two words to
+save one. Programs only say `.gp USER_GP`. The address-then-access
+pairs on kernel globals became `lw rd, name` / `sw rs, name`, except
+where the address is used again (the disk command's list, whose
+physical address is computed from it).

@@ -2,6 +2,7 @@
 
         .compress
         .section prog3, P_PROG3 * PAGE, V_USER
+        .gp   USER_GP                  # set by spawn
 
 hello:  la    a1, hello_msg
         li    a0, SYS_PUTS

@@ -13,6 +13,7 @@
         # Code from the bottom of its page: loaded at a physical address, run
         # (and labelled) at the virtual one, KOFF lower.
         .section kernel, P_KCODE * PAGE - 9840, P_KCODE * PAGE - 9840 - KOFF
+        .gp   kgp
         .include "../kernel/entry.s"
         .include "../kernel/trap.s"
         .include "../kernel/syscall.s"
