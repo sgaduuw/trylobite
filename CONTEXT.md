@@ -213,3 +213,29 @@ beside the other files meant only to be included, and its first line
 uses `RAM_PAGES` with a comment saying what to run instead: the
 assembler prints the failing line, comment and all. A real `.error`
 directive would need a detrytus assembler change; this needs none.
+
+### 2026-11-21 · Hot-plug: hart 0 hears it, a leaving hart stops itself
+
+The hart controller announces a hart added or asked to go with an
+external interrupt on its event hart, hart 0 by default. Hart 0 suits
+the job: the platform never removes it, so the events always have
+somewhere to go. The firmware delegates the external interrupt to ring
+0 as well as the doorbell, and hart 0 enables it while running and
+while idle; idle, it takes the events as soon as it wakes.
+
+- **Added:** a hart in the middle nine is started as at boot. Others
+  stay stopped, as at boot.
+- **Asked to go:** hart 0 marks it leaving and rings its doorbell if it
+  waits for work. The hart checks the mark at `pick`, the one point where
+  it holds no process (whatever it ran is already back in the table as
+  ready, waiting or exited), wakes another hart for any work it left,
+  gives the lock up and stops itself; the platform then removes it. A
+  running hart reaches `pick` within a timer slice.
+- **Starting clears the mark.** A hart added and asked to go before hart
+  0 sees either event is gone by then, but would keep the mark; plugged
+  in again, it would leave at once.
+- The kernel prints `trylobite: hart N joined` and `... left`, so a run
+  shows what the platform did and the tests can check it.
+
+The tests schedule events with `--plug` and `--unplug` at times after
+the kernel has booted (user code starts at about time 93000).

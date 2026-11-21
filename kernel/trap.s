@@ -48,6 +48,8 @@ ktrap:
         beq   t0, t1, on_timer
         li    t1, CAUSE_SYSCALL
         beq   t0, t1, on_syscall
+        li    t1, CAUSE_EXTERNAL
+        beq   t0, t1, on_hotplug
         j     on_fault
 
 # Run the process whose record is in s0: switch to its page table (the
@@ -130,6 +132,11 @@ on_timer:
         addi  t1, t1, 1
         sw    t1, 0(t0)
         j     schedule                 # the current process stays ready
+
+# Hot-plug events, on hart 0; the interrupted process carries on.
+on_hotplug:
+        call  hotplug_events
+        j     resume
 
 # A process faulted: report it, end it, and carry on with the others.
 on_fault:

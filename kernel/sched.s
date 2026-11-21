@@ -8,8 +8,16 @@ schedule:
         li    t0, ST_READY             # preempted or yielded: it can run again
         sw    t0, PCB_STATE(s0)
 
-# pick: run the next ready process after s0, any record: s0's turn last.
+# pick: run the next ready process after s0, any record: s0's turn last;
+# or leave, if the platform asked this hart to go.
 pick:
+        addi  t0, tp, HART_MAX
+        li    t1, 3
+        mul   t0, t0, t1
+        la    t1, leaving
+        add   t0, t0, t1
+        lw    t1, 0(t0)
+        bnez  t1, hart_leave
         la    t2, procs
         li    t0, NPROC * PCB_SIZE
         add   t3, t2, t0               # t3: just past the table
@@ -75,7 +83,9 @@ idle:
         li    t0, 1
         sw    t0, 0(s1)
         li    t0, IE_SOFT
-        csrw  sie, t0
+        bnez  tp, 2f
+        li    t0, IE_SOFT + IE_EXT     # hart 0 also wakes for hot-plug events
+2:      csrw  sie, t0
         call  klock_give
         wfi
         call  klock_take
@@ -83,7 +93,9 @@ idle:
         li    t0, V_HART
 1:      lw    t1, HC_RECEIVE(t0)       # empty the mailbox: no wake-up can
         bnez  t1, 1b                   # arrive now, with the entry cleared
-        call  timer_on
+        bnez  tp, 3f
+        call  hotplug_events
+3:      call  timer_on
         j     pick
 
 # a0 = the number of the process in s0.

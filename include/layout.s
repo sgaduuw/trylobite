@@ -62,9 +62,12 @@
 
         .equ  CAUSE_SYSCALL, 4
         .equ  CAUSE_TIMER, -1
+        .equ  CAUSE_EXTERNAL, -2          # hot-plug events, on hart 0
         .equ  EDELEG_ALL, 29523           # trits 1..9: every exception to ring 0
-        .equ  IDELEG_SOFT, 27             # trit 3: the mailbox doorbell to ring 0
+        .equ  IDELEG_KERNEL, 36           # trits 2 and 3 to ring 0: hot-plug
+                                          # events and the mailbox doorbell
         .equ  IE_TIMER, 3                 # sie trit 1
+        .equ  IE_EXT, 9                   # sie trit 2
         .equ  IE_SOFT, 27                 # sie trit 3
         .equ  QUANTUM, 500                # timer slice, in emulator ticks
 
@@ -81,6 +84,9 @@
         .equ  HC_CONTROL, -3              # +1 starts a stopped hart
         .equ  HC_SEND, 0                  # queue a word: rings its doorbell
         .equ  HC_RECEIVE, 3               # own slot: take a word, 0 if none
+        .equ  HC_EVENT, -33               # with V_HART: take a hot-plug event,
+                                          # kind + 3*hart (kind +1 added, -1 asked
+                                          # to leave), 0 if none
 
 # --- system calls: number in a0, arguments in a1 and a2, result in a0 -------
 

@@ -51,6 +51,9 @@ pipe.
   this hart's number (the kernel cannot read `hartid`, a ring +1 CSR).
   Each helper says what it clobbers in its header comment; helpers that
   call others save `ra` on the kernel stack.
+- **Hart 0 handles hot-plug.** It is the hart controller's event hart and
+  can never be removed. A hart asked to go only stops itself in `pick`,
+  where it holds no process: anything it ran is back in the table.
 - **One kernel lock.** Every path from trap entry to `resume` runs
   holding it (`kernel/lock.s`), and so may touch any kernel data,
   including the one kernel stack. Code before `klock_take` touches only

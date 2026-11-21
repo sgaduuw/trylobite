@@ -36,14 +36,16 @@ ksecondary:
         la    s0, procs
         j     pick
 
-# timer_on: this hart's first slice, and its timer interrupt enabled.
-# Clobbers t0.
+# timer_on: this hart's first slice, and its timer interrupt enabled;
+# on hart 0, hot-plug events too. Clobbers t0.
 timer_on:
         csrr  t0, time
         addi  t0, t0, QUANTUM
         csrw  stimecmp, t0
         li    t0, IE_TIMER
-        csrw  sie, t0
+        bnez  tp, 1f
+        li    t0, IE_TIMER + IE_EXT
+1:      csrw  sie, t0
         ret
 
 1:      la    a0, msg_noinit

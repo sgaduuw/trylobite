@@ -18,7 +18,9 @@ calls, and give their memory back when they exit.
 The kernel runs on several harts at once: up to nine, detrytus harts
 −4 to +4. Hart 0 boots and starts the others; processes run on whichever
 hart is free, and a hart with nothing to do waits until another wakes it
-through its mailbox. On three harts:
+through its mailbox. Harts can be plugged in and removed while it runs:
+a new one joins in, and one the platform asks to go hands its process
+back and stops. On three harts:
 
 ```text
 trylobite: booting
@@ -53,6 +55,14 @@ detrytus debug demo.s --ram-pages 40 --harts 3
 ```
 
 Without `--harts` the machine has one hart, and everything runs on it.
+`--plug TIME:HART` and `--unplug TIME:HART` add a hart, or ask one to
+go, when the machine's clock reaches TIME; the kernel reports each
+(`trylobite: hart 1 joined`, `... left`). User code starts at about time
+93000, once the kernel has booted:
+
+```bash
+detrytus run demo.s --ram-pages 40 --plug 150000:1 --unplug 200000:1
+```
 
 `--ram-pages` must match the `RAM_PAGES` the build declares (`demo.s`
 says 40): the kernel hands out the pages it was told exist.
