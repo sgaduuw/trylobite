@@ -73,6 +73,18 @@ data first and block 0 last, so an interrupted change loses only the
 change. Nothing guards against two processes changing the filesystem at
 once; for now only the shell does.
 
+## The shell
+
+`sh` (`user/sh.s`) has four built-ins: `ls` lists each file's size and
+name, `cat NAME` prints a file, `write NAME TEXT` makes `NAME` hold the
+rest of the line and a newline, replacing it if it is there, and `rm
+NAME` removes it. Its window holds one block, so `cat` reads block 0
+again for the FAT before each further block of a file. `write` puts the
+text in a free block first and block 0 last, so it needs a free block
+even to replace a file. Failures are said, not fatal: `sh: no such file:
+NAME`, `sh: the disk is full`, `sh: cannot read the filesystem: N` (a
+`bread` failure, or −4 when block 0 holds no filesystem).
+
 ## The host tool
 
 ```bash
