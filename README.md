@@ -41,7 +41,8 @@ Milestone 3 works too: the kernel can start a shell instead. `shell.s`
 builds it with `sh` as program 0, which reads a line from the console,
 runs the program it names, waits for it and says how it ended. It knows
 `hello`, `fail` (which exits with 3), `pingpong` (the demo above, as a
-program) and the built-in `exit`, and stops at the end of its input:
+program), the built-in `exit` and the file built-ins further down, and
+stops at the end of its input:
 
 ```bash
 printf 'hello\nfail\nexit\n' > session.txt
@@ -204,11 +205,15 @@ the rest wait their turn. Run with `detrytus run --disk FILE --disk-blocks
 N`; the file keeps what was written for the next run.
 
 The disk can hold a filesystem: a flat directory and a FAT in block 0
-(`docs/filesystem.md`). `tools/fs.py` makes one and reads it back:
+(`docs/filesystem.md`). `tools/fs.py` makes one on the host, and the
+shell's built-ins `ls`, `cat NAME`, `write NAME TEXT` (the text and a
+newline) and `rm NAME` use it:
 
 ```bash
 tools/fs.py new disk.img 100 notes.txt
-tools/fs.py ls disk.img
+printf 'ls\nwrite motd hello, disk\ncat motd\n' > session.txt
+detrytus run shell.s --ram-pages 40 --input session.txt --disk disk.img
+tools/fs.py cat disk.img motd
 ```
 
 Process numbers are handed out round-robin, so a number is not reused

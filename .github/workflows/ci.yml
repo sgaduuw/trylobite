@@ -28,3 +28,9 @@ jobs:
         run: detrytus run demo.s --ram-pages 40 --harts 3
       - name: Run a shell session
         run: printf 'hello\nfail\npingpong\nexit\n' | detrytus run shell.s --ram-pages 40 --harts 3 --input -
+      - name: Use files from the shell
+        run: |
+          printf 'hello, disk\n' > notes
+          tools/fs.py new disk.img 8 notes
+          printf 'ls\ncat notes\nwrite motd from the shell\nexit\n' | detrytus run shell.s --ram-pages 40 --input - --disk disk.img
+          tools/fs.py cat disk.img motd
