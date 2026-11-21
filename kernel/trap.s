@@ -45,6 +45,8 @@ ktrap:
         lw    tp, PCB_HART(s0)         # tp: this hart's number (see resume)
         call  klock_take
         la    sp, kstack_top           # the one kernel stack: ours while we hold the lock
+        lw    t0, PCB_KILLED(s0)       # killed while it ran: it goes before
+        bnez  t0, on_kill              # anything it asked for happens
 
         csrr  t0, stcause
         li    t1, CAUSE_TIMER
@@ -65,6 +67,8 @@ ktrap:
 # translations for that ASID. spawn counts each slot's tenants in epochs;
 # each hart flushes an ASID when it first sees a new epoch for it.
 resume:
+        lw    t0, PCB_KILLED(s0)       # killed while it waited or was ready
+        bnez  t0, on_kill
         la    t0, procs
         sub   t0, s0, t0
         li    t1, PCB_SIZE
@@ -165,6 +169,20 @@ on_fault:
         sw    t0, PCB_A0(s0)
         csrr  t0, stcause
         sw    t0, PCB_A1(s0)
+        j     release
+
+# The process in s0 was killed (kill_pid): end it, as wait reports.
+on_kill:
+        sw    zero, PCB_KILLED(s0)
+        la    a0, msg_proc
+        call  kputs
+        call  current_pid
+        call  kputn
+        la    a0, msg_killed
+        call  kputs
+        li    t0, WAIT_KILLED
+        sw    t0, PCB_A0(s0)
+        sw    zero, PCB_A1(s0)
         j     release
 
 # A trap inside the kernel: nothing to save, nowhere to return to.

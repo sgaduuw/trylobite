@@ -33,6 +33,8 @@ read:   li    a0, SYS_GETC
         j     read
 got:    li    t0, '\n'
         beq   a0, t0, enter
+        li    t0, CTRL_C               # nothing runs: drop the line instead
+        beq   a0, t0, cancel
         li    t0, BS
         beq   a0, t0, erase
         li    t0, DEL
@@ -51,6 +53,11 @@ erase:  beq   s1, s0, read             # nothing to erase
         li    a0, SYS_PUTS
         sys
         j     read
+
+cancel: la    a1, sh_cancel
+        li    a0, SYS_PUTS
+        sys
+        j     prompt
 
 eof:    li    a0, SYS_PUTC             # end the last prompt's line
         li    a1, '\n'
@@ -113,14 +120,24 @@ found:  li    a0, SYS_SPAWN
         mv    a0, s3
         call  putn
         j     newline
-1:      mv    a1, a0
+1:      mv    s3, a0                   # s3: the child
+        mv    a1, a0                   # Ctrl-C kills it while it runs; the
+        li    a0, SYS_FOREGROUND       # kernel takes the console back after
+        sys
+        mv    a1, s3
         li    a0, SYS_WAIT
         sys
         mv    s3, a1                   # s3: its exit code or trap cause
+        li    t0, WAIT_KILLED
+        beq   a0, t0, killed
         br3   a0, prompt, faulted      # negative cannot happen: it is ours
         beqz  s3, prompt               # exited with 0: nothing to say
         la    a1, sh_exited
         j     2f
+killed: la    a1, sh_killed
+        li    a0, SYS_PUTS
+        sys
+        j     newline
 faulted:
         la    a1, sh_faulted
 2:      li    a0, SYS_PUTS
@@ -464,10 +481,12 @@ sh_programs:
         .word sh_hello, 3
         .word sh_fail, 4
         .word sh_pingpong, 5
+        .word sh_spin, 6
         .word 0
 
 sh_hello:    .string "hello"
 sh_fail:     .string "fail"
+sh_spin:     .string "spin"
 sh_pingpong: .string "pingpong"
 sh_exit:     .string "exit"
 sh_ls:       .string "ls"
@@ -480,6 +499,8 @@ sh_unknown:  .string "sh: no such program: "
 sh_nostart:  .string "sh: cannot start it: "
 sh_exited:   .string "sh: exit "
 sh_faulted:  .string "sh: fault "
+sh_killed:   .string "sh: killed"
+sh_cancel:   .string "^C\n"
 sh_cantread: .string "sh: cannot read the filesystem: "
 sh_cantwrite: .string "sh: cannot write the disk: "
 sh_nofile:   .string "sh: no such file: "

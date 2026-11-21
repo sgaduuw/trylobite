@@ -41,8 +41,10 @@ Milestone 3 works too: the kernel can start a shell instead. `shell.s`
 builds it with `sh` as program 0, which reads a line from the console,
 runs the program it names, waits for it and says how it ended. It knows
 `hello`, `fail` (which exits with 3), `pingpong` (the demo above, as a
-program), the built-in `exit` and the file built-ins further down, and
-stops at the end of its input:
+program), `spin` (a runaway that loops for ever), the built-in `exit`
+and the file built-ins further down, and stops at the end of its input.
+Ctrl-C ends the program the shell is waiting for, and at the prompt
+drops the line typed so far:
 
 ```bash
 printf 'hello\nfail\nexit\n' > session.txt
@@ -119,20 +121,21 @@ it, or else the one on the PATH is used.
 | `include/layout.s` | every shared constant: memory map, page-table flags, system calls, the process record |
 | `firmware/boot.s` | ring +1: delegate exceptions, enter the kernel |
 | `kernel/entry.s` | kernel start: traps, process table, timer |
-| `kernel/trap.s` | trap entry and exit, faults, panics |
+| `kernel/trap.s` | trap entry and exit, faults, kills, panics |
 | `kernel/syscall.s` | the system calls |
 | `kernel/sched.s` | round-robin scheduling, halting |
 | `kernel/mm.s` | the page allocator, spawning and releasing processes |
-| `kernel/wait.s` | `wait`, and what happens to a process once it has ended |
+| `kernel/wait.s` | `wait`, `kill`, and what happens to a process once it has ended |
+| `kernel/input.s` | console input: the kernel's buffer, `getc`, the foreground process and Ctrl-C |
 | `kernel/console.s` | kernel console output |
 | `kernel/data.s` | the process table, buffers, messages |
 | `kernel/pagetables.s` | the boot address space and the kernel's shared leaf table |
 | `kernel/lock.s` | the kernel lock |
 | `kernel/harts.s` | starting the other harts, waking an idle one |
 | `include/kernel.s` | firmware and kernel together, without programs: included by a build such as `demo.s`, not run on its own |
-| `user/` | `init` (program 0 of the demo), `ping` (1) and `pong` (2); `sh` (program 0 of the shell build), `hello` (3), `fail` (4) and `pingpong` (5) |
+| `user/` | `init` (program 0 of the demo), `ping` (1) and `pong` (2); `sh` (program 0 of the shell build), `hello` (3), `fail` (4), `pingpong` (5) and `spin` (6) |
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
-| `shell.s` | the same machine, starting the shell, with all six programs |
+| `shell.s` | the same machine, starting the shell, with all seven programs |
 | `docs/filesystem.md` | the on-disk format of the filesystem |
 | `tools/fs.py` | builds and reads filesystem images on the host |
 | `tests/` | the tests, and a harness that builds the kernel with test programs |
@@ -176,9 +179,11 @@ result comes back in `a0`.
 | 7 | `spawn(program)` | the new process's number; −1 no free slot, −2 no such program, −3 not enough memory |
 | 8 | `hart()` | the number of the hart running the caller, −4 to +4 |
 | 9 | `getc()` | the next code point of console input, waiting for one; negative once no more will come |
-| 10 | `wait(pid)` | how child `pid` ended, once it has: `a0` 0 exited or 1 faulted, `a1` its exit code or trap cause; `a0` −2 if `pid` is not the caller's child |
+| 10 | `wait(pid)` | how child `pid` ended, once it has: `a0` 0 exited, 1 faulted or 2 killed, `a1` its exit code, trap cause, or 0 when killed; `a0` −2 if `pid` is not the caller's child |
 | 11 | `bread(block)` | reads the block into the block window: 0; −1 the disk failed, −2 no such block (or no disk), −3 no memory for the window |
 | 12 | `bwrite(block)` | writes the block window to the block: as `bread` |
+| 13 | `kill(pid)` | ends child `pid` before it runs again: 0; −2 if `pid` is not the caller's child |
+| 14 | `foreground(pid)` | gives the console to child `pid`, so that Ctrl-C kills it, or to nobody with `NO_FOREGROUND` (−1): 0; −2 if `pid` is not the caller's child |
 
 A call whose result is a status, or a value that is never negative,
 reports failure with a negative number; `include/layout.s` names each
@@ -195,6 +200,15 @@ hart while it waits. `detrytus run --input FILE` closes the console behind
 the file, so `getc` returns `GETC_NONE` at its end; in `detrytus debug`
 the console stays open, `input TEXT` types more while a program waits, and
 `eof` closes it.
+
+Ctrl-C (code point 3) kills the console's **foreground process**, which
+`foreground` names; the shell gives it each program it runs, and the
+kernel takes the console back when that process ends. To see a Ctrl-C
+while nobody reads, the kernel reads console input into a buffer of its
+own, but only while a reader waits (as much as the readers need) or a
+foreground process runs (all of it). Ctrl-C throws away what was typed
+before it, as a terminal does; with no foreground process it is an
+ordinary code point.
 
 A block is one page, and a process's own page holds its code, so the disk
 is reached through a **block window**: a second page, at `V_BLOCK` just

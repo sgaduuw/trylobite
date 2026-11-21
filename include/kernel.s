@@ -5,7 +5,7 @@
 # program 0; programs start others with SYS_SPAWN.
 
         .assert defined(RAM_PAGES) * defined(NPROG), "include/kernel.s is not run on its own: run a file that sets RAM_PAGES and NPROG and includes it, such as demo.s or shell.s"
-        .assert (NPROG >= 1) * (NPROG <= 6), "NPROG says how many programs the build adds, from 1 to 6"
+        .assert (NPROG >= 1) * (NPROG <= 9), "NPROG says how many programs the build adds, from 1 to 9"
 
         .include "layout.s"
         .include "../firmware/boot.s"            # the boot page, from address 0
@@ -24,6 +24,7 @@
         .include "../kernel/lock.s"
         .include "../kernel/harts.s"
         .include "../kernel/devices.s"
+        .include "../kernel/input.s"
 
         .include "../kernel/data.s"
         .include "../kernel/pagetables.s"

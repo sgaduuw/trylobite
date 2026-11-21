@@ -469,6 +469,39 @@ extended.
 numbers from `include/layout.s`, and a test checks it agrees with the
 assembler about each of them.
 
+### 2026-11-21 · Ctrl-C and kill, rather than pre-emption
+
+The owner asked for pre-emptive scheduling so that a runaway process
+cannot freeze the others. The kernel had it already (`on_timer`, and a
+test with a spinner that never makes a system call), so what a runaway
+still froze was the shell, waiting for it with no way to end it. The
+owner picked Ctrl-C from a short list (with fairer scheduling and
+stopping there).
+
+- **A killed process ends the next time the kernel would run it**:
+  `kill_pid` sets `PCB_KILLED`, and `ktrap` and `resume` end a marked
+  process (`on_kill`, then `release` as for a fault). A process running
+  on another hart cannot be freed under it, and a timer slice bounds
+  the wait. One blocked in `recv`, `wait` or `getc` is made ready so it
+  gets there; one in the disk queue keeps its place, since the disk may
+  be writing its block window. `wait` reports `WAIT_KILLED`.
+- **Only a parent can kill**, the same rule as `wait`: no permissions
+  exist yet, and a child is what a parent can name.
+- **The console has a foreground process**, set by `foreground`, a
+  child of the caller; the kernel clears it when that process ends. An
+  ended child is not accepted: its number may come back as another
+  process's before the foreground is cleared.
+- **Input goes through a kernel buffer**, because the shell is in
+  `wait`, not `getc`, while its program runs, and someone must read the
+  console to see a Ctrl-C. The kernel reads only while there is a
+  foreground process (all of it, looking for Ctrl-C) or readers wait (no
+  more than they need). Reading eagerly would pull input queued with
+  `--input` into the buffer before the program it was typed for starts,
+  and a Ctrl-C with it.
+- **Ctrl-C flushes what came before it**, as a terminal does, and is an
+  ordinary code point with no foreground process: the shell uses that at
+  its prompt to drop a line.
+
 ### 2026-11-21 · A timer slice starts when a process is resumed
 
 `on_timer` used to be the only place that armed the next slice, so the
