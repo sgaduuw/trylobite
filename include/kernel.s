@@ -1,12 +1,13 @@
 # The firmware and the kernel, without programs: not something to run on
-# its own. Include it from a file that first defines RAM_PAGES and then
-# adds programs in sections prog0 to prog2, each loaded at P_PROGn * PAGE
-# and run at V_USER (see demo.s). The kernel starts program 0; programs
-# start others with SYS_SPAWN.
+# its own. Include it from a file that first defines RAM_PAGES and NPROG,
+# then adds NPROG programs in sections prog0, prog1 and so on, each loaded
+# at P_PROGn * PAGE and run at V_USER (see demo.s). The kernel starts
+# program 0; programs start others with SYS_SPAWN.
 
         # Assembled on its own, this is the first error, and the assembler
         # prints the line with its comment.
         .equ  KERNEL_RAM_PAGES, RAM_PAGES   # run a file that sets RAM_PAGES and includes this one, such as demo.s
+        .equ  KERNEL_NPROG, NPROG           # the build says how many programs it adds, from 1 to 6
 
         .include "layout.s"
         .include "../firmware/boot.s"            # the boot page, from address 0

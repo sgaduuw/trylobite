@@ -17,9 +17,11 @@
         .equ  P_KLEAF,    5               # the kernel's leaf table, shared by all
         .equ  P_PROG0,    6               # program images, as loaded: the kernel
         .equ  P_PROG1,    7               # copies one into a fresh page for
-        .equ  P_PROG2,    8               # each process it spawns
-        .equ  NPROG,      3
-        .equ  P_FREE,     9               # pages from here to RAM_PAGES are free
+        .equ  P_PROG2,    8               # each process it spawns. NPROG of
+        .equ  P_PROG3,    9               # them, as the build declares
+        .equ  P_PROG4,   10
+        .equ  P_PROG5,   11
+        .equ  P_FREE, P_PROG0 + NPROG     # pages from here to RAM_PAGES are free
         .equ  POWER_PA, -2 * PAGE         # power-off register, for firmware
 
 # --- virtual memory ------------------------------------------------------------

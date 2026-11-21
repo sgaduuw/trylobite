@@ -4,6 +4,7 @@
 #   detrytus run demo.s --ram-pages 40 --harts 3
 
         .equ  RAM_PAGES, 40            # the machine this build is for
+        .equ  NPROG, 3                 # init, ping and pong
 
         .include "include/kernel.s"
         .include "user/init.s"
