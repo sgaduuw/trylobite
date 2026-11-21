@@ -7,7 +7,8 @@ kentry:
         mv    tp, a1                   # the hart's number, from the firmware
         la    t0, ktrap
         csrw  stvec, t0
-        csrw  sscratch, zero           # zero while in the kernel (see ktrap)
+        li    t0, 0                    # csrw from zero would only read
+        csrw  sscratch, t0             # zero while in the kernel (see ktrap)
         call  klock_take               # the other harts wait until init runs
         la    sp, kstack_top
         la    a0, msg_boot
@@ -29,7 +30,8 @@ ksecondary:
         mv    tp, a1
         la    t0, ktrap
         csrw  stvec, t0
-        csrw  sscratch, zero
+        li    t0, 0
+        csrw  sscratch, t0
         call  klock_take
         la    sp, kstack_top
         call  timer_on

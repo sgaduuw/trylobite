@@ -67,6 +67,9 @@ pipe.
   that slot in the new epoch.
 - **`RAM_PAGES` belongs to the build**, not to `include/layout.s`: each
   top-level file (demo, tests) states the machine it targets.
+- **Writing zero to a CSR needs a register holding 0.** A CSR
+  instruction whose source is `r0` only reads (detrytus isa.md 7.12), so
+  `csrw sie, zero` changes nothing: `li t0, 0` first.
 - **User memory is only read with `SUA` on, and only after checking the
   address lies in the process's page.**
 - **Comments explain why.** No em-dashes or double hyphens in prose.

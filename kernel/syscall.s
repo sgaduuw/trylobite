@@ -64,7 +64,8 @@ sys_puts:
         sw    t0, 0(t5)
         addi  a1, a1, 1
         j     1b
-3:      csrw  ststatus, zero           # SUA off again
+3:      li    t0, 0
+        csrw  ststatus, t0             # SUA off again
         li    a0, 0
         j     sys_return
 2:      li    a0, -2

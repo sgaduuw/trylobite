@@ -37,7 +37,8 @@ ktrap:
         sw    t0, 0(sp)                # the user's sp
         csrr  t0, stpc
         sw    t0, PCB_PC(sp)
-        csrw  sscratch, zero
+        li    t0, 0                    # csrw from zero would only read
+        csrw  sscratch, t0
         mv    s0, sp                   # s0: the current process, from here on
         lw    tp, PCB_HART(s0)         # tp: this hart's number (see resume)
         call  klock_take

@@ -1,7 +1,9 @@
 """Several harts: processes run on them at once, idle ones are woken,
 and only the middle nine are used."""
 
-from tests.kernel import SPAWN_BOTH, exit_with, run
+import re
+
+from tests.kernel import SPAWN_BOTH, build, detrytus, exit_with, run
 
 
 def spin_then_hart(rounds: int = 20000) -> str:
@@ -183,3 +185,19 @@ msg:    .string "A\\n"
     assert [c for p, c in result.exits() if p == 1] == [-1, -1]
     assert result.console.count("A\n") == 1
     assert result.console.count("B\n") == 5
+
+
+def test_harts_waiting_for_the_kernel_lock_sleep():
+    # Two children keep two harts busy, so their traps meet at the lock.
+    # Waiting in wrs, a hart runs a handful of instructions per wait;
+    # spinning on the lock word, it runs some every step it waits. Spinning
+    # cost over 100000 instructions here; sleeping costs under 20000.
+    image = build(SPAWN_BOTH, SPIN_THEN_HART, SPIN_THEN_HART)
+    done = detrytus(
+        "run", "--ram-pages", "40", "--harts", "3", "--trace", str(image.path)
+    )
+    assert done.returncode == 0, done.stderr[-300:]
+    start, end = image.labels["klock_take"], image.labels["klock_give"]
+    pcs = re.findall(r"^\[\s*-?\d+\s+(-?\d+) r", done.stderr, re.M)
+    in_lock = sum(1 for pc in pcs if start <= int(pc) < end)
+    assert 0 < in_lock < 30_000, in_lock
