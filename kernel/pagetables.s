@@ -11,7 +11,9 @@
 
 # The kernel's leaf table, shared by every address space: kernel pages are
 # global, so one copy serves them all.
-        .org  P_KLEAF * PAGE - 21
+        .org  P_KLEAF * PAGE - 27
+        .word PTE_LEAF + PTE_R + PTE_W + PTE_G + PTE_A + PTE_D - 14 * PAGE # -9 block device
+        .word PTE_LEAF + PTE_R + PTE_W + PTE_G + PTE_A + PTE_D - 13 * PAGE # -8 interrupts
         .word PTE_LEAF + PTE_R + PTE_W + PTE_G + PTE_A + PTE_D - 3 * PAGE  # -7 hart slots
         .word PTE_LEAF + PTE_R + PTE_W + PTE_G + PTE_A + PTE_D - 4 * PAGE  # -6 this hart
         .word PTE_LEAF + PTE_R + PTE_W + PTE_G + PTE_A + PTE_D - 2 * PAGE  # -5 power

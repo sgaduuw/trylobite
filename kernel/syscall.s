@@ -75,17 +75,24 @@ sys_puts:
 2:      li    a0, E_RANGE
         j     sys_return
 
-# getc(): the next code point from the console, or GETC_NONE. Code points
-# are never negative, so the device's own "none" is any negative value;
-# the kernel passes on GETC_NONE rather than whatever the device chose.
-# It does not wait: with no interrupt from the console, waiting would mean
-# polling it on every timer tick.
+# getc: the next code point, or GETC_NONE once the console is closed. With
+# nothing yet, sleep until console input wakes us (devices.s). Code points
+# are never negative; the kernel passes on GETC_NONE rather than whatever
+# negative value the device chose.
 sys_getc:
         li    t0, V_CONSOLE
         lw    a0, CONSOLE_IN(t0)
         bgez  a0, sys_return
-        li    a0, GETC_NONE
+        li    t0, CONSOLE_EMPTY
+        beq   a0, t0, 1f
+        li    a0, GETC_NONE            # closed, or any other negative: none
         j     sys_return
+1:      li    t0, ST_GETC
+        sw    t0, PCB_STATE(s0)
+        li    t0, V_IRQ + 9 * SRC_CONSOLE
+        li    t1, 1
+        sw    t1, IRQ_ENABLE(t0)       # level-triggered: input already here
+        j     schedule                 # interrupts at once
 
 # send(pid, value): deliver straight to a receiver that is waiting, else
 # leave the value in its one-slot mailbox, else report the mailbox full.

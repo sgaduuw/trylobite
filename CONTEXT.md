@@ -350,3 +350,30 @@ session is a file fed with `detrytus run --input`, the same every run.
 - **Not tested:** the shell's report of a faulting program, since none
   of the six programs faults. The kernel side, `wait` returning
   `WAIT_FAULTED`, has its own test.
+
+### 2026-11-21 · getc waits for input
+
+detrytus now has an interrupt controller and tells "nothing yet"
+(`CONSOLE_EMPTY`) from "nothing ever" (`CONSOLE_CLOSED`), the two things
+the first `getc` lacked (see above). `getc` now sleeps on the first and
+returns `GETC_NONE` only on the second.
+
+- **A reader blocks as `ST_GETC`** and the console source is enabled; it
+  is level-triggered, so input that came in between is not lost. The
+  source is masked again once nobody waits, so a closed console (which
+  stays pending) does not interrupt for ever.
+- **Hart 0 serves every device source**, as it serves hot-plug events:
+  the controller routes to hart 0 at reset, and hart 0 already takes the
+  external interrupt, in user mode (`on_external`) and in `idle`. One
+  place to look, and no routing to change when harts come and go.
+- **On an interrupt, the reader goes to the ready queue** and the
+  interrupted process carries on, as for hot-plug events. Each waiting
+  reader gets one code point, in table order; once the console is
+  closed, all of them get `GETC_NONE`.
+- **Waiting readers are not a deadlock**, and not "all exited": while one
+  waits, a hart with nothing to run idles for an interrupt. Under `run`
+  this never happens, since the console is closed behind the input.
+- **Tested in the debugger**, which keeps the console open: a session
+  steps until the program waits, types with `input`, and ends with `eof`.
+  `Run.words` reruns in the debugger, so it closes the console first, as
+  `run` does.

@@ -158,9 +158,11 @@ class Run:
     def words(self, addresses: list[int]) -> list[int | None]:
         """Words of physical memory once the program has stopped, each
         centred on an address; None where nothing is mapped. The debugger
-        runs the image to the same end and reads them with xp."""
+        runs the image to the same end and reads them with xp. It closes
+        the console first, as run does, so getc ends at the end of the
+        input rather than waiting for more."""
         script = _WORK / f"read{next(_names)}.txt"
-        script.write_text("continue\n" + "".join(f"xp {a} 1\n" for a in addresses))
+        script.write_text("eof\ncontinue\n" + "".join(f"xp {a} 1\n" for a in addresses))
         done = detrytus(
             "debug",
             str(self.image.path),
@@ -215,6 +217,31 @@ def input_options(text: str | None) -> list[str]:
     path = _WORK / f"input{next(_names)}.txt"
     path.write_text(text)
     return ["--input", str(path)]
+
+
+def debug_session(
+    image: Image, script: str, harts: int | None = None, ram_pages: int = RAM_PAGES
+) -> str:
+    """Run an image in the debugger under script's commands, and return
+    what it printed: its replies and the program's output, in order.
+    Unlike run, the console stays open until the script says eof, so
+    `input` can type more while the program waits."""
+    harts = HARTS if harts is None else harts
+    path = _WORK / f"session{next(_names)}.txt"
+    path.write_text(script)
+    done = detrytus(
+        "debug",
+        str(image.path),
+        "--ram-pages",
+        str(ram_pages),
+        "--harts",
+        str(harts),
+        "-x",
+        str(path),
+        "--batch",
+    )
+    assert done.returncode == 0, done.stderr
+    return done.stdout
 
 
 def run_image(
