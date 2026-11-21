@@ -107,7 +107,7 @@ def send_to_2(value: int) -> str:
         li    a1, 2
         li    a2, {value}
         sys
-        li    t0, -2
+        li    t0, E_NOPROC
         bne   a0, t0, 2f
         li    a0, SYS_YIELD
         sys
@@ -146,6 +146,7 @@ class Run:
     harts: int
     steps: int | None  # None if it was still running at the step limit
     hotplug: list[str]  # the --plug and --unplug options it ran with
+    input_options: list[str]  # --input FILE, if it was given console input
 
     def words(self, addresses: list[int]) -> list[int | None]:
         """Words of physical memory once the program has stopped, each
@@ -161,6 +162,7 @@ class Run:
             "--harts",
             str(self.harts),
             *self.hotplug,
+            *self.input_options,
             "-x",
             str(script),
             "--batch",
@@ -198,6 +200,16 @@ def hotplug_options(plug: list[tuple[int, int]], unplug: list[tuple[int, int]]):
     return options
 
 
+def input_options(text: str | None) -> list[str]:
+    """--input with a file holding text, so that a debugger run reading
+    memory afterwards gets the same input; none for None."""
+    if text is None:
+        return []
+    path = _WORK / f"input{next(_names)}.txt"
+    path.write_text(text)
+    return ["--input", str(path)]
+
+
 def run_image(
     image: Image,
     ram_pages: int = RAM_PAGES,
@@ -205,9 +217,12 @@ def run_image(
     harts: int | None = None,
     plug: list[tuple[int, int]] = (),
     unplug: list[tuple[int, int]] = (),
+    input: str | None = None,
 ) -> Run:
+    """Run an image; input, if given, is what the console has to read."""
     harts = HARTS if harts is None else harts
     hotplug = hotplug_options(plug, unplug)
+    inputs = input_options(input)
     done = detrytus(
         "run",
         "--stats",
@@ -218,6 +233,7 @@ def run_image(
         "--harts",
         str(harts),
         *hotplug,
+        *inputs,
         str(image.path),
     )
     code: int | None = None
@@ -228,7 +244,7 @@ def run_image(
         m = re.search(r"detrytus: (\d+) steps, exit (-?\d+)", done.stderr)
         assert m, done.stderr
         steps, code = int(m.group(1)), int(m.group(2))
-    return Run(done.stdout, code, image, ram_pages, harts, steps, hotplug)
+    return Run(done.stdout, code, image, ram_pages, harts, steps, hotplug, inputs)
 
 
 def run(
@@ -240,6 +256,7 @@ def run(
     harts: int | None = None,
     plug: list[tuple[int, int]] = (),
     unplug: list[tuple[int, int]] = (),
+    input: str | None = None,
 ) -> Run:
     image = build(init, prog1, prog2, ram_pages)
-    return run_image(image, ram_pages, max_steps, harts, plug, unplug)
+    return run_image(image, ram_pages, max_steps, harts, plug, unplug, input)

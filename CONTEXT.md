@@ -262,3 +262,30 @@ still held the user's stack pointer, and a trap inside the kernel would
 have saved registers there instead of reaching `kpanic`. `puts` meant to
 turn SUA off the same way (harmless: `resume` rewrites `ststatus`). Each
 now writes from a register holding 0, and AGENTS.md says so.
+
+### 2026-11-21 · getc, and failures that are negative by name
+
+Milestone 3 is a shell, and a shell reads what is typed. `getc` (9)
+returns the next code point from the console, which detrytus now feeds
+from `run --input FILE` (pin 3aa4f85).
+
+- **Negative means no character.** A code point is never negative, so
+  the sign alone tells a character from none, and one `br3` separates
+  none, NUL and a character. The owner asked whether returning −1 would
+  confuse anyone on a machine where −1 is as ordinary a value as 0 or
+  1: it would, as a magic number. So the rule is the sign, and the value
+  has a name, `GETC_NONE`. The kernel returns that name rather than
+  whatever negative value the device used.
+- **It does not wait.** Nothing tells the kernel that input arrived, so
+  a blocking `getc` would have to poll the console on every timer tick,
+  and deadlock detection would need to know about it. With all input
+  fed up front, none now means none ever. A blocking `getc` can come
+  with a console interrupt from detrytus, and may then add a second
+  negative value for "would block".
+- **Every error code has a name.** The kernel wrote failures as bare
+  literals, and −1 meant three things: no such call, mailbox full, no
+  free slot. They are now `E_NOCALL`, `E_FULL`, `E_NOSLOT` and so on in
+  `include/layout.s`, with the same values, so nothing a program sees
+  changes. The rule, in AGENTS.md: a result that is a status or never
+  negative reports failure as a negative name; a result that can be any
+  word (`recv`, and soon `wait`'s exit code) carries no failure in it.

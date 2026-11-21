@@ -26,7 +26,9 @@ on_syscall:
         beq   a0, t0, sys_spawn
         li    t0, SYS_HART
         beq   a0, t0, sys_hart
-        li    a0, -1                   # no such call
+        li    t0, SYS_GETC
+        beq   a0, t0, sys_getc
+        li    a0, E_NOCALL
 
 sys_return:                            # a0: the result
         sw    a0, PCB_A0(s0)
@@ -68,7 +70,19 @@ sys_puts:
         csrw  ststatus, t0             # SUA off again
         li    a0, 0
         j     sys_return
-2:      li    a0, -2
+2:      li    a0, E_RANGE
+        j     sys_return
+
+# getc(): the next code point from the console, or GETC_NONE. Code points
+# are never negative, so the device's own "none" is any negative value;
+# the kernel passes on GETC_NONE rather than whatever the device chose.
+# It does not wait: with no interrupt from the console, waiting would mean
+# polling it on every timer tick.
+sys_getc:
+        li    t0, V_CONSOLE
+        lw    a0, CONSOLE_IN(t0)
+        bgez  a0, sys_return
+        li    a0, GETC_NONE
         j     sys_return
 
 # send(pid, value): deliver straight to a receiver that is waiting, else
@@ -92,7 +106,7 @@ sys_send:
         sw    t0, PCB_FULL(s1)
         li    a0, 0
         j     sys_return
-1:      li    a0, -2                   # no such process
+1:      li    a0, E_NOPROC
         j     sys_return
 2:      sw    a2, PCB_A0(s1)           # its recv returns the value
         li    t0, ST_READY
@@ -100,7 +114,7 @@ sys_send:
         call  wake_one                 # a hart waiting for work can run it
         li    a0, 0
         j     sys_return
-3:      li    a0, -1                   # mailbox full
+3:      li    a0, E_FULL
         j     sys_return
 
 # recv(): take the waiting message, or block until send delivers one.

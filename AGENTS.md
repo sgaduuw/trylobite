@@ -41,6 +41,14 @@ pipe.
   numbers, page-table flags, system-call numbers, process-record offsets.
   The firmware, the kernel, user programs and tests all read them from
   there; never repeat one as a literal.
+- **Failures are negative, and tested by sign or by name.** A system
+  call whose result is a status or a non-negative value reports failure
+  with a negative number named in `include/layout.s` (`E_...`,
+  `GETC_NONE`). Return those names, and compare with them or test the
+  sign; never write a bare −1, which on a balanced machine is an
+  ordinary value. A call whose result can be any word (`recv`, an exit
+  code) cannot also carry a failure in it: give it a separate status, or
+  no failure at all.
 - **Labels are run addresses.** Each kernel and user section is loaded
   at a physical address and runs at a virtual one
   (`.section NAME, LOAD, RUN`), so every label is the address the code

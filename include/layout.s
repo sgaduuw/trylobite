@@ -35,6 +35,8 @@
         .equ  V_HART,    -6 * PAGE        # ... and this hart's own
         .equ  V_POWER,   -5 * PAGE        # power-off register
         .equ  V_CONSOLE, -4 * PAGE        # console output register
+        .equ  CONSOLE_IN, 3               # with V_CONSOLE: the next input code
+                                          # point, or a negative value if none
         .equ  V_USER, SUPER               # every process runs from here
         .equ  USER_SP, V_USER + 9843      # just above its page; the first push
                                           # lands at the page's top word
@@ -89,20 +91,38 @@
                                           # to leave), 0 if none
 
 # --- system calls: number in a0, arguments in a1 and a2, result in a0 -------
+#
+# A call whose result is a status, or a value that is never negative (a
+# process number, a code point), reports failure with a negative number.
+# Test the sign, or compare with the names below; never with a bare -1,
+# which on this machine is as ordinary a value as any. A call whose result
+# can be any word (recv, hart) has no failure to report: a negative result
+# there is a value.
 
         .equ  SYS_PUTC,   0               # print code point a1
         .equ  SYS_SEND,   1               # give a2 to process a1: 0 sent,
-                                          # -1 its mailbox is full, -2 no such process
+                                          # E_FULL, E_NOPROC
         .equ  SYS_RECV,   2               # wait for a message; a0 = the value
         .equ  SYS_YIELD,  3               # let another process run
         .equ  SYS_EXIT,   4               # stop with exit code a1
         .equ  SYS_GETPID, 5               # a0 = this process's number
         .equ  SYS_PUTS,   6               # print the string at a1, whole: 0 done,
-                                          # -2 the address is outside the process
+                                          # E_RANGE
         .equ  SYS_SPAWN,  7               # start program a1: its process number,
-                                          # -1 no free slot, -2 no such program,
-                                          # -3 not enough memory
-        .equ  SYS_HART,   8               # a0 = the hart running the caller
+                                          # E_NOSLOT, E_NOPROG, E_NOMEM
+        .equ  SYS_HART,   8               # a0 = the hart running the caller,
+                                          # -4 to +4
+        .equ  SYS_GETC,   9               # a0 = the next code point typed, or
+                                          # GETC_NONE when there is none
+
+        .equ  E_NOCALL,  -1               # no system call with that number
+        .equ  E_FULL,    -1               # send: the receiver's mailbox is full
+        .equ  E_NOPROC,  -2               # send: no such process
+        .equ  E_RANGE,   -2               # puts: the address is outside the process
+        .equ  E_NOSLOT,  -1               # spawn: the process table is full
+        .equ  E_NOPROG,  -2               # spawn: no such program
+        .equ  E_NOMEM,   -3               # spawn: not enough free pages
+        .equ  GETC_NONE, -1               # getc: no input; any negative means none
 
 # --- the process table ---------------------------------------------------------
 # One record per process, in words. Register r is saved at 3 * (r + 13), so
