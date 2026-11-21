@@ -8,6 +8,36 @@
         .compress
 # wait(pid): how child pid ended, in a0 and a1; block until it has.
 sys_wait:
+        call  find_child
+        bltz  a0, sys_return
+        lw    t0, PCB_STATE(s1)
+        li    t1, ST_ZOMBIE
+        bne   t0, t1, 1f
+        lw    t0, PCB_A1(s1)           # it has ended: reap it
+        sw    t0, PCB_A1(s0)
+        lw    a0, PCB_A0(s1)
+        sw    zero, PCB_STATE(s1)
+        j     sys_return
+1:      li    t0, ST_WAIT              # its bury hands over a0 and a1
+        sw    t0, PCB_STATE(s0)
+        j     schedule
+
+# kill(pid): end child pid. It goes the next time the kernel would run
+# it, which for one running on another hart is its next trap, within a
+# timer slice; its parent's wait then reports WAIT_KILLED.
+sys_kill:
+        call  find_child
+        bltz  a0, sys_return
+        mv    a0, a1
+        call  kill_pid
+        li    a0, 0
+        j     sys_return
+
+# find_child: s1 = the record of process a1, and a0 = 0, if it is a child
+# of the process in s0 (ended or not); else a0 = E_NOCHILD. Clobbers t0, t1.
+find_child:
+        addi  sp, sp, -3
+        sw    ra, 0(sp)
         call  current_pid              # a0: the caller's number
         bltz  a1, 8f
         li    t0, NPROC
@@ -20,18 +50,36 @@ sys_wait:
         beqz  t0, 8f                   # a free slot is nobody's child
         lw    t1, PCB_PARENT(s1)
         bne   t1, a0, 8f
-        li    t1, ST_ZOMBIE
-        bne   t0, t1, 1f
-        lw    t0, PCB_A1(s1)           # it has ended: reap it
-        sw    t0, PCB_A1(s0)
-        lw    a0, PCB_A0(s1)
-        sw    zero, PCB_STATE(s1)
-        j     sys_return
-1:      li    t0, ST_WAIT              # its bury hands over a0 and a1
-        sw    t0, PCB_STATE(s0)
-        j     schedule
+        li    a0, 0
+        j     9f
 8:      li    a0, E_NOCHILD
-        j     sys_return
+9:      lw    ra, 0(sp)
+        addi  sp, sp, 3
+        ret
+
+# kill_pid: mark process a0 killed, if it has not ended; on_kill ends it
+# the next time the kernel would run it (ktrap, resume). One blocked in
+# recv, wait or getc is made ready for that, since nothing else would
+# wake it; one in the disk queue keeps its place, because the disk may be
+# writing into its block window. Clobbers a0 and t0..t3.
+kill_pid:
+        li    t0, PCB_SIZE
+        mul   t0, a0, t0
+        la    t1, procs
+        add   t0, t0, t1               # t0: its record
+        lw    t1, PCB_STATE(t0)
+        beqz  t1, 9f                   # already gone
+        li    t2, ST_ZOMBIE
+        beq   t1, t2, 9f
+        li    t2, 1
+        sw    t2, PCB_KILLED(t0)
+        bgtz  t1, 9f                   # ready or running: it goes when next run
+        li    t2, ST_DISK
+        beq   t1, t2, 9f               # disk_irq readies it
+        li    t2, ST_READY
+        sw    t2, PCB_STATE(t0)
+        j     wake_one                 # returns to our caller
+9:      ret
 
 # bury: the process in s0 has ended and its pages are free. Orphan its
 # children, freeing those already ended, since nobody can wait for them
@@ -41,7 +89,12 @@ sys_wait:
 bury:
         call  current_pid
         mv    t4, a0                   # t4: its number
-        la    s1, procs
+        lw    t0, foreground
+        bne   t0, t4, 0f
+        li    t0, NO_FOREGROUND        # the console goes back to nobody
+        sw    t0, foreground
+        call  console_arm
+0:        la    s1, procs
         li    t3, NPROC * PCB_SIZE
         add   t3, s1, t3               # t3: just past the table
 1:      lw    t0, PCB_PARENT(s1)

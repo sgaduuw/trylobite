@@ -21,6 +21,9 @@
         .equ  P_PROG3,    9               # them, as the build declares
         .equ  P_PROG4,   10
         .equ  P_PROG5,   11
+        .equ  P_PROG6,   12
+        .equ  P_PROG7,   13
+        .equ  P_PROG8,   14
         .equ  P_FREE, P_PROG0 + NPROG     # pages from here to RAM_PAGES are free
         .equ  POWER_PA, -2 * PAGE         # power-off register, for firmware
 
@@ -43,6 +46,9 @@
                                           # point, or one of these when there is none:
         .equ  CONSOLE_EMPTY, -1           # nothing yet: more may come
         .equ  CONSOLE_CLOSED, -2          # nothing more will come
+        .equ  CTRL_C, 3                   # typed while the console has a
+                                          # foreground process: kills it
+        .equ  CONIN_MAX, 81               # code points the kernel holds for getc
         .equ  V_USER, SUPER               # every process runs from here
         .equ  V_BLOCK, V_USER + PAGE      # its block window, once it uses the disk
         .equ  USER_GP, V_USER             # every process starts with gp here
@@ -154,6 +160,11 @@
                                           # V_BLOCK: 0 done, E_NOBLOCK, E_NOMEM, E_IO
         .equ  SYS_BWRITE, 12              # write the block window to block a1: the
                                           # same results
+        .equ  SYS_KILL,  13               # end child a1: 0 done (it ends before
+                                          # it runs again), E_NOCHILD
+        .equ  SYS_FOREGROUND, 14          # give the console to child a1, or to
+                                          # nobody with NO_FOREGROUND: Ctrl-C
+                                          # then kills it. 0 done, E_NOCHILD
 
         .equ  E_NOCALL,  -1               # no system call with that number
         .equ  E_FULL,    -1               # send: the receiver's mailbox is full
@@ -172,6 +183,7 @@
 # tells failure, exit and fault apart.
         .equ  WAIT_EXITED,  0             # a1 = the code it gave exit
         .equ  WAIT_FAULTED, 1             # a1 = the trap cause that ended it
+        .equ  WAIT_KILLED,  2             # a1 = 0: kill or Ctrl-C ended it
 
 # --- the process table ---------------------------------------------------------
 # One record per process, in words. Register r is saved at 3 * (r + 13), so
@@ -194,7 +206,9 @@
         .equ  PCB_HART,   108             # the hart running it (see resume)
         .equ  PCB_PARENT, 111             # the process that spawned it, or NO_PARENT
         .equ  PCB_BLOCKPG, 114            # its block window's page, or 0 for none
-        .equ  PCB_SIZE,   117
+        .equ  PCB_KILLED, 117             # 1 once killed: it ends the next time
+                                          # the kernel would run it
+        .equ  PCB_SIZE,   120
         .equ  PAGES_PER_PROCESS, 4
 
         .equ  ST_EXITED, 0                # also: a free slot
@@ -208,6 +222,7 @@
         .equ  ST_GETC,   -4               # blocked in SYS_GETC, until input comes
         .equ  ST_DISK,   -5               # blocked in SYS_BREAD or SYS_BWRITE, its
                                           # command in its saved a2 and block in a1
+        .equ  NO_FOREGROUND, -1           # SYS_FOREGROUND: the console is nobody's
         .equ  NO_PARENT, -1               # PCB_PARENT of init and of orphans:
                                           # process numbers are never negative
 

@@ -5,7 +5,7 @@
 #   detrytus run shell.s --ram-pages 40 --input session.txt
 
         .equ  RAM_PAGES, 40            # the machine this build is for
-        .equ  NPROG, 6                 # sh, ping, pong, hello, fail, pingpong
+        .equ  NPROG, 7                 # sh, ping, pong, hello, fail, pingpong, spin
 
         .include "include/kernel.s"
         .include "user/sh.s"
@@ -14,3 +14,4 @@
         .include "user/hello.s"
         .include "user/fail.s"
         .include "user/pingpong.s"
+        .include "user/spin.s"
