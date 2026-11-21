@@ -60,10 +60,42 @@ of `n` trytes has `⌈n / 19,683⌉` blocks.
 
 ## Data blocks
 
-A file's text is one code point per tryte, 1 to 9,841, from the block's
-first tryte (`BLOCK_T0`, −9,841) upward, continuing in the next block of
-its chain. Its size says where it ends; the rest of its last block is
-zero, so a program can `puts` a block that the file does not fill.
+A file is trytes, from the block's first tryte (`BLOCK_T0`, −9,841)
+upward, continuing in the next block of its chain. Its size says where
+it ends; the rest of its last block is zero. Two kinds of file use this:
+
+- **Text**: one code point per tryte, 1 to 9,841. Since the rest of the
+  last block is zero, a program can `puts` a block that the file does
+  not fill.
+- **Programs**: `EXEC_MAGIC` as the first word, then the program's
+  image, at most `EXEC_MAX` (9,843) trytes, so a program file is always
+  one block. The magic word's first tryte is negative, which no text
+  file's is.
+
+## Program files
+
+Every process runs from `V_USER`, so a program is assembled to run
+there and needs no relocating: its image is what it holds from
+`V_USER − 1` (the low tryte of its first word, at `V_USER`) upward. To
+start one, a program reads the file's first block into its block window
+and calls `spawnw` (15). The kernel checks the magic word, copies the
+image to `V_USER` in a fresh page, clears the rest of the page, and
+starts the new process at `V_USER` with `gp` at `USER_GP`, as `spawn`
+starts a built-in program. A block without the magic word gives
+`E_NOPROG`. The image includes the program's stack space: the stack
+starts at the top of the page and grows down towards the image.
+
+A program for the disk is a file of its own, assembled where it loads
+and runs:
+
+```asm
+        .include "../include/layout.s"
+        .compress
+        .section hello, V_USER, V_USER
+        .gp   USER_GP
+hello:  ...
+        .nocompress
+```
 
 ## Changing it
 
@@ -93,12 +125,18 @@ tools/fs.py ls disk.img
 tools/fs.py put disk.img notes.txt notes
 tools/fs.py cat disk.img notes
 tools/fs.py rm disk.img notes
+detrytus asm hello.s -o hello.dti
+tools/fs.py put disk.img hello.dti       # a program file, named hello
 detrytus run shell.s --ram-pages 40 --disk disk.img
 ```
 
 Images are detrytus disk files, two bytes per tryte, as long as the
 filesystem. The tool checks the header and every chain when it opens
-one, and refuses a name or text that does not fit.
+one, and refuses a name or text that does not fit. Given an image
+assembled by `detrytus asm`, `put` and `new` store it as a program
+file, named after the image without `.dti`, and refuse one that does
+not lie between `V_USER − 1` and the top of the page. `cat` refuses a
+program file.
 
 ## Later
 

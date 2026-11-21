@@ -88,17 +88,45 @@ copy_page:
         ble   t4, t5, 1b
         ret
 
+# copy_exec: copy the image of the program file in physical page a1 (its
+# first block, from EXEC_IMAGE) into physical page a0 at V_USER, as far as
+# the page's top word. Clobbers t0..t2, t5.
+copy_exec:
+        li    t0, PAGE
+        mul   t1, a0, t0
+        mul   t2, a1, t0
+        li    t0, DMAP
+        add   t1, t1, t0               # the page's centre word: V_USER
+        add   t2, t2, t0
+        addi  t5, t1, 9840
+        addi  t2, t2, EXEC_IMAGE
+1:      lw    t0, 0(t2)
+        sw    t0, 0(t1)
+        addi  t2, t2, 3
+        addi  t1, t1, 3
+        ble   t1, t5, 1b
+        ret
+
 # do_spawn: start program a1 in a free slot, as a child of process a2 (or
 # NO_PARENT). a0 = its process number, or E_NOSLOT, E_NOPROG or E_NOMEM.
-# Clobbers a0..a2, s1..s5 and every t register; keeps s0.
+# Clobbers a0..a2, s1..s6 and every t register; keeps s0.
 do_spawn:
+        bltz  a1, 1f
+        li    t0, NPROG
+        bge   a1, t0, 1f
+        addi  s5, a1, P_PROG0          # s5: the program image's page
+        li    s6, 0                    # copied whole
+        j     spawn_page
+1:      li    a0, E_NOPROG
+        ret
+
+# spawn_page: start the program in physical page s5, as do_spawn does,
+# from a whole page image when s6 is 0 and from a program file's first
+# block (copy_exec) when s6 is 1. a0 = its process number, or E_NOSLOT or
+# E_NOMEM. Clobbers as do_spawn.
+spawn_page:
         addi  sp, sp, -3
         sw    ra, 0(sp)
-
-        bltz  a1, 8f
-        li    t0, NPROG
-        bge   a1, t0, 8f
-        addi  s5, a1, P_PROG0          # s5: the program image's page
 
         # Find a free slot, starting after the last one handed out, so a
         # process number is not reused until the table wraps: a message
@@ -138,10 +166,17 @@ do_spawn:
         call  alloc_page
         sw    a0, PCB_LEAFPG(s1)
         mv    s4, a0
+        bnez  s6, 4f
         call  take_page                # copied over whole: no need to clear it
         sw    a0, PCB_USERPG(s1)
         mv    a1, s5
         call  copy_page                # the program, into its own page
+        j     5f
+4:      call  alloc_page               # below V_USER it stays 0
+        sw    a0, PCB_USERPG(s1)
+        mv    a1, s5
+        call  copy_exec
+5:
 
         # Root entry 0 -> the mid table.
         mv    a0, s2
@@ -205,8 +240,6 @@ do_spawn:
         call  wake_one                 # a hart waiting for work can run it
         j     7f
 
-8:      li    a0, E_NOPROG
-        j     7f
 9:      li    a0, E_NOMEM
 7:      lw    ra, 0(sp)
         addi  sp, sp, 3

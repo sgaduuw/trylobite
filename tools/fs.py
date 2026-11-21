@@ -7,8 +7,10 @@
     tools/fs.py put IMAGE FILE [NAME]         add a file, or replace it
     tools/fs.py rm IMAGE NAME                 remove a file
 
-A file is text: each code point is one tryte, so it must lie between 1
-and 9,841. The image is a detrytus disk file, two bytes per tryte, so
+A file is text, each code point one tryte between 1 and 9,841, or a
+program: `put` given an image assembled by `detrytus asm` (a .dti file)
+stores it as a program file, which the shell can run. The image is a
+detrytus disk file, two bytes per tryte, so
 `detrytus run --disk IMAGE` attaches it. The format's numbers are read
 from include/layout.s, which the kernel and programs share.
 """
@@ -63,6 +65,7 @@ PAGE = L["PAGE"]
 HALF = PAGE // 2  # 9841: the largest tryte, and a block's last offset
 TRYTE_BYTES = 2
 BLOCK_BYTES = PAGE * TRYTE_BYTES
+DTI_MAGIC = b"DTI\x01"
 
 
 class FsError(Exception):
@@ -115,6 +118,62 @@ class Block:
         assert offset % 3 == 0, "words are aligned"
         i = offset + HALF
         self.trytes[i - 1 : i + 2] = split_word(value)
+
+
+# --- programs ---------------------------------------------------------------------
+
+
+def read_dti(data: bytes) -> list[tuple[int, list[int]]]:
+    """The segments of a detrytus image (.dti): each one's first address
+    and its trytes. Five trits to a byte, least significant first, each
+    byte sum((trit + 1) * 3^i); nine trits to a tryte."""
+    if data[:4] != DTI_MAGIC:
+        raise FsError("not a detrytus image")
+    (meta_len,) = struct.unpack_from("<I", data, 4)
+    pos = 8 + meta_len
+    (count,) = struct.unpack_from("<I", data, pos)
+    pos += 4
+    segments = []
+    for _ in range(count):
+        start, n = struct.unpack_from("<qI", data, pos)
+        pos += 12
+        size = -(-9 * n // 5)
+        trits = []
+        for byte in data[pos : pos + size]:
+            for _ in range(5):
+                trits.append(byte % 3 - 1)
+                byte //= 3
+        pos += size
+        trytes = [
+            sum(t * 3**i for i, t in enumerate(trits[9 * k : 9 * k + 9]))
+            for k in range(n)
+        ]
+        segments.append((start, trytes))
+    return segments
+
+
+def program_file(data: bytes) -> list[int]:
+    """A program file's trytes, from an assembled image: EXEC_MAGIC, then
+    the image, from V_USER - 1 to its last tryte, with any gap between its
+    segments zero. It must be assembled to load where it runs, and fit
+    between V_USER - 1 and the top of the page."""
+    low, high = L["V_USER"] - 1, L["V_USER"] - 1 + L["EXEC_MAX"]
+    image: list[int] = []
+    for start, trytes in read_dti(data):
+        if not low <= start <= start + len(trytes) <= high:
+            raise FsError(
+                f"a program loads and runs from V_USER ({L['V_USER']}) and has "
+                f"at most {L['EXEC_MAX']} trytes, but fills {start} to "
+                f"{start + len(trytes) - 1}"
+            )
+        at = start - low
+        image += [0] * (at + len(trytes) - len(image))
+        image[at : at + len(trytes)] = trytes
+    return split_word(L["EXEC_MAGIC"]) + image
+
+
+def is_program(trytes: list[int]) -> bool:
+    return len(trytes) >= 3 and join_word(trytes[:3]) == L["EXEC_MAGIC"]
 
 
 # --- the disk file -------------------------------------------------------------
@@ -245,15 +304,21 @@ class Filesystem:
             raise FsError(f"{entry.name}: {entry.size} trytes in {len(blocks)} blocks")
         return blocks
 
-    def read(self, name: str) -> str:
+    def read_trytes(self, name: str) -> list[int]:
         entry = self.find(name)
         if entry is None:
             raise FsError(f"no such file: {name}")
-        text = []
+        trytes = []
         for i, block in enumerate(self.chain(entry)):
             n = min(PAGE, entry.size - i * PAGE)
-            text += [chr(c) for c in self.blocks[block].trytes[:n]]
-        return "".join(text)
+            trytes += self.blocks[block].trytes[:n]
+        return trytes
+
+    def read(self, name: str) -> str:
+        trytes = self.read_trytes(name)
+        if is_program(trytes):
+            raise FsError(f"{name} is a program, not text")
+        return "".join(chr(c) for c in trytes)
 
     def remove(self, name: str) -> None:
         entry = self.find(name)
@@ -266,12 +331,16 @@ class Filesystem:
             self.head.set_tryte(at + L["DE_NAME"] + i, 0)
 
     def write(self, name: str, text: str) -> None:
-        """Add a file, or replace one of the same name."""
-        check_name(name)
+        """Add a text file, or replace one of the same name."""
         check_text(text, name)
+        self.write_trytes(name, [ord(c) for c in text])
+
+    def write_trytes(self, name: str, trytes: list[int]) -> None:
+        """Add a file of any trytes, or replace one of the same name."""
+        check_name(name)
         old = self.find(name)
         reusable = len(self.chain(old)) if old else 0
-        need = -(-len(text) // PAGE)
+        need = -(-len(trytes) // PAGE)
         if need > len(self.free_blocks()) + reusable:
             raise FsError(f"{name}: no room for {need} blocks")
         if old:
@@ -284,16 +353,27 @@ class Filesystem:
         for this, after in zip(blocks, [*blocks[1:], L["FAT_END"]], strict=False):
             self.set_fat(this, after)
         for i, block in enumerate(blocks):
-            chunk = [ord(c) for c in text[i * PAGE : (i + 1) * PAGE]]
+            chunk = trytes[i * PAGE : (i + 1) * PAGE]
             self.blocks[block].trytes = chunk + [0] * (PAGE - len(chunk))
         at = entry_at(slot)
         for i, c in enumerate(name):
             self.head.set_tryte(at + L["DE_NAME"] + i, ord(c))
-        self.head.set_word(at + L["DE_SIZE"], len(text))
+        self.head.set_word(at + L["DE_SIZE"], len(trytes))
         self.head.set_word(at + L["DE_FIRST"], blocks[0] if blocks else L["FAT_END"])
 
 
 # --- the command line --------------------------------------------------------------
+
+
+def put(fs: Filesystem, file: Path, name: str | None = None) -> None:
+    """Add a host file: an assembled image as a program, anything else as
+    text. Unless named, a program is called after its file without .dti,
+    and text after its file."""
+    data = file.read_bytes()
+    if data[:4] == DTI_MAGIC:
+        fs.write_trytes(name or file.name.removesuffix(".dti"), program_file(data))
+    else:
+        fs.write(name or file.name, data.decode())
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -321,7 +401,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "new":
             fs = Filesystem.new(args.blocks)
             for file in args.files:
-                fs.write(file.name, file.read_text())
+                put(fs, file)
             fs.save(args.image)
         elif args.command == "ls":
             for entry in Filesystem.load(args.image).entries():
@@ -330,7 +410,7 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write(Filesystem.load(args.image).read(args.name))
         elif args.command == "put":
             fs = Filesystem.load(args.image)
-            fs.write(args.name or args.file.name, args.file.read_text())
+            put(fs, args.file, args.name)
             fs.save(args.image)
         elif args.command == "rm":
             fs = Filesystem.load(args.image)

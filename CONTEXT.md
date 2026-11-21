@@ -511,3 +511,33 @@ process's slice. With a busy neighbour making a system call after every
 step, a process could be resumed with its slice already over, take the
 timer at once and never advance. `resume` now gives every process a
 whole `QUANTUM` from the moment it runs.
+
+### 2026-11-21 · Programs from files: spawnw and a magic word
+
+The owner chose running programs from disk next, so that programs need
+not all be built into the kernel image. The filesystem lives in user
+space (the shell), so the kernel should not have to read it.
+
+- **spawnw starts the block window.** A program finds the file, reads
+  its first block into its window and calls `spawnw` (15), which copies
+  the image into a fresh page. The kernel learns nothing about the FAT
+  or the directory, which are expected to be replaced; the cost is one
+  `bread` the caller does itself. Rejected: an `exec NAME` call that
+  reads the filesystem in the kernel.
+- **No relocation.** Every process runs from `V_USER`, so a program is
+  assembled to run there, exactly like a built-in one, and its image is
+  copied as it is. A relocatable format pays off only once programs
+  load at different addresses. The image is limited to what fits from
+  `V_USER` to the top of the page, `EXEC_MAX` trytes with its stack,
+  the room a built-in program has too, so a program file is one block.
+- **A magic word, checked by the kernel.** A program file starts with
+  `EXEC_MAGIC`, whose first tryte is negative, which no text file's
+  first tryte can be. Running a text file, or calling with no window,
+  then fails with `E_NOPROG` instead of faulting in the new process. The
+  word lives only in the file: images in memory are unchanged.
+- **The rest of the page is cleared.** A built-in image is copied as a
+  whole page; a program file brings only the upper half, so the lower
+  half is zeroed rather than left with an old tenant's data.
+- **`P_FREE` moved to `include/kernel.s`.** It needs `NPROG`, which only
+  a kernel build defines, and `include/layout.s` must assemble on its
+  own for a program built for the disk.

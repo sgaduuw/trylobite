@@ -40,6 +40,8 @@ on_syscall:
         beq   a0, t0, sys_kill
         li    t0, SYS_FOREGROUND
         beq   a0, t0, sys_foreground
+        li    t0, SYS_SPAWNW
+        beq   a0, t0, sys_spawnw
         li    a0, E_NOCALL
 
 sys_return:                            # a0: the result
@@ -158,5 +160,24 @@ sys_spawn:
         call  current_pid
         mv    a2, a0                   # the caller is the parent
         call  do_spawn                 # a1: the program
+        j     sys_return
+
+# spawnw(): start the program file whose first block the caller has read
+# into its block window. The window must hold one: it starts with
+# EXEC_MAGIC, so a text file is refused, as is a caller with no window.
+sys_spawnw:
+        lw    s5, PCB_BLOCKPG(s0)      # s5: the window's page
+        beqz  s5, 1f
+        mv    a0, s5
+        call  kva
+        lw    t0, BLOCK_W0(a0)
+        li    t1, EXEC_MAGIC
+        bne   t0, t1, 1f
+        call  current_pid
+        mv    a2, a0                   # the caller is the parent
+        li    s6, 1                    # from a program file
+        call  spawn_page
+        j     sys_return
+1:      li    a0, E_NOPROG
         j     sys_return
         .nocompress
