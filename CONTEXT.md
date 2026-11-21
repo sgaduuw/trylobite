@@ -377,3 +377,28 @@ returns `GETC_NONE` only on the second.
   steps until the program waits, types with `input`, and ends with `eof`.
   `Run.words` reruns in the debugger, so it closes the console first, as
   `run` does.
+
+### 2026-11-21 · A disk driver with a block window per process
+
+detrytus's block device moves whole pages; a process has one page, which
+holds its code and stack. The owner chose a **block window**: a second
+page per process, at `V_BLOCK` (leaf entry +1, just above its own), made
+on its first `bread` or `bwrite` and freed when it ends.
+
+- **DMA straight into the process**, with no kernel copy: the window's
+  physical page is the command's one list entry. Rejected: byte ranges
+  copied through a kernel buffer (a copy on every call), and a
+  kernel-only driver until the file system (nothing to test it with).
+- **One command at a time.** A process asking while another's command is
+  in flight sleeps as `ST_DISK` with its request in its saved a1 and a2;
+  when a command finishes, `disk_irq` starts the next waiting one in table
+  order after it, so nobody waits for ever. A single list word in kernel
+  data serves every command.
+- **Checked before the disk sees it.** A block outside the disk, or no
+  disk at all, is `E_NOBLOCK` at once; `E_IO` stays for a command the
+  device refuses anyway, which the checks make unreachable today.
+- **One block per call for now.** The device can move a run of blocks in
+  one command; calls for runs can come with a file system that wants
+  them, along with a window that can hold more than one block.
+- **`puts` reaches the window**, once there is one, so a program can
+  print what it read.
