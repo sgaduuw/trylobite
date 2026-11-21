@@ -1,9 +1,9 @@
-# Program 5 of shell.s: the demo's init, as a program the shell runs.
+# Program 3 of shell.s: the demo's init, as a program the shell runs.
 # Start pong and ping, tell ping where pong is, and wait for both, so
 # that the shell's prompt comes back only once they are done.
 
         .compress
-        .section prog5, P_PROG5 * PAGE, V_USER
+        .section prog3, P_PROG3 * PAGE, V_USER
         .gp   USER_GP                  # set by spawn
 
 pingpong:

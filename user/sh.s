@@ -2,7 +2,9 @@
 # first word names, waits for it, and says how it ended if not with code
 # 0. Some words are built in: exit, and ls, cat, write and rm, which use
 # the filesystem on the disk (docs/filesystem.md) through the block
-# window. It stops at the end of input. Programs take no arguments yet.
+# window. A word that is neither built in nor a program in the kernel
+# image is looked up on the disk, and a program file of that name is
+# run. It stops at the end of input. Programs take no arguments yet.
 
         .compress
         .section prog0, P_PROG0 * PAGE, V_USER
@@ -90,12 +92,36 @@ enter:  li    a0, SYS_PUTC
 
 6:      la    s2, sh_programs          # s2: the table entry tried
 7:      lw    a0, 0(s2)
-        beqz  a0, unknown              # the end of the table
+        beqz  a0, from_disk            # the end of the table
         mv    a1, s0
         call  streq
         bnez  a0, found
         addi  s2, s2, 6
         j     7b
+
+# from_disk: run the program file named s0, if the disk has one. Its
+# first block holds the whole program; spawnw starts it from the window.
+from_disk:
+        call  fs_load
+        bnez  a0, unknown              # no filesystem, so no programs on it
+        mv    a0, s0
+        call  find
+        bltz  a0, unknown
+        lw    a1, DE_FIRST(a0)
+        bltz  a1, not_prog             # FAT_END: an empty file
+        li    a0, SYS_BREAD
+        sys
+        bnez  a0, cant_read
+        li    a0, SYS_SPAWNW
+        sys
+        li    t0, E_NOPROG
+        bne   a0, t0, started
+not_prog:
+        la    a1, sh_notprog
+        li    a0, SYS_PUTS
+        sys
+        mv    a1, s0
+        j     say
 
 unknown:
         la    a1, sh_unknown
@@ -112,6 +138,7 @@ unknown:
 found:  li    a0, SYS_SPAWN
         lw    a1, 3(s2)
         sys
+started:                               # a0: the child, or why it did not start
         bgez  a0, 1f
         mv    s3, a0                   # it could not start: say why
         la    a1, sh_nostart
@@ -477,16 +504,11 @@ sh_builtins:
         .word 0
 
 # Each entry: the name, and the program number to spawn; 0 ends it.
+# Everything else is on the disk.
 sh_programs:
-        .word sh_hello, 3
-        .word sh_fail, 4
-        .word sh_pingpong, 5
-        .word sh_spin, 6
+        .word sh_pingpong, 3
         .word 0
 
-sh_hello:    .string "hello"
-sh_fail:     .string "fail"
-sh_spin:     .string "spin"
 sh_pingpong: .string "pingpong"
 sh_exit:     .string "exit"
 sh_ls:       .string "ls"
@@ -496,6 +518,7 @@ sh_rm:       .string "rm"
 sh_prompt:   .string "$ "
 sh_rubout:   .tryte BS, ' ', BS, 0     # back, blank, back: the assembler has no \b
 sh_unknown:  .string "sh: no such program: "
+sh_notprog:  .string "sh: not a program: "
 sh_nostart:  .string "sh: cannot start it: "
 sh_exited:   .string "sh: exit "
 sh_faulted:  .string "sh: fault "

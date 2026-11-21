@@ -8,7 +8,15 @@ the program to be waiting in getc before the next line is typed."""
 
 import re
 
-from tests.kernel import EXIT, ROOT, SPAWN_BOTH, assemble_file, build, debug_session
+from tests.kernel import (
+    EXIT,
+    ROOT,
+    SPAWN_BOTH,
+    assemble_file,
+    bin_disk,
+    build,
+    debug_session,
+)
 
 WAIT = "step 300000\n"
 
@@ -85,7 +93,11 @@ def test_a_reader_left_waiting_after_the_others_is_woken_by_eof():
 def test_the_shell_waits_at_its_prompt_for_what_is_typed():
     shell = assemble_file(ROOT / "shell.s")
     out = program_output(
-        debug_session(shell, f"{WAIT}input hello\\n\n{WAIT}input exit\\n\ncontinue\n")
+        debug_session(
+            shell,
+            f"{WAIT}input hello\\n\n{WAIT}input exit\\n\ncontinue\n",
+            disk=bin_disk(),
+        )
     )
     assert out.startswith(
         "trylobite: booting\n"
