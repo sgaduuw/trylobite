@@ -3,6 +3,7 @@
 # spawns program 0 (init), starts the other harts and runs init. The
 # other harts enter at ksecondary and look for work.
 
+        .compress
 kentry:
         mv    tp, a1                   # the hart's number, from the firmware
         la    t0, ktrap
@@ -58,3 +59,4 @@ timer_on:
         call  kputs
         li    a0, 98
         j     halt
+        .nocompress

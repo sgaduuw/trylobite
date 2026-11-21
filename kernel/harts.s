@@ -9,6 +9,7 @@
 # (from the firmware at entry, from the process record on a trap); hart h
 # uses index h + HART_MAX in per-hart tables.
 
+        .compress
 # start_harts: start every other hart of the middle nine that is present.
 # Clobbers a0, a1, t0..t4.
 start_harts:
@@ -148,3 +149,4 @@ wake_one:
         li    t2, 1
         sw    t2, HC_SEND(t1)
         ret
+        .nocompress

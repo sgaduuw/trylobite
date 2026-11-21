@@ -87,6 +87,13 @@ pipe.
   `csrw sie, zero` changes nothing: `li t0, 0` first.
 - **User memory is only read with `SUA` on, and only after checking the
   address lies in the process's page.**
+- **Code is bundled.** Each kernel and user code file sits between
+  `.compress` and `.nocompress`, so the assembler pairs neighbouring
+  instructions into compressed bundles (detrytus isa.md 6.1). Labels
+  move when code changes size, so never count instructions to reach an
+  address; keep anything whose layout matters (data, page tables, a
+  vectored trap table) outside. A system call resumes at `stval`, the
+  instruction after the `sys`, since `stpc + 3` is wrong inside a bundle.
 - **Comments explain why.** No em-dashes or double hyphens in prose.
 - One concern per file, as in `kernel/`.
 

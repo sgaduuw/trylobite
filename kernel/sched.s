@@ -1,6 +1,7 @@
 # Round-robin scheduling, under the kernel lock. s0 is the process that
 # just stopped running on this hart.
 
+        .compress
 schedule:
         lw    t0, PCB_STATE(s0)
         li    t1, ST_RUNNING
@@ -116,3 +117,4 @@ current_pid:
 halt:
         li    t0, V_POWER
         sw    a0, 0(t0)
+        .nocompress

@@ -409,3 +409,18 @@ detrytus gained `.assert E, "MESSAGE"` with `defined(NAME)`, so
 `include/kernel.s` now says in its own words that it is included by a
 build rather than run, instead of relying on the first undefined symbol
 and the comment beside it. It also checks that `NPROG` is 1 to 6.
+
+### 2026-11-21 · The kernel and programs are built with bundles
+
+detrytus (ISA 0.10) runs compressed bundles and its assembler pairs
+neighbouring instructions under `.compress`. Every code file now turns
+it on; data and page tables stay out. Code in `shell.s` went from 1,261
+words to 977 (22% smaller; the image from 1,598 words to 1,314), a
+little better than the 21% detrytus' `asm --mix` had estimated.
+
+The one kernel change it needed: a system call returned to `stpc + 3`,
+which is wrong when the `sys` sits in a bundle, so it returns to
+`stval`, which `sys` now sets to the instruction after it. One test
+looked for the letter c in a debugger session to find echoed input;
+the debugger's lines now show `c.` instructions, so it looks for a line
+that starts with c.

@@ -7,6 +7,7 @@
 # The kernel stack is kernel data too: the harts share one, used only by
 # the hart holding the lock. Nothing touches it before klock_take.
 
+        .compress
 # klock_take: wait until this hart holds the lock. While another hart
 # holds it, this one sleeps in wrs on the reserved lock word instead of
 # spinning; the holder's store in klock_give breaks the reservation and
@@ -36,3 +37,4 @@ klock_give:
         la    t0, klock
         amoswap.rl zero, zero, (t0)
         ret
+        .nocompress

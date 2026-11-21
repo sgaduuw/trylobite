@@ -2,6 +2,7 @@
 # Start pong and ping, tell ping where pong is, and wait for both, so
 # that the shell's prompt comes back only once they are done.
 
+        .compress
         .section prog5, P_PROG5 * PAGE, V_USER
 
 pingpong:
@@ -31,3 +32,4 @@ pingpong:
         sys
 
 pingpong_msg: .string "pingpong: starting pong and ping\n"
+        .nocompress

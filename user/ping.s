@@ -1,6 +1,7 @@
 # Program 1: learn pong's process number from a message, then send it 1, 2
 # and 3. A full mailbox means pong has not caught up: yield and retry.
 
+        .compress
         .section prog1, P_PROG1 * PAGE, V_USER
 
 ping:   li    a0, SYS_RECV
@@ -29,3 +30,4 @@ ping:   li    a0, SYS_RECV
 
         .equ  PING_DIGIT, 14                   # the ? below
 ping_msg: .string "ping: sending ?\n"
+        .nocompress

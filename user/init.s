@@ -1,6 +1,7 @@
 # Program 0, started by the kernel: start pong and ping, tell ping where
 # pong is, and leave them to it.
 
+        .compress
         .section prog0, P_PROG0 * PAGE, V_USER
 
 init:   la    a1, init_msg
@@ -22,3 +23,4 @@ init:   la    a1, init_msg
         sys
 
 init_msg: .string "init: starting pong and ping\n"
+        .nocompress

@@ -1,10 +1,10 @@
 # System calls. The number is in the saved a0, arguments in the saved a1
 # and a2; the result goes back into the saved a0.
 
+        .compress
 on_syscall:
-        lw    t0, PCB_PC(s0)
-        addi  t0, t0, 3                # return past the sys instruction
-        sw    t0, PCB_PC(s0)
+        csrr  t0, stval                # the instruction after the sys: tpc + 3
+        sw    t0, PCB_PC(s0)           # is wrong when the sys is in a bundle
         lw    a0, PCB_A0(s0)
         lw    a1, PCB_A1(s0)
         lw    a2, PCB_A2(s0)
@@ -174,3 +174,4 @@ sys_spawn:
         mv    a2, a0                   # the caller is the parent
         call  do_spawn                 # a1: the program
         j     sys_return
+        .nocompress

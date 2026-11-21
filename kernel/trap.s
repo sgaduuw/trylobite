@@ -5,6 +5,7 @@
 # process's record is this hart's alone while the process is ST_RUNNING,
 # so saving needs no lock.
 
+        .compress
 ktrap:
         csrrw sp, sscratch, sp         # sp = process record, sscratch = user sp
         beqz  sp, kpanic
@@ -174,3 +175,4 @@ kpanic:
         call  kputc
         li    a0, 99
         j     halt
+        .nocompress
