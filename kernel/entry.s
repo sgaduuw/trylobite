@@ -19,6 +19,7 @@ kentry:
         la    t1, next_slot
         sw    t0, 0(t1)                # spawn starts with slot 0
         li    a1, 0
+        li    a2, NO_PARENT
         call  do_spawn                 # init: everything else is its to start
         bltz  a0, 1f
         call  start_harts

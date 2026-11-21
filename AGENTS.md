@@ -59,6 +59,11 @@ pipe.
   this hart's number (the kernel cannot read `hartid`, a ring +1 CSR).
   Each helper says what it clobbers in its header comment; helpers that
   call others save `ra` on the kernel stack.
+- **An ended process keeps its record until its parent waits.** Its
+  pages go back at once, but its slot stays `ST_ZOMBIE`, with how it
+  ended in its saved `a0` and `a1`, until `wait` reaps it or the parent
+  ends. A program that spawns in a loop must wait for its children, or
+  run out of the table's 6 slots.
 - **Hart 0 handles hot-plug.** It is the hart controller's event hart and
   can never be removed. A hart asked to go only stops itself in `pick`,
   where it holds no process: anything it ran is back in the table.

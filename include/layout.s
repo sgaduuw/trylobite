@@ -114,6 +114,8 @@
                                           # -4 to +4
         .equ  SYS_GETC,   9               # a0 = the next code point typed, or
                                           # GETC_NONE when there is none
+        .equ  SYS_WAIT,  10               # wait for child a1 to end: a0 = how it
+                                          # ended, a1 = its exit code or trap cause
 
         .equ  E_NOCALL,  -1               # no system call with that number
         .equ  E_FULL,    -1               # send: the receiver's mailbox is full
@@ -123,6 +125,13 @@
         .equ  E_NOPROG,  -2               # spawn: no such program
         .equ  E_NOMEM,   -3               # spawn: not enough free pages
         .equ  GETC_NONE, -1               # getc: no input; any negative means none
+        .equ  E_NOCHILD, -2               # wait: not a child of the caller
+
+# How a child ended, as wait returns it in a0. An exit code can be any
+# word, so it comes back in a1, apart from the status; the sign of a0
+# tells failure, exit and fault apart.
+        .equ  WAIT_EXITED,  0             # a1 = the code it gave exit
+        .equ  WAIT_FAULTED, 1             # a1 = the trap cause that ended it
 
 # --- the process table ---------------------------------------------------------
 # One record per process, in words. Register r is saved at 3 * (r + 13), so
@@ -142,10 +151,17 @@
         .equ  PCB_LEAFPG, 102
         .equ  PCB_USERPG, 105
         .equ  PCB_HART,   108             # the hart running it (see resume)
-        .equ  PCB_SIZE,   111
+        .equ  PCB_PARENT, 111             # the process that spawned it, or NO_PARENT
+        .equ  PCB_SIZE,   114
         .equ  PAGES_PER_PROCESS, 4
 
         .equ  ST_EXITED, 0                # also: a free slot
         .equ  ST_READY,  1                # waiting for a hart
         .equ  ST_RUNNING, 2               # on a hart, or in the kernel for it
         .equ  ST_RECV,   -1               # blocked in SYS_RECV
+        .equ  ST_WAIT,   -2               # blocked in SYS_WAIT, for the child in
+                                          # its saved a1
+        .equ  ST_ZOMBIE, -3               # ended; holds how (saved a0, a1) until
+                                          # its parent waits for it
+        .equ  NO_PARENT, -1               # PCB_PARENT of init and of orphans:
+                                          # process numbers are never negative

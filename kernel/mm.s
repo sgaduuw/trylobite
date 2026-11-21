@@ -91,8 +91,8 @@ copy_page:
         ble   t4, t5, 1b
         ret
 
-# do_spawn: start program a1 in a free slot. a0 = its process number, or
-# E_NOSLOT, E_NOPROG or E_NOMEM.
+# do_spawn: start program a1 in a free slot, as a child of process a2 (or
+# NO_PARENT). a0 = its process number, or E_NOSLOT, E_NOPROG or E_NOMEM.
 # Clobbers a0..a2, s1..s5 and every t register; keeps s0.
 do_spawn:
         addi  sp, sp, -3
@@ -136,6 +136,7 @@ do_spawn:
 3:      sw    zero, 0(t0)
         addi  t0, t0, 3
         blt   t0, t1, 3b
+        sw    a2, PCB_PARENT(s1)
 
         call  alloc_page
         sw    a0, PCB_ROOTPG(s1)
@@ -219,8 +220,8 @@ do_spawn:
         addi  sp, sp, 3
         ret
 
-# release: end the process in s0, return its pages, and schedule. Does not
-# return.
+# release: end the process in s0, return its pages, and bury it (wait.s).
+# Its saved a0 and a1 say how it ended. Does not return.
 release:
         # Leave its address space first. Freeing a page writes the free-list
         # link into its centre word, which in a root table is entry 0: done
@@ -235,5 +236,4 @@ release:
         call  free_page
         lw    a0, PCB_USERPG(s0)
         call  free_page
-        sw    zero, PCB_STATE(s0)
-        j     schedule
+        j     bury
