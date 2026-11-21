@@ -15,6 +15,9 @@ kentry:
         call  kputs
 
         call  page_init
+        li    t0, V_IRQ + 9 * SRC_DISK
+        li    t1, 1
+        sw    t1, IRQ_ENABLE(t0)       # the disk only interrupts when asked
         la    t0, procs
         la    t1, next_slot
         sw    t0, 0(t1)                # spawn starts with slot 0

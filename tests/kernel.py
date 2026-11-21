@@ -154,6 +154,7 @@ class Run:
     steps: int | None  # None if it was still running at the step limit
     hotplug: list[str]  # the --plug and --unplug options it ran with
     input_options: list[str]  # --input FILE, if it was given console input
+    disk_options: list[str]  # --disk FILE --disk-blocks N, if it had a disk
 
     def words(self, addresses: list[int]) -> list[int | None]:
         """Words of physical memory once the program has stopped, each
@@ -161,6 +162,8 @@ class Run:
         runs the image to the same end and reads them with xp. It closes
         the console first, as run does, so getc ends at the end of the
         input rather than waiting for more."""
+        # Running again would write the disk again: not the same run.
+        assert not self.disk_options, "words() cannot rerun a run with a disk"
         script = _WORK / f"read{next(_names)}.txt"
         script.write_text("eof\ncontinue\n" + "".join(f"xp {a} 1\n" for a in addresses))
         done = detrytus(
@@ -244,6 +247,20 @@ def debug_session(
     return done.stdout
 
 
+def disk_options(disk: tuple[Path, int] | None) -> list[str]:
+    """--disk FILE --disk-blocks N for a disk (file, blocks); none for None.
+    The file is created if missing, and keeps what a run wrote."""
+    if disk is None:
+        return []
+    path, blocks = disk
+    return ["--disk", str(path), "--disk-blocks", str(blocks)]
+
+
+def new_disk() -> Path:
+    """A path for a disk file that does not exist yet."""
+    return _WORK / f"disk{next(_names)}.img"
+
+
 def run_image(
     image: Image,
     ram_pages: int = RAM_PAGES,
@@ -252,11 +269,14 @@ def run_image(
     plug: list[tuple[int, int]] = (),
     unplug: list[tuple[int, int]] = (),
     input: str | None = None,
+    disk: tuple[Path, int] | None = None,
 ) -> Run:
-    """Run an image; input, if given, is what the console has to read."""
+    """Run an image; input, if given, is what the console has to read, and
+    disk, if given, is (file, blocks) for its block device."""
     harts = HARTS if harts is None else harts
     hotplug = hotplug_options(plug, unplug)
     inputs = input_options(input)
+    disks = disk_options(disk)
     done = detrytus(
         "run",
         "--stats",
@@ -268,6 +288,7 @@ def run_image(
         str(harts),
         *hotplug,
         *inputs,
+        *disks,
         str(image.path),
     )
     code: int | None = None
@@ -278,7 +299,9 @@ def run_image(
         m = re.search(r"detrytus: (\d+) steps, exit (-?\d+)", done.stderr)
         assert m, done.stderr
         steps, code = int(m.group(1)), int(m.group(2))
-    return Run(done.stdout, code, image, ram_pages, harts, steps, hotplug, inputs)
+    return Run(
+        done.stdout, code, image, ram_pages, harts, steps, hotplug, inputs, disks
+    )
 
 
 def run(
@@ -291,6 +314,7 @@ def run(
     plug: list[tuple[int, int]] = (),
     unplug: list[tuple[int, int]] = (),
     input: str | None = None,
+    disk: tuple[Path, int] | None = None,
 ) -> Run:
     image = build(init, prog1, prog2, ram_pages)
-    return run_image(image, ram_pages, max_steps, harts, plug, unplug, input)
+    return run_image(image, ram_pages, max_steps, harts, plug, unplug, input, disk)

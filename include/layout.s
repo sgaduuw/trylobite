@@ -44,6 +44,7 @@
         .equ  CONSOLE_EMPTY, -1           # nothing yet: more may come
         .equ  CONSOLE_CLOSED, -2          # nothing more will come
         .equ  V_USER, SUPER               # every process runs from here
+        .equ  V_BLOCK, V_USER + PAGE      # its block window, once it uses the disk
         .equ  USER_SP, V_USER + 9843      # just above its page; the first push
                                           # lands at the page's top word
 
@@ -106,6 +107,20 @@
         .equ  IRQ_ROUTE, 3                # with V_IRQ + 9*s: the hart it interrupts
         .equ  SRC_CONSOLE, 1              # console input: pending while a read
                                           # would not give CONSOLE_EMPTY
+        .equ  SRC_DISK, 2                 # block device: a command has finished
+
+# The block device (detrytus platform.md, The block device): registers at
+# V_DISK + DISK_*. A block is one page.
+        .equ  DISK_BLOCKS, -9             # how many blocks; 0 with no disk
+        .equ  DISK_BLOCK, -6              # the first block to move
+        .equ  DISK_COUNT, -3              # how many blocks
+        .equ  DISK_LIST, 0                # physical address of their page numbers
+        .equ  DISK_COMMAND, 3             # BLOCK_READ or BLOCK_WRITE
+        .equ  DISK_STATUS, 6              # BLOCK_BUSY, BLOCK_DONE or BLOCK_FAILED
+        .equ  DISK_ACK, 9                 # any write ends the interrupt
+        .equ  BLOCK_READ, 1
+        .equ  BLOCK_WRITE, -1
+        .equ  BLOCK_FAILED, -1
 
 # --- system calls: number in a0, arguments in a1 and a2, result in a0 -------
 #
@@ -124,7 +139,7 @@
         .equ  SYS_EXIT,   4               # stop with exit code a1
         .equ  SYS_GETPID, 5               # a0 = this process's number
         .equ  SYS_PUTS,   6               # print the string at a1, whole: 0 done,
-                                          # E_RANGE
+                                          # E_RANGE (outside its page and window)
         .equ  SYS_SPAWN,  7               # start program a1: its process number,
                                           # E_NOSLOT, E_NOPROG, E_NOMEM
         .equ  SYS_HART,   8               # a0 = the hart running the caller,
@@ -133,6 +148,10 @@
                                           # for one, or GETC_NONE when none will come
         .equ  SYS_WAIT,  10               # wait for child a1 to end: a0 = how it
                                           # ended, a1 = its exit code or trap cause
+        .equ  SYS_BREAD, 11               # read block a1 into the block window, at
+                                          # V_BLOCK: 0 done, E_NOBLOCK, E_NOMEM, E_IO
+        .equ  SYS_BWRITE, 12              # write the block window to block a1: the
+                                          # same results
 
         .equ  E_NOCALL,  -1               # no system call with that number
         .equ  E_FULL,    -1               # send: the receiver's mailbox is full
@@ -143,6 +162,8 @@
         .equ  E_NOMEM,   -3               # spawn: not enough free pages
         .equ  GETC_NONE, -1               # getc: no more input; any negative means none
         .equ  E_NOCHILD, -2               # wait: not a child of the caller
+        .equ  E_IO,      -1               # bread, bwrite: the disk refused
+        .equ  E_NOBLOCK, -2               # bread, bwrite: no such block, or no disk
 
 # How a child ended, as wait returns it in a0. An exit code can be any
 # word, so it comes back in a1, apart from the status; the sign of a0
@@ -169,7 +190,8 @@
         .equ  PCB_USERPG, 105
         .equ  PCB_HART,   108             # the hart running it (see resume)
         .equ  PCB_PARENT, 111             # the process that spawned it, or NO_PARENT
-        .equ  PCB_SIZE,   114
+        .equ  PCB_BLOCKPG, 114            # its block window's page, or 0 for none
+        .equ  PCB_SIZE,   117
         .equ  PAGES_PER_PROCESS, 4
 
         .equ  ST_EXITED, 0                # also: a free slot
@@ -181,5 +203,7 @@
         .equ  ST_ZOMBIE, -3               # ended; holds how (saved a0, a1) until
                                           # its parent waits for it
         .equ  ST_GETC,   -4               # blocked in SYS_GETC, until input comes
+        .equ  ST_DISK,   -5               # blocked in SYS_BREAD or SYS_BWRITE, its
+                                          # command in its saved a2 and block in a1
         .equ  NO_PARENT, -1               # PCB_PARENT of init and of orphans:
                                           # process numbers are never negative

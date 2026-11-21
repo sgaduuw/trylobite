@@ -30,6 +30,12 @@ on_syscall:
         beq   a0, t0, sys_getc
         li    t0, SYS_WAIT
         beq   a0, t0, sys_wait
+        li    t0, SYS_BREAD
+        li    a2, BLOCK_READ
+        beq   a0, t0, sys_block
+        li    t0, SYS_BWRITE
+        li    a2, BLOCK_WRITE
+        beq   a0, t0, sys_block
         li    a0, E_NOCALL
 
 sys_return:                            # a0: the result
@@ -54,11 +60,16 @@ sys_hart:
 # go, so preemption cannot split it. Reading user memory needs SUA, and
 # the address must lie in the process's page: otherwise a process could
 # make the kernel print kernel memory, or fault inside the kernel.
+# puts(address): the string may be in the process's page or, once it has
+# one, its block window just above.
 sys_puts:
         li    t3, V_USER - 9841        # the user page's first tryte
         blt   a1, t3, 2f
         li    t3, V_USER + 9841        # and its last
-        bgt   a1, t3, 2f
+        lw    t0, PCB_BLOCKPG(s0)
+        beqz  t0, 0f
+        li    t3, V_BLOCK + 9841       # or the window's last
+0:      bgt   a1, t3, 2f
         li    t0, 0t+000
         csrw  ststatus, t0             # SUA on (resume rewrites ststatus anyway)
         li    t5, V_CONSOLE

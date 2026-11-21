@@ -232,4 +232,7 @@ release:
         call  free_page
         lw    a0, PCB_USERPG(s0)
         call  free_page
-        j     bury
+        lw    a0, PCB_BLOCKPG(s0)
+        beqz  a0, 1f
+        call  free_page
+1:      j     bury

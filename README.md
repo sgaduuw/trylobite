@@ -169,11 +169,13 @@ result comes back in `a0`.
 | 3 | `yield()` | 0 |
 | 4 | `exit(code)` | does not return |
 | 5 | `getpid()` | this process's number |
-| 6 | `puts(address)` | 0; −2 if the string is outside the process |
+| 6 | `puts(address)` | 0; −2 if the string is outside the process's page and block window |
 | 7 | `spawn(program)` | the new process's number; −1 no free slot, −2 no such program, −3 not enough memory |
 | 8 | `hart()` | the number of the hart running the caller, −4 to +4 |
 | 9 | `getc()` | the next code point of console input, waiting for one; negative once no more will come |
 | 10 | `wait(pid)` | how child `pid` ended, once it has: `a0` 0 exited or 1 faulted, `a1` its exit code or trap cause; `a0` −2 if `pid` is not the caller's child |
+| 11 | `bread(block)` | reads the block into the block window: 0; −1 the disk failed, −2 no such block (or no disk), −3 no memory for the window |
+| 12 | `bwrite(block)` | writes the block window to the block: as `bread` |
 
 A call whose result is a status, or a value that is never negative,
 reports failure with a negative number; `include/layout.s` names each
@@ -190,6 +192,14 @@ hart while it waits. `detrytus run --input FILE` closes the console behind
 the file, so `getc` returns `GETC_NONE` at its end; in `detrytus debug`
 the console stays open, `input TEXT` types more while a program waits, and
 `eof` closes it.
+
+A block is one page, and a process's own page holds its code, so the disk
+is reached through a **block window**: a second page, at `V_BLOCK` just
+above the process's own, made on its first `bread` or `bwrite` and freed
+when it ends. `bread` fills it from a block and `bwrite` copies it to one,
+by DMA, sleeping until the disk interrupts; one command runs at a time and
+the rest wait their turn. Run with `detrytus run --disk FILE --disk-blocks
+N`; the file keeps what was written for the next run.
 
 Process numbers are handed out round-robin, so a number is not reused
 until the table of 6 wraps around.
