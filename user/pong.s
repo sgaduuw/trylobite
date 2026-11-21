@@ -1,6 +1,7 @@
 # Program 2: spin first, with no system calls, so only the timer can let
 # ping run; then receive three messages.
 
+        .compress
         .section prog2, P_PROG2 * PAGE, V_USER
 
         .equ  SPIN, 1500
@@ -26,3 +27,4 @@ pong:   li    s1, 0
 
         .equ  PONG_DIGIT, 10
 pong_msg: .string "pong: got ?\n"
+        .nocompress

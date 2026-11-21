@@ -5,6 +5,7 @@
 # any physical page through the direct map. Page 0 is the boot page and is
 # never free, so 0 also means "none".
 
+        .compress
 # kva: a0 = the kernel virtual address of physical page a0's centre.
 # Clobbers t0.
 kva:
@@ -236,3 +237,4 @@ release:
         beqz  a0, 1f
         call  free_page
 1:      j     bury
+        .nocompress

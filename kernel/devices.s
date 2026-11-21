@@ -2,6 +2,7 @@
 # routed to hart 0 (the controller's reset value), and enabled only while
 # something waits on it.
 
+        .compress
 # device_irqs: serve every device source that wants attention. Clobbers
 # a0, s1, s2 and t0..t4.
 device_irqs:
@@ -156,3 +157,4 @@ disk_irq:
 9:      lw    ra, 0(sp)
         addi  sp, sp, 3
         ret
+        .nocompress

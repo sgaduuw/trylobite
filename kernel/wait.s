@@ -5,6 +5,7 @@
 # WAIT_FAULTED) and a1 (the code or the cause): the very registers its
 # parent's wait returns.
 
+        .compress
 # wait(pid): how child pid ended, in a0 and a1; block until it has.
 sys_wait:
         call  current_pid              # a0: the caller's number
@@ -78,3 +79,4 @@ bury:
         j     schedule
 4:      sw    zero, PCB_STATE(s0)
         j     schedule
+        .nocompress

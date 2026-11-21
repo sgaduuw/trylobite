@@ -1,5 +1,6 @@
 # Kernel console output. Each helper clobbers only a0 and t0..t5.
 
+        .compress
 # kputc: print code point a0.
 kputc:
         li    t5, V_CONSOLE
@@ -38,3 +39,4 @@ kputn:
         addi  t4, t4, 1
         bne   t4, t1, 3b
         ret
+        .nocompress

@@ -3,6 +3,7 @@
 # at the end of input. Only the first word of a line counts: programs
 # take no arguments yet.
 
+        .compress
         .section prog0, P_PROG0 * PAGE, V_USER
 
         .equ  LINE_MAX, 60             # characters kept from a line
@@ -181,3 +182,4 @@ sh_faulted:  .string "sh: fault "
 sh_digits:   .zero 12
 sh_digits_end: .zero 1
 sh_line:     .zero LINE_MAX + 1
+        .nocompress

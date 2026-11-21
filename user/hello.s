@@ -1,5 +1,6 @@
 # Program 3 of shell.s: say hello, and exit with 0.
 
+        .compress
         .section prog3, P_PROG3 * PAGE, V_USER
 
 hello:  la    a1, hello_msg
@@ -10,3 +11,4 @@ hello:  la    a1, hello_msg
         sys
 
 hello_msg: .string "hello from a balanced-ternary machine\n"
+        .nocompress

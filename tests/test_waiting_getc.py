@@ -48,7 +48,9 @@ def test_getc_waits_for_input_and_only_eof_ends_it():
     # to echo it: it never saw GETC_NONE until eof.
     steps = [m.start() for m in re.finditer(r"=> -?\d+ <", out)]
     assert len(steps) == 3, out
-    assert steps[0] < out.index("ab\n") < steps[1] < out.index("c") < steps[2]
+    # The echoed c starts a line; the debugger's own lines may hold a c too.
+    echo_c = out.index("\nc", steps[1])
+    assert steps[0] < out.index("ab\n") < steps[1] < echo_c < steps[2]
     assert out.index("exited with code -1") > steps[2]
     # Waiting is sleeping, not polling: no timer slices went by meanwhile.
     ticks = int(re.search(r"after (\d+) timer interrupts", out).group(1))
