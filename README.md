@@ -152,7 +152,8 @@ Every address space has three regions, one per mid-table entry:
 
 The first two regions are shared by every address space. A new process
 costs four pages: a root, a mid and a leaf table, and its own page,
-into which `spawn` copies the program image loaded at boot.
+into which `spawn` copies the program image loaded at boot, or `spawnw`
+a program file read from the disk.
 
 | Physical page | Contents |
 |---------------|----------|
@@ -184,6 +185,7 @@ result comes back in `a0`.
 | 12 | `bwrite(block)` | writes the block window to the block: as `bread` |
 | 13 | `kill(pid)` | ends child `pid` before it runs again: 0; −2 if `pid` is not the caller's child |
 | 14 | `foreground(pid)` | gives the console to child `pid`, so that Ctrl-C kills it, or to nobody with `NO_FOREGROUND` (−1): 0; −2 if `pid` is not the caller's child |
+| 15 | `spawnw()` | starts the program file whose first block is in the block window (docs/filesystem.md): as `spawn`, with −2 when there is no window or no program in it |
 
 A call whose result is a status, or a value that is never negative,
 reports failure with a negative number; `include/layout.s` names each

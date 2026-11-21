@@ -8,6 +8,7 @@
         .assert (NPROG >= 1) * (NPROG <= 9), "NPROG says how many programs the build adds, from 1 to 9"
 
         .include "layout.s"
+        .equ  P_FREE, P_PROG0 + NPROG     # pages from here to RAM_PAGES are free
         .include "../firmware/boot.s"            # the boot page, from address 0
 
         # Code from the bottom of its page: loaded at a physical address, run

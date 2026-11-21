@@ -23,8 +23,8 @@
         .equ  P_PROG5,   11
         .equ  P_PROG6,   12
         .equ  P_PROG7,   13
-        .equ  P_PROG8,   14
-        .equ  P_FREE, P_PROG0 + NPROG     # pages from here to RAM_PAGES are free
+        .equ  P_PROG8,   14               # (P_FREE, the first free page, is
+                                          # include/kernel.s's: it needs NPROG)
         .equ  POWER_PA, -2 * PAGE         # power-off register, for firmware
 
 # --- virtual memory ------------------------------------------------------------
@@ -165,13 +165,18 @@
         .equ  SYS_FOREGROUND, 14          # give the console to child a1, or to
                                           # nobody with NO_FOREGROUND: Ctrl-C
                                           # then kills it. 0 done, E_NOCHILD
+        .equ  SYS_SPAWNW, 15              # start the program file whose first
+                                          # block is in the block window (see
+                                          # EXEC_MAGIC): its process number,
+                                          # E_NOSLOT, E_NOPROG, E_NOMEM
 
         .equ  E_NOCALL,  -1               # no system call with that number
         .equ  E_FULL,    -1               # send: the receiver's mailbox is full
         .equ  E_NOPROC,  -2               # send: no such process
         .equ  E_RANGE,   -2               # puts: the address is outside the process
         .equ  E_NOSLOT,  -1               # spawn: the process table is full
-        .equ  E_NOPROG,  -2               # spawn: no such program
+        .equ  E_NOPROG,  -2               # spawn: no such program; spawnw: no
+                                          # window, or no program in it
         .equ  E_NOMEM,   -3               # spawn: not enough free pages
         .equ  GETC_NONE, -1               # getc: no more input; any negative means none
         .equ  E_NOCHILD, -2               # wait: not a child of the caller
@@ -254,3 +259,13 @@
         .equ  FAT_FREE, 0                 # a block in no file; block 0 never is
         .equ  FAT_END, -1                 # the last block of its file (and of
                                           # block 0): there is no next one
+
+# A program file: EXEC_MAGIC, then the program's image, as assembled to
+# run from V_USER (its first word there, so its first tryte at V_USER - 1).
+# spawnw copies the image into a fresh page at V_USER; the rest stays 0.
+# The magic word's low tryte, its first, is negative, which no text file's
+# first tryte is.
+        .equ  EXEC_MAGIC, -20261121       # word 0 of a program file's first block
+        .equ  EXEC_IMAGE, BLOCK_W0 + 3    # word 1: the image's first word
+        .equ  EXEC_MAX, 9843              # trytes an image may have: V_USER - 1
+                                          # to the top of the page, stack included
