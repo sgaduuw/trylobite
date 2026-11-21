@@ -33,10 +33,13 @@ pick:
         bnez  t4, 1b
 
         # Nobody is ready. A process running on another hart can still
-        # send or spawn: wait for work.
+        # send or spawn, and console input can still wake a reader: wait
+        # for work.
         mv    s1, t2
 6:      lw    t0, PCB_STATE(s1)
         li    t1, ST_RUNNING
+        beq   t0, t1, idle
+        li    t1, ST_GETC
         beq   t0, t1, idle
         addi  s1, s1, PCB_SIZE
         blt   s1, t3, 6b
@@ -95,6 +98,7 @@ idle:
         bnez  t1, 1b                   # arrive now, with the entry cleared
         bnez  tp, 3f
         call  hotplug_events
+        call  device_irqs
 3:      call  timer_on
         j     pick
 

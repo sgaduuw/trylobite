@@ -33,12 +33,16 @@
 
         .equ  DMAP, -SUPER                # direct map offset
         .equ  KOFF, 4 * PAGE              # kernel code and data: physical - KOFF
+        .equ  V_DISK,    -9 * PAGE        # block device
+        .equ  V_IRQ,     -8 * PAGE        # interrupt controller
         .equ  V_HARTS,   -7 * PAGE        # hart controller: every hart's slot
         .equ  V_HART,    -6 * PAGE        # ... and this hart's own
         .equ  V_POWER,   -5 * PAGE        # power-off register
         .equ  V_CONSOLE, -4 * PAGE        # console output register
         .equ  CONSOLE_IN, 3               # with V_CONSOLE: the next input code
-                                          # point, or a negative value if none
+                                          # point, or one of these when there is none:
+        .equ  CONSOLE_EMPTY, -1           # nothing yet: more may come
+        .equ  CONSOLE_CLOSED, -2          # nothing more will come
         .equ  V_USER, SUPER               # every process runs from here
         .equ  USER_SP, V_USER + 9843      # just above its page; the first push
                                           # lands at the page's top word
@@ -66,10 +70,10 @@
 
         .equ  CAUSE_SYSCALL, 4
         .equ  CAUSE_TIMER, -1
-        .equ  CAUSE_EXTERNAL, -2          # hot-plug events, on hart 0
+        .equ  CAUSE_EXTERNAL, -2          # devices and hot-plug events, on hart 0
         .equ  EDELEG_ALL, 29523           # trits 1..9: every exception to ring 0
-        .equ  IDELEG_KERNEL, 36           # trits 2 and 3 to ring 0: hot-plug
-                                          # events and the mailbox doorbell
+        .equ  IDELEG_KERNEL, 36           # trits 2 and 3 to ring 0: devices and
+                                          # hot-plug events, and the mailbox doorbell
         .equ  IE_TIMER, 3                 # sie trit 1
         .equ  IE_EXT, 9                   # sie trit 2
         .equ  IE_SOFT, 27                 # sie trit 3
@@ -91,6 +95,17 @@
         .equ  HC_EVENT, -33               # with V_HART: take a hot-plug event,
                                           # kind + 3*hart (kind +1 added, -1 asked
                                           # to leave), 0 if none
+
+# --- devices (detrytus platform.md, Device interrupts) -----------------------
+# Every device source is routed to hart 0, which handles hot-plug events
+# too. Source s's registers are at V_IRQ + 9*s + IRQ_*.
+
+        .equ  IRQ_CLAIM, -3               # with V_IRQ: take a source to serve, 0 if none
+        .equ  IRQ_COMPLETE, 0             # with V_IRQ: done serving the source written
+        .equ  IRQ_ENABLE, 0               # with V_IRQ + 9*s: +1 lets source s interrupt
+        .equ  IRQ_ROUTE, 3                # with V_IRQ + 9*s: the hart it interrupts
+        .equ  SRC_CONSOLE, 1              # console input: pending while a read
+                                          # would not give CONSOLE_EMPTY
 
 # --- system calls: number in a0, arguments in a1 and a2, result in a0 -------
 #
@@ -114,8 +129,8 @@
                                           # E_NOSLOT, E_NOPROG, E_NOMEM
         .equ  SYS_HART,   8               # a0 = the hart running the caller,
                                           # -4 to +4
-        .equ  SYS_GETC,   9               # a0 = the next code point typed, or
-                                          # GETC_NONE when there is none
+        .equ  SYS_GETC,   9               # a0 = the next code point typed, waiting
+                                          # for one, or GETC_NONE when none will come
         .equ  SYS_WAIT,  10               # wait for child a1 to end: a0 = how it
                                           # ended, a1 = its exit code or trap cause
 
@@ -126,7 +141,7 @@
         .equ  E_NOSLOT,  -1               # spawn: the process table is full
         .equ  E_NOPROG,  -2               # spawn: no such program
         .equ  E_NOMEM,   -3               # spawn: not enough free pages
-        .equ  GETC_NONE, -1               # getc: no input; any negative means none
+        .equ  GETC_NONE, -1               # getc: no more input; any negative means none
         .equ  E_NOCHILD, -2               # wait: not a child of the caller
 
 # How a child ended, as wait returns it in a0. An exit code can be any
@@ -165,5 +180,6 @@
                                           # its saved a1
         .equ  ST_ZOMBIE, -3               # ended; holds how (saved a0, a1) until
                                           # its parent waits for it
+        .equ  ST_GETC,   -4               # blocked in SYS_GETC, until input comes
         .equ  NO_PARENT, -1               # PCB_PARENT of init and of orphans:
                                           # process numbers are never negative

@@ -50,7 +50,7 @@ ktrap:
         li    t1, CAUSE_SYSCALL
         beq   t0, t1, on_syscall
         li    t1, CAUSE_EXTERNAL
-        beq   t0, t1, on_hotplug
+        beq   t0, t1, on_external
         j     on_fault
 
 # Run the process whose record is in s0: switch to its page table (the
@@ -134,9 +134,11 @@ on_timer:
         sw    t1, 0(t0)
         j     schedule                 # the current process stays ready
 
-# Hot-plug events, on hart 0; the interrupted process carries on.
-on_hotplug:
+# Devices and hot-plug events, on hart 0; the interrupted process carries
+# on. A reader that console input woke waits for a hart like any other.
+on_external:
         call  hotplug_events
+        call  device_irqs
         j     resume
 
 # A process faulted: report it, end it, and carry on with the others.

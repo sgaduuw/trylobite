@@ -24,6 +24,7 @@
         .include "../kernel/wait.s"
         .include "../kernel/lock.s"
         .include "../kernel/harts.s"
+        .include "../kernel/devices.s"
 
         .include "../kernel/data.s"
         .include "../kernel/pagetables.s"

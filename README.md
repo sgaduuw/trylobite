@@ -172,7 +172,7 @@ result comes back in `a0`.
 | 6 | `puts(address)` | 0; −2 if the string is outside the process |
 | 7 | `spawn(program)` | the new process's number; −1 no free slot, −2 no such program, −3 not enough memory |
 | 8 | `hart()` | the number of the hart running the caller, −4 to +4 |
-| 9 | `getc()` | the next code point of console input; negative when there is none |
+| 9 | `getc()` | the next code point of console input, waiting for one; negative once no more will come |
 | 10 | `wait(pid)` | how child `pid` ended, once it has: `a0` 0 exited or 1 faulted, `a1` its exit code or trap cause; `a0` −2 if `pid` is not the caller's child |
 
 A call whose result is a status, or a value that is never negative,
@@ -182,8 +182,14 @@ use those names, never a bare −1, which is an ordinary value on a
 balanced machine. `recv` and `hart` can return negative values that are
 not failures, and so can an exit code: `wait` returns it in `a1`, apart
 from its status in `a0`. A process that ends keeps its slot until its
-parent waits for it, or until the parent ends too. `getc` does not wait: run the kernel with `detrytus run
---input FILE` to give it something to read.
+parent waits for it, or until the parent ends too.
+
+`getc` sleeps until input comes: console input wakes the reader through
+detrytus's interrupt controller, routed to hart 0, and the reader takes no
+hart while it waits. `detrytus run --input FILE` closes the console behind
+the file, so `getc` returns `GETC_NONE` at its end; in `detrytus debug`
+the console stays open, `input TEXT` types more while a program waits, and
+`eof` closes it.
 
 Process numbers are handed out round-robin, so a number is not reused
 until the table of 6 wraps around.
