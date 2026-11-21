@@ -4,6 +4,7 @@
 
         .compress
         .section prog5, P_PROG5 * PAGE, V_USER
+        .gp   USER_GP                  # set by spawn
 
 pingpong:
         la    a1, pingpong_msg

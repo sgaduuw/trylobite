@@ -57,8 +57,7 @@ pick:
         blt   s1, t3, 4b
         la    a0, msg_done
         call  kputs
-        la    t0, ticks
-        lw    a0, 0(t0)
+        lw    a0, ticks
         call  kputn
         la    a0, msg_ticks
         call  kputs

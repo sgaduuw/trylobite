@@ -5,6 +5,7 @@
 
         .compress
         .section prog0, P_PROG0 * PAGE, V_USER
+        .gp   USER_GP                  # set by spawn
 
         .equ  LINE_MAX, 60             # characters kept from a line
         .equ  BS, 8                    # backspace, and delete, both erase

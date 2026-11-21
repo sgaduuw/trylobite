@@ -54,6 +54,13 @@ pipe.
   (`.section NAME, LOAD, RUN`), so every label is the address the code
   sees at run time: `li label`, `la label` and the debugger all agree.
   Keep that true for any new section.
+- **gp reaches the globals.** Every section that addresses data sets
+  `.gp` (`include/kernel.s` for the kernel, the top of each program),
+  so `la` is one instruction and `lw rd, name` / `sw rs, name` reach a
+  global with no address register. The kernel's `gp` is `kgp`, loaded
+  at entry and in `ktrap` right after the process's `gp` is saved; a
+  process starts with `gp` at `USER_GP`, which `spawn` sets. Never
+  change `gp` anywhere else.
 - **Register discipline in the kernel**: `s0` is the current process's
   record from trap entry to `resume`, `s1` another process's, and `tp`
   this hart's number (the kernel cannot read `hartid`, a ring +1 CSR).

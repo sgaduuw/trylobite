@@ -73,8 +73,7 @@ sys_block:
         bge   a1, t0, 8f               # past the end, or no disk at all
         lw    t0, PCB_BLOCKPG(s0)
         bnez  t0, 1f
-        la    t0, free_count
-        lw    t0, 0(t0)
+        lw    t0, free_count
         beqz  t0, 9f
         sw    a2, PCB_A2(s0)           # alloc_page clobbers every t
         call  alloc_page
@@ -91,8 +90,7 @@ sys_block:
 1:      sw    a2, PCB_A2(s0)
         li    t0, ST_DISK
         sw    t0, PCB_STATE(s0)
-        la    t0, disk_user
-        lw    t0, 0(t0)
+        lw    t0, disk_user
         bnez  t0, 2f                   # busy: disk_irq starts it later
         mv    s1, s0
         call  disk_start
@@ -105,10 +103,9 @@ sys_block:
 # disk_start: give the disk the command of the waiting process in s1.
 # Clobbers t0, t1.
 disk_start:
-        la    t0, disk_user
-        sw    s1, 0(t0)
-        la    t0, disk_list
+        sw    s1, disk_user
         lw    t1, PCB_BLOCKPG(s1)
+        la    t0, disk_list
         sw    t1, 0(t0)
         li    t1, KOFF
         add   t1, t0, t1               # the list's physical address
@@ -130,10 +127,9 @@ disk_irq:
         li    t0, V_DISK
         lw    t1, DISK_STATUS(t0)
         sw    zero, DISK_ACK(t0)
-        la    t0, disk_user
-        lw    s1, 0(t0)
+        lw    s1, disk_user
         beqz  s1, 9f                   # nothing was asked of it
-        sw    zero, 0(t0)
+        sw    zero, disk_user
         li    a0, 0
         li    t0, BLOCK_FAILED
         bne   t1, t0, 1f

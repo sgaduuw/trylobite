@@ -5,6 +5,7 @@
 
         .compress
 kentry:
+        la    gp, kgp                  # every global is reached through gp
         mv    tp, a1                   # the hart's number, from the firmware
         la    t0, ktrap
         csrw  stvec, t0
@@ -20,8 +21,7 @@ kentry:
         li    t1, 1
         sw    t1, IRQ_ENABLE(t0)       # the disk only interrupts when asked
         la    t0, procs
-        la    t1, next_slot
-        sw    t0, 0(t1)                # spawn starts with slot 0
+        sw    t0, next_slot            # spawn starts with slot 0
         li    a1, 0
         li    a2, NO_PARENT
         call  do_spawn                 # init: everything else is its to start
@@ -32,6 +32,7 @@ kentry:
         j     pick                     # init, the only process
 
 ksecondary:
+        la    gp, kgp
         mv    tp, a1
         la    t0, ktrap
         csrw  stvec, t0

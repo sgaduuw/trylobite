@@ -34,14 +34,12 @@ free_page:
         mul   t1, t3, t0
         li    t0, DMAP
         add   t1, t1, t0               # t1: the page's centre
-        la    t0, free_head
-        lw    t2, 0(t0)
+        lw    t2, free_head
         sw    t2, 0(t1)                # link it to the old head
-        sw    t3, 0(t0)
-        la    t0, free_count
-        lw    t2, 0(t0)
+        sw    t3, free_head
+        lw    t2, free_count
         addi  t2, t2, 1
-        sw    t2, 0(t0)
+        sw    t2, free_count
         ret
 
 # alloc_page: a0 = a zeroed page from the free list. The caller checks
@@ -60,18 +58,16 @@ alloc_page:
 # centre's kernel virtual address. For a page about to be overwritten
 # whole. Clobbers t0..t2.
 take_page:
-        la    t0, free_head
-        lw    a0, 0(t0)
+        lw    a0, free_head
         li    t1, PAGE
         mul   t2, a0, t1
         li    t1, DMAP
         add   t2, t2, t1               # t2: the page's centre
         lw    t1, 0(t2)
-        sw    t1, 0(t0)                # unlink it
-        la    t0, free_count
-        lw    t1, 0(t0)
+        sw    t1, free_head            # unlink it
+        lw    t1, free_count
         addi  t1, t1, -1
-        sw    t1, 0(t0)
+        sw    t1, free_count
         ret
 
 # copy_page: copy physical page a1 over physical page a0. Clobbers t0..t5.
@@ -110,8 +106,7 @@ do_spawn:
         la    t2, procs
         li    t0, NPROC * PCB_SIZE
         add   t3, t2, t0               # t3: just past the table
-        la    t0, next_slot
-        lw    s1, 0(t0)
+        lw    s1, next_slot
         li    t4, NPROC
 1:      blt   s1, t3, 0f
         mv    s1, t2                   # wrap around
@@ -123,8 +118,7 @@ do_spawn:
         li    a0, E_NOSLOT
         j     7f
 
-2:      la    t0, free_count           # check memory before taking any
-        lw    t0, 0(t0)
+2:      lw    t0, free_count           # check memory before taking any
         li    t1, PAGES_PER_PROCESS
         blt   t0, t1, 9f
 
@@ -193,11 +187,12 @@ do_spawn:
         sw    t0, PCB_PC(s1)
         li    t0, USER_SP
         sw    t0, 0(s1)
+        li    t0, USER_GP              # programs address their data from gp
+        sw    t0, PCB_GP(s1)
         li    t0, ST_READY
         sw    t0, PCB_STATE(s1)
         addi  t0, s1, PCB_SIZE         # the next spawn looks after this slot
-        la    t1, next_slot
-        sw    t0, 0(t1)
+        sw    t0, next_slot
         # The slot's last tenant had this ASID: a new epoch makes each hart
         # drop its translations before running the new one (see resume).
         la    t1, epochs

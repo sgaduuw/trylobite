@@ -3,6 +3,7 @@
 
         .compress
         .section prog2, P_PROG2 * PAGE, V_USER
+        .gp   USER_GP                  # set by spawn
 
         .equ  SPIN, 1500
 

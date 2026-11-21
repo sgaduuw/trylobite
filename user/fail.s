@@ -3,6 +3,7 @@
 
         .compress
         .section prog4, P_PROG4 * PAGE, V_USER
+        .gp   USER_GP                  # set by spawn
 
 fail:   li    a0, SYS_EXIT
         li    a1, 3
