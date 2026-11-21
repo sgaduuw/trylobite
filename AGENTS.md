@@ -89,6 +89,12 @@ pipe.
   `include/layout.s`: each top-level file (demo, shell, tests) states the
   machine it targets and how many programs it adds. Program images sit
   in pages from `P_PROG0`, and the free pages start after the last.
+- **A new program goes in `bin/`, on the disk**, unless another program
+  spawns it by number (ping and pong) or the kernel starts it (init,
+  sh). A disk program is assembled on its own, including
+  `include/layout.s` and loading where it runs, at `V_USER`
+  (docs/filesystem.md, Program files); `include/layout.s` must
+  therefore assemble without `NPROG` or `RAM_PAGES`.
 - **Writing zero to a CSR needs a register holding 0.** A CSR
   instruction whose source is `r0` only reads (detrytus isa.md 7.12), so
   `csrw sie, zero` changes nothing: `li t0, 0` first.

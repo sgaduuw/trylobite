@@ -541,3 +541,25 @@ space (the shell), so the kernel should not have to read it.
 - **`P_FREE` moved to `include/kernel.s`.** It needs `NPROG`, which only
   a kernel build defines, and `include/layout.s` must assemble on its
   own for a program built for the disk.
+
+### 2026-11-21 · The shell runs files, and most programs moved to the disk
+
+With `spawnw` in place, `sh` looks a word up on the disk once it is
+neither a built-in nor in its table of image programs, and runs the
+program file of that name. Unix shells find programs by searching for
+a file too; an explicit `exec NAME` built-in was the alternative, but
+typing the name is what a shell user expects.
+
+- **hello, fail and spin moved to `bin/`**, as programs for the disk.
+  Keeping them in the image as well would have meant two copies of
+  each; the point of the change is that a program need not be built
+  into the kernel. pingpong stays, since it spawns ping and pong by
+  program number, and those can only be image programs. The shell build
+  went from 7 programs to 4, which frees three pages.
+- **The shell needs a disk to run them**: `tools/fs.py new disk.img 20
+  bin/*.s`, which assembles each `.s` with `detrytus`. The tests build
+  such a disk (`tests/kernel.py: bin_disk`).
+- **Not a program, or not there.** No filesystem or no such file reads
+  as `sh: no such program`, as before; a text or empty file is `sh: not
+  a program`, from `spawnw`'s `E_NOPROG` (an empty file has no block to
+  read, so the shell says so itself).

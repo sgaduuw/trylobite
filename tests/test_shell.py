@@ -1,9 +1,9 @@
-"""The shell build: sh reads lines, runs programs, and reports how they
-ended."""
+"""The shell build: sh reads lines, runs programs, from the kernel image
+or the disk, and reports how they ended."""
 
 import pytest
 
-from tests.kernel import ROOT, assemble_file, run_image
+from tests.kernel import ROOT, assemble_file, bin_disk, new_disk, run_image
 
 
 @pytest.fixture(scope="module")
@@ -11,8 +11,9 @@ def shell():
     return assemble_file(ROOT / "shell.s")
 
 
-def session(shell, typed: str):
-    result = run_image(shell, input=typed)
+def session(shell, typed: str, disk=None):
+    """Run the shell on typed, with bin/ on its disk unless given another."""
+    result = run_image(shell, input=typed, disk=disk or bin_disk())
     assert result.exit_code == 0, result.console
     return result
 
@@ -67,3 +68,28 @@ def test_the_shell_exits_at_the_end_of_input(shell):
     result = session(shell, "hello")  # no newline: the line is never run
     assert "hello from" not in result.console
     assert result.code_of(0) == 0
+
+
+def test_programs_come_from_the_disk(shell):
+    # Only pingpong is in the kernel image; hello is a file, and without
+    # it, or without a filesystem at all, there is no such program.
+    assert "hello from" in session(shell, "hello\n").console
+    blank = (new_disk(), 4)
+    assert "sh: no such program: hello\n" in session(shell, "hello\n", blank).console
+
+
+def test_a_text_file_is_not_a_program(shell):
+    result = session(shell, "notes\nhello\n", bin_disk(notes="li a0, 4\n", empty=""))
+    assert "$ notes\nsh: not a program: notes\n$ hello\nhello from" in result.console
+    result = session(shell, "empty\n", bin_disk(empty=""))
+    assert "sh: not a program: empty\n" in result.console
+
+
+def test_ls_lists_the_programs_on_the_disk(shell):
+    result = session(shell, "ls\nfail\n")
+    assert "sh: exit 3\n" in result.console
+    assert [line.split()[1] for line in result.console.splitlines()[2:5]] == [
+        "fail",
+        "hello",
+        "spin",
+    ]

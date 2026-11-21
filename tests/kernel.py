@@ -223,7 +223,11 @@ def input_options(text: str | None) -> list[str]:
 
 
 def debug_session(
-    image: Image, script: str, harts: int | None = None, ram_pages: int = RAM_PAGES
+    image: Image,
+    script: str,
+    harts: int | None = None,
+    ram_pages: int = RAM_PAGES,
+    disk: tuple[Path, int] | None = None,
 ) -> str:
     """Run an image in the debugger under script's commands, and return
     what it printed: its replies and the program's output, in order.
@@ -239,6 +243,7 @@ def debug_session(
         str(ram_pages),
         "--harts",
         str(harts),
+        *disk_options(disk),
         "-x",
         str(path),
         "--batch",
@@ -259,6 +264,28 @@ def disk_options(disk: tuple[Path, int] | None) -> list[str]:
 def new_disk() -> Path:
     """A path for a disk file that does not exist yet."""
     return _WORK / f"disk{next(_names)}.img"
+
+
+_BIN: dict[str, list[int]] = {}
+
+
+def bin_disk(blocks: int = 8, **texts: str) -> tuple[Path, int]:
+    """A new disk holding a filesystem with every program in bin/, as the
+    shell expects, and these text files: (path, blocks)."""
+    from tools.fs import Filesystem, program_file
+
+    if not _BIN:
+        for source in sorted((ROOT / "bin").glob("*.s")):
+            image = assemble_file(source)
+            _BIN[source.stem] = program_file(image.path.read_bytes())
+    made = Filesystem.new(blocks)
+    for name, trytes in _BIN.items():
+        made.write_trytes(name, trytes)
+    for name, text in texts.items():
+        made.write(name, text)
+    path = new_disk()
+    made.save(path)
+    return path, blocks
 
 
 def run_image(

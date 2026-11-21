@@ -9,7 +9,8 @@
 
 A file is text, each code point one tryte between 1 and 9,841, or a
 program: `put` given an image assembled by `detrytus asm` (a .dti file)
-stores it as a program file, which the shell can run. The image is a
+stores it as a program file, which the shell can run, and given a .s
+file assembles it first (with $DETRYTUS, or detrytus on the PATH). The image is a
 detrytus disk file, two bytes per tryte, so
 `detrytus run --disk IMAGE` attaches it. The format's numbers are read
 from include/layout.s, which the kernel and programs share.
@@ -20,9 +21,13 @@ from __future__ import annotations
 import argparse
 import ast
 import contextlib
+import os
 import re
+import shutil
 import struct
+import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -365,13 +370,28 @@ class Filesystem:
 # --- the command line --------------------------------------------------------------
 
 
+def assemble(source: Path) -> bytes:
+    """The image detrytus asm makes of a program's source."""
+    binary = os.environ.get("DETRYTUS") or shutil.which("detrytus")
+    if binary is None:
+        raise FsError("no detrytus command to assemble with: set DETRYTUS")
+    with tempfile.TemporaryDirectory() as work:
+        out = Path(work) / "program.dti"
+        done = subprocess.run(
+            [binary, "asm", str(source), "-o", str(out)], capture_output=True, text=True
+        )
+        if done.returncode != 0:
+            raise FsError(done.stderr.strip())
+        return out.read_bytes()
+
+
 def put(fs: Filesystem, file: Path, name: str | None = None) -> None:
-    """Add a host file: an assembled image as a program, anything else as
-    text. Unless named, a program is called after its file without .dti,
-    and text after its file."""
-    data = file.read_bytes()
+    """Add a host file: an assembled image, or a .s file assembled here,
+    as a program, anything else as text. Unless named, a program is called
+    after its file without .dti or .s, and text after its file."""
+    data = assemble(file) if file.suffix == ".s" else file.read_bytes()
     if data[:4] == DTI_MAGIC:
-        fs.write_trytes(name or file.name.removesuffix(".dti"), program_file(data))
+        fs.write_trytes(name or file.stem, program_file(data))
     else:
         fs.write(name or file.name, data.decode())
 

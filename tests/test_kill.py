@@ -6,6 +6,7 @@ from tests.kernel import (
     EXIT,
     ROOT,
     assemble_file,
+    bin_disk,
     exit_with,
     run,
     run_image,
@@ -109,7 +110,9 @@ def shell():
 
 
 def test_ctrl_c_stops_a_runaway_program_and_the_shell_carries_on(shell):
-    result = run_image(shell, input="spin\n" + CTRL_C + "hello\nexit\n")
+    result = run_image(
+        shell, input="spin\n" + CTRL_C + "hello\nexit\n", disk=bin_disk()
+    )
     assert result.exit_code == 0, result.console
     lines = result.console.splitlines()
     i = lines.index("$ spin")
@@ -122,6 +125,6 @@ def test_ctrl_c_stops_a_runaway_program_and_the_shell_carries_on(shell):
 
 
 def test_ctrl_c_at_the_prompt_drops_the_line(shell):
-    result = run_image(shell, input="hel" + CTRL_C + "hello\nexit\n")
+    result = run_image(shell, input="hel" + CTRL_C + "hello\nexit\n", disk=bin_disk())
     assert result.exit_code == 0, result.console
     assert "$ hel^C\n$ hello\nhello from" in result.console

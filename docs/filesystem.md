@@ -117,6 +117,12 @@ even to replace a file. Failures are said, not fatal: `sh: no such file:
 NAME`, `sh: the disk is full`, `sh: cannot read the filesystem: N` (a
 `bread` failure, or −4 when block 0 holds no filesystem).
 
+A command that is neither built in nor one of the programs in the
+kernel image (only `pingpong`) is a file: the shell finds it, reads its
+first block and calls `spawnw`. No such file, or no filesystem, is `sh:
+no such program: NAME`; a text or empty file is `sh: not a program:
+NAME`. The programs in `bin/` are meant for the disk.
+
 ## The host tool
 
 ```bash
@@ -125,16 +131,18 @@ tools/fs.py ls disk.img
 tools/fs.py put disk.img notes.txt notes
 tools/fs.py cat disk.img notes
 tools/fs.py rm disk.img notes
-detrytus asm hello.s -o hello.dti
+detrytus asm bin/hello.s -o hello.dti
 tools/fs.py put disk.img hello.dti       # a program file, named hello
+tools/fs.py put disk.img bin/fail.s      # assembled first, named fail
 detrytus run shell.s --ram-pages 40 --disk disk.img
 ```
 
 Images are detrytus disk files, two bytes per tryte, as long as the
 filesystem. The tool checks the header and every chain when it opens
 one, and refuses a name or text that does not fit. Given an image
-assembled by `detrytus asm`, `put` and `new` store it as a program
-file, named after the image without `.dti`, and refuse one that does
+assembled by `detrytus asm`, or a `.s` file, which they assemble with
+`detrytus` first, `put` and `new` store it as a program file, named
+after the file without `.dti` or `.s`, and refuse one that does
 not lie between `V_USER − 1` and the top of the page. `cat` refuses a
 program file.
 

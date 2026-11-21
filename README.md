@@ -39,16 +39,18 @@ trylobite: all processes exited after 28 timer interrupts
 
 Milestone 3 works too: the kernel can start a shell instead. `shell.s`
 builds it with `sh` as program 0, which reads a line from the console,
-runs the program it names, waits for it and says how it ended. It knows
-`hello`, `fail` (which exits with 3), `pingpong` (the demo above, as a
-program), `spin` (a runaway that loops for ever), the built-in `exit`
-and the file built-ins further down, and stops at the end of its input.
-Ctrl-C ends the program the shell is waiting for, and at the prompt
-drops the line typed so far:
+runs the program it names, waits for it and says how it ended. Only
+`pingpong` (the demo above, as a program) is built into the kernel
+image; other programs are files on the disk, from `bin/`: `hello`,
+`fail` (which exits with 3) and `spin` (a runaway that loops for ever).
+It also has the built-in `exit` and the file built-ins further down,
+and stops at the end of its input. Ctrl-C ends the program the shell is
+waiting for, and at the prompt drops the line typed so far:
 
 ```bash
+tools/fs.py new disk.img 20 bin/*.s
 printf 'hello\nfail\nexit\n' > session.txt
-detrytus run shell.s --ram-pages 40 --input session.txt
+detrytus run shell.s --ram-pages 40 --input session.txt --disk disk.img
 ```
 
 ```text
@@ -133,9 +135,10 @@ it, or else the one on the PATH is used.
 | `kernel/lock.s` | the kernel lock |
 | `kernel/harts.s` | starting the other harts, waking an idle one |
 | `include/kernel.s` | firmware and kernel together, without programs: included by a build such as `demo.s`, not run on its own |
-| `user/` | `init` (program 0 of the demo), `ping` (1) and `pong` (2); `sh` (program 0 of the shell build), `hello` (3), `fail` (4), `pingpong` (5) and `spin` (6) |
+| `user/` | programs built into the kernel image: `init` (program 0 of the demo), `ping` (1) and `pong` (2); `sh` (program 0 of the shell build) and `pingpong` (3) |
+| `bin/` | programs for the disk, each assembled on its own: `hello`, `fail` and `spin` |
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
-| `shell.s` | the same machine, starting the shell, with all seven programs |
+| `shell.s` | the same machine, starting the shell, with sh, ping, pong and pingpong |
 | `docs/filesystem.md` | the on-disk format of the filesystem |
 | `tools/fs.py` | builds and reads filesystem images on the host |
 | `tests/` | the tests, and a harness that builds the kernel with test programs |
@@ -160,7 +163,7 @@ a program file read from the disk.
 | 0 | firmware |
 | 1, 2 | kernel code; kernel data |
 | 3, 4, 5 | the boot address space; the kernel's shared leaf table |
-| 6 .. 5 + `NPROG` | program images 0 to `NPROG` − 1 (the demo has 3, the shell build 6) |
+| 6 .. 5 + `NPROG` | program images 0 to `NPROG` − 1 (the demo has 3, the shell build 4) |
 | 6 + `NPROG` .. `RAM_PAGES` | free pages, handed out by the allocator |
 
 ## System calls
@@ -223,10 +226,13 @@ N`; the file keeps what was written for the next run.
 The disk can hold a filesystem: a flat directory and a FAT in block 0
 (`docs/filesystem.md`). `tools/fs.py` makes one on the host, and the
 shell's built-ins `ls`, `cat NAME`, `write NAME TEXT` (the text and a
-newline) and `rm NAME` use it:
+newline) and `rm NAME` use it. A word the shell does not know as a
+built-in or a program in the kernel image names a program file on it:
+the shell reads the file's first block into its window and `spawnw`
+starts it. `tools/fs.py` stores a `.s` or `.dti` file as a program:
 
 ```bash
-tools/fs.py new disk.img 100 notes.txt
+tools/fs.py new disk.img 100 notes.txt bin/*.s
 printf 'ls\nwrite motd hello, disk\ncat motd\n' > session.txt
 detrytus run shell.s --ram-pages 40 --input session.txt --disk disk.img
 tools/fs.py cat disk.img motd
