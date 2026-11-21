@@ -95,6 +95,7 @@ it, or else the one on the PATH is used.
 | `kernel/syscall.s` | the system calls |
 | `kernel/sched.s` | round-robin scheduling, halting |
 | `kernel/mm.s` | the page allocator, spawning and releasing processes |
+| `kernel/wait.s` | `wait`, and what happens to a process once it has ended |
 | `kernel/console.s` | kernel console output |
 | `kernel/data.s` | the process table, buffers, messages |
 | `kernel/pagetables.s` | the boot address space and the kernel's shared leaf table |
@@ -144,13 +145,16 @@ result comes back in `a0`.
 | 7 | `spawn(program)` | the new process's number; −1 no free slot, −2 no such program, −3 not enough memory |
 | 8 | `hart()` | the number of the hart running the caller, −4 to +4 |
 | 9 | `getc()` | the next code point of console input; negative when there is none |
+| 10 | `wait(pid)` | how child `pid` ended, once it has: `a0` 0 exited or 1 faulted, `a1` its exit code or trap cause; `a0` −2 if `pid` is not the caller's child |
 
 A call whose result is a status, or a value that is never negative,
 reports failure with a negative number; `include/layout.s` names each
 one (`E_FULL`, `E_NOPROC`, `GETC_NONE`, ...). Programs test the sign or
 use those names, never a bare −1, which is an ordinary value on a
 balanced machine. `recv` and `hart` can return negative values that are
-not failures. `getc` does not wait: run the kernel with `detrytus run
+not failures, and so can an exit code: `wait` returns it in `a1`, apart
+from its status in `a0`. A process that ends keeps its slot until its
+parent waits for it, or until the parent ends too. `getc` does not wait: run the kernel with `detrytus run
 --input FILE` to give it something to read.
 
 Process numbers are handed out round-robin, so a number is not reused

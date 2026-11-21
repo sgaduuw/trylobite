@@ -20,6 +20,7 @@
         .include "../kernel/sched.s"
         .include "../kernel/console.s"
         .include "../kernel/mm.s"
+        .include "../kernel/wait.s"
         .include "../kernel/lock.s"
         .include "../kernel/harts.s"
 

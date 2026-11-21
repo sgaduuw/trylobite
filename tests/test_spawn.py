@@ -1,6 +1,6 @@
 """Process creation, the page allocator and reclaimed memory."""
 
-from tests.kernel import DONE, EXIT, build, exit_with, run, run_image
+from tests.kernel import DONE, EXIT, build, exit_with, run, run_image, wait_for
 
 WAIT = "li a0, SYS_RECV\n        sys\n        " + DONE  # holds its pages
 
@@ -96,7 +96,8 @@ def test_a_reused_slot_does_not_see_its_old_tenants_translations():
     # Program 1 ("A") runs in slot 1 and exits. Init then spawns program 2
     # ("B") until one lands in slot 1 again, and so gets the same ASID.
     # Without a fence.vm the TLB would still map V_USER to A's freed page,
-    # and that B would print A or crash.
+    # and that B would print A or crash. Init waits for each child, which
+    # frees its slot: an ended child it never waited for would hold one.
     first = """
         la    a1, msg_a
         li    a0, SYS_PUTS
@@ -120,18 +121,15 @@ msg_a:  .string "A\\n"
 msg_b:  .string "B\\n"
     """
     init = f"""
-        {spawn(1)}
+        {spawn(1, "s1")}
         li    a0, SYS_RECV           # A says it is done
         sys
-        li    a0, SYS_YIELD          # and exits
-        sys
-1:      {spawn(2)}
+        {wait_for("s1")}
+1:      {spawn(2, "s1")}
+        {wait_for("s1")}
         li    t0, 1
-        beq   a0, t0, 2f
-        li    a0, SYS_YIELD          # let this B finish, freeing its slot
-        sys
-        j     1b
-2:      {DONE}
+        bne   s1, t0, 1b
+        {DONE}
     """
     result = run(init, first, second, max_steps=4_000_000)
     assert result.exit_code == 0

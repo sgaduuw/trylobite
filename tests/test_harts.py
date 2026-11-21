@@ -3,7 +3,7 @@ and only the middle nine are used."""
 
 import re
 
-from tests.kernel import SPAWN_BOTH, build, detrytus, exit_with, run
+from tests.kernel import SPAWN_BOTH, build, detrytus, exit_with, run, wait_for
 
 
 def spin_then_hart(rounds: int = 20000) -> str:
@@ -145,7 +145,8 @@ def test_a_reused_slot_is_flushed_on_the_hart_that_ran_its_old_tenant():
     # first waiting hart. Child A runs in slot 1 there and exits; init then
     # spawns Bs until one lands in slot 1 again. A flush on hart 0 alone,
     # where spawn runs, would leave hart -1 mapping V_USER, for slot 1's
-    # ASID, to A's freed page.
+    # ASID, to A's freed page. Init waits for each child only once it has
+    # surely ended, so it never blocks and leaves hart 0 free.
     a = f"""
         la    a1, msg
         li    a0, SYS_PUTS
@@ -167,12 +168,15 @@ msg:    .string "A\\n"
         li    a0, SYS_SPAWN
         li    a1, 1
         sys
+        mv    s1, a0
         {wait}
+        {wait_for("s1")}
 1:      li    a0, SYS_SPAWN
         li    a1, 2
         sys
         mv    s1, a0
         {wait}
+        {wait_for("s1")}
         li    t0, 1
         bne   s1, t0, 1b
         li    a0, SYS_EXIT

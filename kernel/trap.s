@@ -155,6 +155,10 @@ on_fault:
         call  kputn
         li    a0, 10
         call  kputc
+        li    t0, WAIT_FAULTED         # for its parent's wait
+        sw    t0, PCB_A0(s0)
+        csrr  t0, stcause
+        sw    t0, PCB_A1(s0)
         j     release
 
 # A trap inside the kernel: nothing to save, nowhere to return to.

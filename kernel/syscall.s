@@ -28,6 +28,8 @@ on_syscall:
         beq   a0, t0, sys_hart
         li    t0, SYS_GETC
         beq   a0, t0, sys_getc
+        li    t0, SYS_WAIT
+        beq   a0, t0, sys_wait
         li    a0, E_NOCALL
 
 sys_return:                            # a0: the result
@@ -97,6 +99,8 @@ sys_send:
         add   s1, s1, t1               # s1: the receiver
         lw    t0, PCB_STATE(s1)
         beqz  t0, 1f                   # it has exited
+        li    t1, ST_ZOMBIE
+        beq   t0, t1, 1f               # ended, only its exit code left
         li    t1, ST_RECV
         beq   t0, t1, 2f
         lw    t0, PCB_FULL(s1)
@@ -143,8 +147,12 @@ sys_exit:
         call  kputn
         li    a0, 10
         call  kputc
+        li    t0, WAIT_EXITED          # a1 already holds the code
+        sw    t0, PCB_A0(s0)
         j     release
 
 sys_spawn:
+        call  current_pid
+        mv    a2, a0                   # the caller is the parent
         call  do_spawn                 # a1: the program
         j     sys_return

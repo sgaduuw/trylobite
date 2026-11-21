@@ -115,6 +115,12 @@ def send_to_2(value: int) -> str:
 2:"""
 
 
+def wait_for(register: str) -> str:
+    """Wait for the child whose number is in register; a0 and a1 then say
+    how it ended."""
+    return f"li a0, SYS_WAIT\n        mv a1, {register}\n        sys"
+
+
 def exit_with(register: str) -> str:
     return f"mv a1, {register}\n        {EXIT}"
 

@@ -289,3 +289,34 @@ from `run --input FILE` (pin 3aa4f85).
   changes. The rule, in AGENTS.md: a result that is a status or never
   negative reports failure as a negative name; a result that can be any
   word (`recv`, and soon `wait`'s exit code) carries no failure in it.
+
+### 2026-11-21 · wait, and exit codes that outlive their process
+
+A shell runs a program and then needs to know how it went, so `wait`
+(10) blocks until a given child has ended and says how.
+
+- **Two results.** An exit code can be any word, negative ones included
+  (the tests exit with −1), so it cannot share a register with "not
+  your child". `wait` returns the status in `a0`, as every call does,
+  and the code in `a1`. The status is three-way: negative a failure
+  (`E_NOCHILD`), 0 the child exited (`a1` its code), +1 it faulted (`a1`
+  the trap cause). One `br3` takes it apart.
+- **Zombies.** A process's pages go back the moment it ends, as before,
+  but its record stays as `ST_ZOMBIE`, holding how it ended in its saved
+  `a0` and `a1`, the very registers its parent's `wait` returns. Those
+  were dead anyway, so the record needed only one new field,
+  `PCB_PARENT`.
+- **Orphans go at once.** A parent that ends unlinks its children and
+  frees those already ended, since nobody can wait for them now. `init`
+  has no parent. This keeps the demo, whose `init` leaves right after
+  spawning, exactly as it was.
+- **The cost:** a program that spawns in a loop must now wait for its
+  children, or a slot is lost with each one. Two tests spawned until a
+  slot came round again; they now wait, which is also what their
+  comments said they meant ("let this B finish, freeing its slot").
+- **Deadlock detection is unchanged.** The plan was to count `ST_WAIT`
+  beside `ST_RECV`, but it adds nothing: a wait only blocks on a live
+  child, and a chain of waits ends in a process that is running, ready
+  or in `recv`. So when nothing can run, someone is in `recv`, and the
+  existing check finds it. A test covers a parent waiting on a child
+  stuck in `recv`.
