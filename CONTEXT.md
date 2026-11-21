@@ -445,3 +445,26 @@ save one. Programs only say `.gp USER_GP`. The address-then-access
 pairs on kernel globals became `lw rd, name` / `sw rs, name`, except
 where the address is used again (the disk command's list, whose
 physical address is computed from it).
+
+### 2026-11-21 · A bootstrap filesystem: a FAT in block 0, in user space
+
+The shell should list, read and write files on the disk. Three places
+for the code were weighed: the kernel (open, read, write as system
+calls), a file-server process, and the programs themselves over `bread`
+and `bwrite`. The driver runs one command per call and cannot pause a
+system call halfway through a multi-block operation, and messages are
+one word with no sender, so the first two each need kernel work before
+any filesystem. The programs' own code needs none, so that comes first.
+
+The layout is the simplest that lets files grow: block 0 holds a
+header, a flat directory of 64 entries and a FAT, one word per block,
+chaining each file's blocks and marking free ones (docs/filesystem.md).
+One block per file was simpler but capped a file at 19,683 trytes;
+inodes and directories as files bring subdirectories at several times
+the code. The owner chose to start simple and move to a POSIX-shaped
+filesystem later, so this format is expected to be replaced, not
+extended.
+
+`tools/fs.py` builds and reads images on the host. It reads the format's
+numbers from `include/layout.s`, and a test checks it agrees with the
+assembler about each of them.
