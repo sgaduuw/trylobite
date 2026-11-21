@@ -91,8 +91,9 @@
         .equ  HC_START_PC, -9
         .equ  HC_START_ARG, -6
         .equ  HC_CONTROL, -3              # +1 starts a stopped hart
-        .equ  HC_SEND, 0                  # queue a word: rings its doorbell
-        .equ  HC_RECEIVE, 3               # own slot: take a word, 0 if none
+        .equ  HC_SEND, 0                  # queue a word, 0 or more: rings its doorbell
+        .equ  HC_RECEIVE, 3               # own slot: take a word, or MAILBOX_EMPTY
+        .equ  MAILBOX_EMPTY, -1           # no message: test the sign, never the number
         .equ  HC_EVENT, -33               # with V_HART: take a hot-plug event,
                                           # kind + 3*hart (kind +1 added, -1 asked
                                           # to leave), 0 if none
