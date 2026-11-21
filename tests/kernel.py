@@ -145,6 +145,7 @@ class Run:
     ram_pages: int
     harts: int
     steps: int | None  # None if it was still running at the step limit
+    hotplug: list[str]  # the --plug and --unplug options it ran with
 
     def words(self, addresses: list[int]) -> list[int | None]:
         """Words of physical memory once the program has stopped, each
@@ -159,6 +160,7 @@ class Run:
             str(self.ram_pages),
             "--harts",
             str(self.harts),
+            *self.hotplug,
             "-x",
             str(script),
             "--batch",
@@ -186,13 +188,26 @@ class Run:
         return int(m.group(1))
 
 
+def hotplug_options(plug: list[tuple[int, int]], unplug: list[tuple[int, int]]):
+    """detrytus options adding harts, or asking them to go, at given
+    times: each entry is (time, hart)."""
+    options = []
+    for flag, changes in (("--plug", plug), ("--unplug", unplug)):
+        for time, hart in changes:
+            options += [flag, f"{time}:{hart}"]
+    return options
+
+
 def run_image(
     image: Image,
     ram_pages: int = RAM_PAGES,
     max_steps: int = 2_000_000,
     harts: int | None = None,
+    plug: list[tuple[int, int]] = (),
+    unplug: list[tuple[int, int]] = (),
 ) -> Run:
     harts = HARTS if harts is None else harts
+    hotplug = hotplug_options(plug, unplug)
     done = detrytus(
         "run",
         "--stats",
@@ -202,6 +217,7 @@ def run_image(
         str(max_steps),
         "--harts",
         str(harts),
+        *hotplug,
         str(image.path),
     )
     code: int | None = None
@@ -212,7 +228,7 @@ def run_image(
         m = re.search(r"detrytus: (\d+) steps, exit (-?\d+)", done.stderr)
         assert m, done.stderr
         steps, code = int(m.group(1)), int(m.group(2))
-    return Run(done.stdout, code, image, ram_pages, harts, steps)
+    return Run(done.stdout, code, image, ram_pages, harts, steps, hotplug)
 
 
 def run(
@@ -222,6 +238,8 @@ def run(
     ram_pages: int = RAM_PAGES,
     max_steps: int = 2_000_000,
     harts: int | None = None,
+    plug: list[tuple[int, int]] = (),
+    unplug: list[tuple[int, int]] = (),
 ) -> Run:
     image = build(init, prog1, prog2, ram_pages)
-    return run_image(image, ram_pages, max_steps, harts)
+    return run_image(image, ram_pages, max_steps, harts, plug, unplug)

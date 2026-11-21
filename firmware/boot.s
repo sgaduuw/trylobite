@@ -1,5 +1,5 @@
-# Ring +1 firmware, in the boot page. It hands every exception and the
-# mailbox doorbell to the kernel, points translation at the boot address
+# Ring +1 firmware, in the boot page. It hands every exception, hot-plug
+# events and the mailbox doorbell to the kernel, points translation at the boot address
 # space, and enters the kernel in ring 0.
 #
 # Every hart runs it. Hart 0 starts here at reset with a0 = 0 and enters
@@ -10,7 +10,7 @@
 boot:
         li    t0, EDELEG_ALL
         csrw  edeleg, t0
-        li    t0, IDELEG_SOFT
+        li    t0, IDELEG_KERNEL
         csrw  ideleg, t0
         la    t0, fw_trap
         csrw  mtvec, t0

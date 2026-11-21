@@ -14,6 +14,7 @@ procs:  .words NPROC * PCB_SIZE / 3     # the process table
 
 klock:  .word 0                        # the kernel lock: 1 while a hart holds it
 idle_harts: .words NHART               # 1: the hart waits for work, by index
+leaving: .words NHART                  # 1: the platform asked the hart to go
 epochs: .words NPROC                   # tenants each slot has had (see resume)
 seen:   .words NHART * NPROC           # the epoch each hart last flushed, by slot
 
@@ -33,3 +34,6 @@ msg_ticks:    .string " timer interrupts\n"
 msg_deadlock: .string "trylobite: deadlock, every process is waiting\n"
 msg_panic:    .string "trylobite: panic, trap in the kernel, cause "
 msg_noinit:   .string "trylobite: cannot start init\n"
+msg_hart:     .string "trylobite: hart "
+msg_joined:   .string " joined\n"
+msg_left:     .string " left\n"
