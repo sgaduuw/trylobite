@@ -142,7 +142,16 @@ result comes back in `a0`.
 | 5 | `getpid()` | this process's number |
 | 6 | `puts(address)` | 0; −2 if the string is outside the process |
 | 7 | `spawn(program)` | the new process's number; −1 no free slot, −2 no such program, −3 not enough memory |
-| 8 | `hart()` | the number of the hart running the caller |
+| 8 | `hart()` | the number of the hart running the caller, −4 to +4 |
+| 9 | `getc()` | the next code point of console input; negative when there is none |
+
+A call whose result is a status, or a value that is never negative,
+reports failure with a negative number; `include/layout.s` names each
+one (`E_FULL`, `E_NOPROC`, `GETC_NONE`, ...). Programs test the sign or
+use those names, never a bare −1, which is an ordinary value on a
+balanced machine. `recv` and `hart` can return negative values that are
+not failures. `getc` does not wait: run the kernel with `detrytus run
+--input FILE` to give it something to read.
 
 Process numbers are handed out round-robin, so a number is not reused
 until the table of 6 wraps around.

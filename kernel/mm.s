@@ -92,7 +92,7 @@ copy_page:
         ret
 
 # do_spawn: start program a1 in a free slot. a0 = its process number, or
-# -1 (no free slot), -2 (no such program), -3 (not enough memory).
+# E_NOSLOT, E_NOPROG or E_NOMEM.
 # Clobbers a0..a2, s1..s5 and every t register; keeps s0.
 do_spawn:
         addi  sp, sp, -3
@@ -123,7 +123,7 @@ do_spawn:
         addi  s1, s1, PCB_SIZE
         addi  t4, t4, -1
         bnez  t4, 1b
-        li    a0, -1
+        li    a0, E_NOSLOT
         j     7f
 
 2:      la    t0, free_count           # check memory before taking any
@@ -212,9 +212,9 @@ do_spawn:
         call  wake_one                 # a hart waiting for work can run it
         j     7f
 
-8:      li    a0, -2
+8:      li    a0, E_NOPROG
         j     7f
-9:      li    a0, -3
+9:      li    a0, E_NOMEM
 7:      lw    ra, 0(sp)
         addi  sp, sp, 3
         ret
