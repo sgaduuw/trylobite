@@ -135,6 +135,7 @@ it, or else the one on the PATH is used.
 | `kernel/lock.s` | the kernel lock |
 | `kernel/harts.s` | starting the other harts, waking an idle one |
 | `kernel/ipc.s` | messages for servers: `call`, `receive`, `reply`, `copyin`, `copyout` |
+| `kernel/desc.s` | descriptors: `read`, `write` and `desc`, routed to servers |
 | `include/kernel.s` | firmware and kernel together, without programs: included by a build such as `demo.s`, not run on its own |
 | `user/` | programs built into the kernel image: `init` (program 0 of the demo), `ping` (1) and `pong` (2); `sh` (program 0 of the shell build), `pingpong` (3), `fsd`, the file server (4), `diskd`, the disk server (5), and `consd`, the console server (6) |
 | `bin/` | programs for the disk, each assembled on its own: `hello`, `fail` and `spin` |
@@ -188,6 +189,9 @@ registers mapped past them, at `V_DEVICE`.
 | 10 | `wait(pid)` | how child `pid` ended, once it has: `a0` 0 exited, 1 faulted or 2 killed, `a1` its exit code, trap cause, or 0 when killed; `a0` −2 if `pid` is not the caller's child |
 | 13 | `kill(pid, for)` | ends `pid` before it runs again, a child of the caller when `for` is `FOR_SELF` (−1), or, for a driver, a child of process `for`: 0; 1 (`KILL_ENDED`) if it had ended already; −2 if `pid` is not that process's child, −21 `for` from a process that drives nothing |
 | 15 | `spawnw(window, for)` | starts the program file whose first block is in block window `window` (docs/filesystem.md), as the caller's child when `for` is `FOR_SELF` (−1), or as the child of process `for`, whose call the caller holds: as `spawn`, with −2 when there is no window or no program in it, or `for` is not waiting for the caller |
+| 20 | `read(fd, buffer, n)` | a call to the server descriptor `fd` names, `IO_READ` with its handle, the buffer and `n`: the server's answer (at least one and at most `n` trytes, 0 at the end); −8 if `fd` names nothing. Leaves `a1` to `a5` as `call` does |
+| 21 | `write(fd, buffer, n)` | likewise with `IO_WRITE`: how many were written |
+| 22 | `desc(fd, server, handle)` | makes descriptor `fd`, 0 to 8, name `handle` at process `server`, or nothing with `NO_DESC` (−1): 0; −8 no such descriptor, −2 a negative server |
 | 23 | `call(pid, w1, w2, w3, w4)` | sends four words to process `pid` and waits for its reply: the reply's four words in `a0` to `a3`; `a0` −2 if there is no such process or it ends first, −3 if `pid` is the caller |
 | 24 | `receive()` | waits for a call: `a0` the caller, `a1` to `a4` its words; or `a0` `FROM_KERNEL` (−1) and `a1` `NOTE_ENDED` (0), `a2` a process that ended, or `a1` `NOTE_IRQ` (1), `a2` a device source the caller drives that interrupted |
 | 25 | `reply(pid, w1, w2, w3, w4)` | ends the call of process `pid`, which this process received: 0; −2 if `pid` is not waiting for its reply |
@@ -200,7 +204,7 @@ registers mapped past them, at `V_DEVICE`.
 | 32 | `arm(source)` | lets the source the caller drives interrupt once: 0; −21 it does not drive it |
 | 33 | `phys(address)` | the physical address of the caller's `address`, for a device to use: −12 nothing there, −21 the caller drives no device |
 
-Numbers 9, 11, 12, 14 and 16 to 22 are free: console input, blocks and
+Numbers 9, 11, 12, 14 and 16 to 19 are free: console input, blocks and
 files are not system calls but calls to the console server, the disk
 server and the file server (below and docs/filesystem.md), which fail with their own negative numbers, −2 and
 −4 to −14: no filesystem, no such file, not a
@@ -227,6 +231,19 @@ closes the console behind the file; in `detrytus debug` the console
 stays open, `input TEXT` types more while a program waits, and `eof`
 closes it. The kernel still writes its own messages, and `putc` and
 `puts`, to the console's output directly: they are its log.
+
+**Descriptors.** Each process has nine, 0 to 8, in its record, and
+each names a server and a handle that server gave out. `read` and
+`write` on a descriptor are calls to its server, `IO_READ` or `IO_WRITE`
+with the handle; the kernel only routes them, and the server judges the
+handle and the caller as for any call. A child starts with copies of
+its parent's descriptors, so the shell points 0, 1 and 2 (`STDIN`,
+`STDOUT`, `STDERR`) at the console server, handle `CONSOLE_HANDLE`, and
+every program it runs reads and prints through them: `bin/hello` is a
+single `write(STDOUT, ...)`. A console `read` gives what has been typed,
+at least one code point and at most `n`, one to a tryte; `getc` is still
+there for a code point too large for a tryte. Files keep the file
+server's own descriptor numbers for now.
 
 Ctrl-C (code point 3) kills the console's **foreground process**, which
 `CN_FOREGROUND` names; the shell gives it each program it runs and takes

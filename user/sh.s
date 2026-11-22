@@ -3,8 +3,9 @@
 # 0. Some words are built in: exit, and ls, cat, write, rm, mkdir, rmdir,
 # cd and pwd, which use the filesystem on the disk (docs/filesystem.md)
 # through the file server. The console is the console server's: the
-# shell reads and prints through it, and gives it each program it runs as
-# the foreground, for Ctrl-C. The kernel starts the shell as init; it
+# shell points its standard input, output and error at it, which the
+# programs it starts inherit, reads and prints through them, and gives
+# the server each program it runs as the foreground, for Ctrl-C. The kernel starts the shell as init; it
 # starts the console server, then the disk server and the file server
 # that needs it, and finds the servers by their names. A word that is neither
 # built in nor a program in the kernel image names a program file: a
@@ -34,6 +35,14 @@ sh:     li    a0, SYS_SPAWN            # the console server
         li    t0, CONSOLE_PROTOCOL     # calls it would misread: none at all
         bne   a1, t0, 1f
         sw    a0, sh_con
+        li    s0, STDERR               # standard input, output and error,
+2:      li    a0, SYS_DESC             # which every program it starts
+        mv    a1, s0                   # inherits
+        lw    a2, sh_con
+        li    a3, CONSOLE_HANDLE
+        sys
+        addi  s0, s0, -1
+        bgez  s0, 2b
 1:      li    a0, SYS_SPAWN            # the disk server, which the
         li    a1, SH_DISKD             # file server waits for
         sys
@@ -55,12 +64,15 @@ prompt: la    a1, sh_prompt
         la    s0, sh_line              # s0: the line
         mv    s1, s0                   # s1: just past what was typed
 
-read:   li    a0, SYS_CALL
-        lw    a1, sh_con
-        li    a2, CN_GETC
+read:   li    a0, SYS_READ
+        li    a1, STDIN
+        la    a2, sh_ch
+        li    a3, 1
         sys
-        br3   a0, eof, got             # zero, NUL, is ignored; with no
-                                       # console server E_NOPROC ends it
+        blez  a0, eof                  # the end, or no standard input
+        lt    a0, sh_ch
+        bnez  a0, got                  # zero, NUL, is ignored
+        j     read
         j     read
 got:    li    t0, '\n'
         beq   a0, t0, enter
@@ -501,22 +513,20 @@ streq:  lt    t0, 0(a0)
         ret
 
 # puts: print the 0-terminated string at a1. putc: print code point a1,
-# which fits in a tryte. Both through the console server. Clobber a0..a4
-# and t0.
+# which fits in a tryte. Both to standard output. Clobber a0..a5 and t0.
 puts:   mv    a4, a1
 1:      lt    t0, 0(a4)
         beqz  t0, 2f
         addi  a4, a4, 1
         j     1b
-2:      sub   a4, a4, a1               # a4: its length
-        mv    a3, a1
+2:      sub   a3, a4, a1               # a3: its length
+        mv    a2, a1
         j     3f
 putc:   st    a1, sh_ch
-        la    a3, sh_ch
-        li    a4, 1
-3:      li    a0, SYS_CALL
-        lw    a1, sh_con
-        li    a2, CN_WRITE
+        la    a2, sh_ch
+        li    a3, 1
+3:      li    a0, SYS_WRITE
+        li    a1, STDOUT
         sys
         ret
 
@@ -529,7 +539,7 @@ fground:
         sys
         ret
 
-# putn: print a0 in decimal. Clobbers a0..a4, t0..t3.
+# putn: print a0 in decimal. Clobbers a0..a5, t0..t3.
 putn:   addi  sp, sp, -3               # it calls puts and putc
         sw    ra, 0(sp)
         mv    t3, a0
@@ -591,7 +601,7 @@ sh_fs:       .word SH_NOFS             # the file server's process number
 sh_con:      .word SH_NOCON            # the console server's process number
 sh_fsname:   .string "fs"
 sh_conname:  .string "console"
-sh_ch:       .zero 1                   # what putc prints
+sh_ch:       .zero 1                   # what putc prints, and read reads
 sh_pingpong: .string "pingpong"
 sh_exit:     .string "exit"
 sh_ls:       .string "ls"
