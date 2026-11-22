@@ -135,7 +135,12 @@ pipe.
   is always one the server gave. The server keeps no list of holders:
   the kernel posts `NOTE_CLOSED` (`PCB_CLOSED`) when the last
   descriptor naming a handle goes, and clears every descriptor naming a
-  server that ends.
+  server that ends. A descriptor marked `FD_NOINHERIT` (`SYS_FDFLAGS`)
+  is not copied to children: the shell marks the pipe ends it keeps, or
+  a pipe's reader would never see the end.
+- **Pipes are the pipe server's**, `user/piped.s` (labels `pp_`; tests
+  pass `pipes=True` and write `CALL_PIPE`). Shell children now start
+  after five processes (sh and four servers).
 - **A server asleep in `receive` runs it again when woken**
   (`PCB_RETRY`, `kernel/ipc.s`), so `receive` must change nothing
   before it finds work. Arguments are read from the saved registers,

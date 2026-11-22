@@ -928,3 +928,32 @@ could not hand one to a program.
   input. The shell's complaints go to standard error, so `cat nope >
   out` still says why on the console. `cat>out`, with no space after
   the command, is not split: the command is the first word.
+
+### 2026-11-22 · Pipes
+
+Eelco asked for pipes, on the descriptors of #35 and #36.
+
+- **A pipe server, not a kernel pipe** (`user/piped.s`, "pipe"),
+  following the microkernel direction: `PP_PIPE` gives two descriptors,
+  read end 2k and write end 2k + 1, and reads and writes are descriptor
+  calls held until they can be answered, one per process, as the
+  console server holds readers. The kernel's `NOTE_CLOSED` gives the
+  end of file (no write end left) and `E_PIPE` (no read end left) with
+  no bookkeeping of holders. 13 pipes of 729 trytes.
+- **A write waits until all of it is in**, rather than answering with a
+  short count: the shell's `puts` and `bin/hello` write once and do not
+  loop, and POSIX promises whole writes for small ones anyway.
+- **`FD_NOINHERIT` (`fdflags`, 22)**, Unix's close-on-exec: without it
+  every child inherits the shell's copies of the pipe ends, and a reader
+  holding a write end itself never sees the end. Descriptors grew a
+  flags word (`DESC` 9, `PCB_SIZE` 282). `dup2` makes an unmarked copy,
+  as POSIX's does; the shell's saved 0 and 1 are marked too now.
+- **The shell starts every program of a line before waiting**, waiting
+  then in order with each as the console's foreground, so Ctrl-C ends
+  them one at a time. A built-in runs in the shell, after the programs
+  start, with its descriptors put aside (marked) meanwhile; only one per
+  line, since two built-ins would run one after the other and the first
+  could fill a pipe nobody reads. Up to four commands: the shell build
+  has nine process slots, five of them the shell and its servers.
+- **`bin/upper` and `bin/wc`** are filters to pipe into, since programs
+  take no arguments yet.

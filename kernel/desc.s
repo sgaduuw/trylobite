@@ -49,11 +49,13 @@ sys_close:
         lw    a3, 3(t0)
         sw    zero, 0(t0)
         sw    zero, 3(t0)
+        sw    zero, 6(t0)
         call  desc_unref
         li    a0, 0
         j     sys_return
 
-# dup2(fd, to): to becomes a copy of fd; what to held is closed.
+# dup2(fd, to): to becomes a copy of fd, which a child inherits whatever
+# fd's flags; what to held is closed.
 sys_dup2:
         call  desc_of
         bltz  a0, sys_return
@@ -68,6 +70,7 @@ sys_dup2:
         sw    t1, 0(t0)
         lw    t1, 3(a4)
         sw    t1, 3(t0)
+        sw    zero, 6(t0)
         beqz  a2, 9f
         call  desc_unref
 9:      mv    a0, a1
@@ -96,9 +99,22 @@ sys_give:
         j     sys_return
 2:      sw    t3, 0(t0)
         sw    a2, 3(t0)
+        sw    zero, 6(t0)
         add   t0, s0, a2               # a descriptor names it again: a
         st    zero, PCB_CLOSED(t0)     # notice not yet taken is stale
         j     sys_return
+8:      li    a0, E_INVAL
+        j     sys_return
+
+# fdflags(fd, flags): FD_NOINHERIT, or 0 for none.
+sys_fdflags:
+        call  desc_of
+        bltz  a0, sys_return
+        beqz  a2, 1f
+        li    t1, FD_NOINHERIT
+        bne   a2, t1, 8f
+1:      sw    a2, 6(t0)
+        j     sys_return               # a0 is 0
 8:      li    a0, E_INVAL
         j     sys_return
 
@@ -194,8 +210,9 @@ desc_ended:
         addi  sp, sp, 3
         ret
 
-# desc_inherit: give the record in s1 copies of the descriptors of
-# process a2, its parent, if it has one. Clobbers t0..t3.
+# desc_inherit: give the record in s1, which is all zeros, copies of the
+# descriptors of process a2, its parent, if it has one: those without
+# FD_NOINHERIT, each at its own number. Clobbers t0..t3.
 desc_inherit:
         bltz  a2, 9f
         li    t0, PCB_SIZE
@@ -204,11 +221,15 @@ desc_inherit:
         add   t0, t0, t1
         addi  t0, t0, PCB_DESCS        # t0: the parent's table
         addi  t1, s1, PCB_DESCS        # t1: the child's
-        li    t2, NDESC * DESC / 3
-1:      lw    t3, 0(t0)
+        li    t2, NDESC
+1:      lw    t3, 6(t0)
+        bnez  t3, 2f                   # not for children
+        lw    t3, 0(t0)
         sw    t3, 0(t1)
-        addi  t0, t0, 3
-        addi  t1, t1, 3
+        lw    t3, 3(t0)
+        sw    t3, 3(t1)
+2:      addi  t0, t0, DESC
+        addi  t1, t1, DESC
         addi  t2, t2, -1
         bnez  t2, 1b
 9:      ret

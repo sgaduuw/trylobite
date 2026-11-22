@@ -18,6 +18,15 @@
 # 0 or 1 at it for the command, built-in or program, which a program
 # inherits, and points it back at the next prompt. Its own complaints go
 # to standard error, so they reach the console whatever is redirected.
+#
+# A | between commands makes a pipeline: each command's standard output
+# goes into a pipe (the pipe server's) that is the next one's standard
+# input. The shell starts every program of the line before it waits for
+# any, so they run side by side, and it keeps its own end of each pipe out
+# of the children (FD_NOINHERIT), so that a reader sees the end once its
+# writer has gone. A built-in in a pipeline runs in the shell itself, once
+# every program of the line has started; one is allowed per line, since
+# two would wait for each other.
 
         .compress
         .section prog0, P_PROG0 * PAGE, V_USER
@@ -32,6 +41,10 @@
         .equ  SH_NOCON, -1             # sh_con with no console server, alike
         .equ  SH_SAVEIN, NDESC - 2     # where standard input and output wait
         .equ  SH_SAVEOUT, NDESC - 1    # while a command has them redirected
+        .equ  SH_PARKIN, NDESC - 4     # where a built-in's standard input and
+        .equ  SH_PARKOUT, NDESC - 3    # output wait while the line starts
+        .equ  SH_STAGES, 4             # commands a pipeline may have
+        .equ  SH_NOPIPE, -1            # sh_pipe with no pipe server, alike
 
 sh:     li    a0, SYS_SPAWN            # the console server
         li    a1, SH_CONSD
@@ -58,6 +71,18 @@ sh:     li    a0, SYS_SPAWN            # the console server
         li    a1, STDIN
         li    a2, STDERR
         sys
+1:      li    a0, SYS_SPAWN            # the pipe server
+        li    a1, SH_PIPED
+        sys
+        bltz  a0, 1f                   # none: sh_pipe stays SH_NOPIPE
+        li    a0, SYS_LOOKUP
+        la    a1, sh_pipename
+        li    a2, LOOKUP_WAIT
+        sys
+        bltz  a0, 1f
+        li    t0, PIPE_PROTOCOL
+        bne   a1, t0, 1f
+        sw    a0, sh_pipe
 1:      li    a0, SYS_SPAWN            # the disk server, which the
         li    a1, SH_DISKD             # file server waits for
         sys
@@ -83,7 +108,24 @@ prompt: lw    t0, sh_redir             # what the last command redirected
         li    a1, STDOUT
         li    a2, SH_SAVEOUT
         call  unredir
-1:      li    t0, STDOUT
+        li    s0, 3                    # and whatever a pipeline that stopped
+2:      li    a0, SYS_CLOSE            # partway left open, so that its
+        mv    a1, s0                   # programs see their pipes end
+        sys
+        addi  s0, s0, 1
+        li    t0, SH_SAVEIN
+        blt   s0, t0, 2b
+1:      sw    zero, sh_inpipe          # then wait for a pipeline's programs,
+        la    s0, sh_pids              # in order
+        lw    s1, sh_npids
+        sw    zero, sh_npids
+3:      beqz  s1, 4f
+        lw    a0, 0(s0)
+        call  reap
+        addi  s0, s0, 3
+        addi  s1, s1, -1
+        j     3b
+4:      li    t0, STDOUT
         sw    t0, sh_outfd
         la    a1, sh_prompt
         call  puts
@@ -134,12 +176,40 @@ eof:    li    a1, '\n'                # end the last prompt's line
 enter:  li    a1, '\n'
         call  putc
         st    zero, 0(s1)
-        mv    a0, s0
+        la    t0, sh_segs              # cut the line at each |, a command
+        sw    s0, 0(t0)                # after each
+        li    t1, 1                    # t1: how many
+        li    t3, '|'
+1:      lt    t2, 0(s0)
+        beqz  t2, 2f
+        addi  s0, s0, 1
+        bne   t2, t3, 1b
+        st    zero, -1(s0)
+        li    t2, SH_STAGES
+        beq   t1, t2, p_many
+        addi  t0, t0, 3
+        sw    s0, 0(t0)
+        addi  t1, t1, 1
+        j     1b
+2:      sw    t1, sh_nseg
+        lw    a0, sh_segs
+        li    t2, 1
+        bne   t1, t2, pipeline
+
+# segment: run the command at a0, with its redirections: a line's only
+# one, or one of a pipeline's (sh_inpipe).
+segment:
         call  word
         mv    s0, a0                   # s0: the command
         mv    s4, a1                   # s4: the rest of the line
         lt    t0, 0(s0)
-        beqz  t0, prompt               # an empty line
+        bnez  t0, 1f
+        lw    t0, sh_inpipe            # an empty line; in a pipeline, a
+        beqz  t0, prompt               # command missing
+        call  to_err
+        la    a1, sh_nocmd
+        j     say
+1:
 
 # Redirections: take each word starting with < or > out of the rest of
 # the line, with the spaces before it, opening its file and pointing
@@ -205,14 +275,7 @@ r_path: lt    t0, 0(s6)                # the rest of the word, or the next
         bnez  t0, 4f
         li    t0, 1
         sw    t0, sh_redir
-        li    a0, SYS_DUP2
-        li    a1, STDIN
-        li    a2, SH_SAVEIN
-        sys
-        li    a0, SYS_DUP2
-        li    a1, STDOUT
-        li    a2, SH_SAVEOUT
-        sys
+        call  save_fds
 4:      beq   s3, s8, r_next           # with no console, it may be there already
         li    a0, SYS_DUP2
         mv    a1, s3
@@ -232,7 +295,9 @@ r_done: st    zero, 0(s7)
         bnez  a0, 2f
         addi  s2, s2, 6
         j     1b
-2:      lw    t0, 3(s2)
+2:      lw    t0, sh_inpipe
+        bnez  t0, p_builtin
+        lw    t0, 3(s2)
         jalr  zero, 0(t0)
 
 6:      la    s2, sh_programs          # s2: the table entry tried
@@ -310,7 +375,155 @@ started:                               # a0: the child, or why it did not start
         mv    a0, s3
         call  putn
         j     newline
-1:      mv    s3, a0                   # s3: the child
+1:      lw    t0, sh_inpipe
+        bnez  t0, p_started
+        call  reap
+        j     prompt
+newline:
+        li    a1, '\n'
+        call  putc
+        j     prompt
+
+# --- pipelines ------------------------------------------------------------------
+# pipeline: run the sh_nseg commands of sh_segs, a pipe between each and
+# the next. Each command in turn gets its standard input (the last pipe's
+# read end, or the shell's) and output (a new pipe's write end, or the
+# shell's) in 0 and 1, and is started (a program) or put aside until all
+# are (a built-in). prompt then puts the shell's back, which closes its
+# ends of the pipes, and waits for the programs.
+pipeline:
+        li    t0, 1
+        sw    t0, sh_inpipe
+        sw    zero, sh_stage
+        sw    zero, sh_bi
+        li    t0, -1                   # no pipe yet
+        sw    t0, sh_prevr
+        lw    t0, sh_redir
+        bnez  t0, p_next
+        li    t0, 1
+        sw    t0, sh_redir
+        call  save_fds
+p_next: lw    a1, sh_prevr             # standard input: the last pipe,
+        bgez  a1, 1f
+        li    a1, SH_SAVEIN            # or the shell's
+1:      li    a0, SYS_DUP2
+        li    a2, STDIN
+        sys
+        lw    a1, sh_prevr
+        bltz  a1, 2f
+        li    a0, SYS_CLOSE
+        sys
+2:      lw    t0, sh_stage             # standard output: a new pipe,
+        addi  t0, t0, 1
+        lw    t1, sh_nseg
+        blt   t0, t1, 3f
+        li    a0, SYS_DUP2             # or the shell's, for the last
+        li    a1, SH_SAVEOUT
+        li    a2, STDOUT
+        sys
+        li    t0, -1
+        sw    t0, sh_prevr
+        j     4f
+3:      li    a0, SYS_CALL
+        lw    a1, sh_pipe
+        li    a2, PP_PIPE
+        sys
+        bltz  a0, p_nopipe
+        sw    a0, sh_prevr             # the read end, for the next one,
+        mv    s0, a1                   # s0: the write end
+        call  noinherit                # which this one must not hold
+        li    a0, SYS_DUP2
+        mv    a1, s0
+        li    a2, STDOUT
+        sys
+        li    a0, SYS_CLOSE
+        mv    a1, s0
+        sys
+4:      lw    t0, sh_stage
+        li    t1, 3
+        mul   t0, t0, t1
+        la    t1, sh_segs
+        add   t0, t0, t1
+        lw    a0, 0(t0)
+        j     segment
+
+# p_started: program a0 of the line has started. p_builtin: built-in s2,
+# with the rest of its line at s4, waits with its 0 and 1 put aside.
+p_started:
+        lw    t0, sh_npids
+        li    t1, 3
+        mul   t1, t0, t1
+        la    t2, sh_pids
+        add   t1, t1, t2
+        sw    a0, 0(t1)
+        addi  t0, t0, 1
+        sw    t0, sh_npids
+        j     p_step
+p_builtin:
+        lw    t0, sh_bi
+        bnez  t0, p_twobi
+        sw    s2, sh_bi
+        sw    s4, sh_birest
+        li    a0, SYS_DUP2
+        li    a1, STDIN
+        li    a2, SH_PARKIN
+        sys
+        li    a0, SH_PARKIN            # put aside, and not inherited
+        call  noinherit
+        li    a0, SYS_DUP2
+        li    a1, STDOUT
+        li    a2, SH_PARKOUT
+        sys
+        li    a0, SH_PARKOUT
+        call  noinherit
+p_step: lw    t0, sh_stage
+        addi  t0, t0, 1
+        sw    t0, sh_stage
+        lw    t1, sh_nseg
+        blt   t0, t1, p_next
+        lw    s2, sh_bi                # all started: now the built-in
+        beqz  s2, prompt
+        li    a0, SYS_DUP2
+        li    a1, SH_PARKIN
+        li    a2, STDIN
+        sys
+        li    a0, SYS_DUP2
+        li    a1, SH_PARKOUT
+        li    a2, STDOUT
+        sys
+        li    a0, SYS_CLOSE
+        li    a1, SH_PARKIN
+        sys
+        li    a0, SYS_CLOSE
+        li    a1, SH_PARKOUT
+        sys
+        lw    s4, sh_birest
+        lw    t0, 3(s2)
+        jalr  zero, 0(t0)
+
+p_twobi:
+        call  to_err
+        la    a1, sh_twobi
+        j     say
+p_many:
+        call  to_err
+        la    a1, sh_many
+        j     say
+p_nopipe:
+        mv    s3, a0
+        call  to_err
+        la    a1, sh_nopipe
+        call  puts
+        mv    a0, s3
+        call  putn
+        j     newline
+
+# reap: give the console to child a0, wait for it to end, take the
+# console back, and say how it ended if not with 0. Clobbers a0..a5,
+# t0..t3, s2, s3.
+reap:   addi  sp, sp, -3
+        sw    ra, 0(sp)
+        mv    s3, a0                   # s3: the child
         mv    a3, a0                   # Ctrl-C kills it while it runs
         call  fground
         mv    a1, s3
@@ -320,28 +533,26 @@ started:                               # a0: the child, or why it did not start
         mv    s2, a0                   # s2: how it ended
         li    a3, NO_FOREGROUND        # the console is the shell's again,
         call  fground                  # before the next program's number
-        mv    a0, s2                   # can be this one's
-        call  to_err                   # what follows is about it, not output
-        mv    a0, s2
+        call  to_err                   # can be this one's. What follows is
+        mv    a0, s2                   # about it, not output
         li    t0, WAIT_KILLED
-        beq   a0, t0, killed
-        br3   a0, prompt, faulted      # negative cannot happen: it is ours
-        beqz  s3, prompt               # exited with 0: nothing to say
+        beq   a0, t0, 1f
+        br3   a0, 9f, 2f               # negative cannot happen: it is ours
+        beqz  s3, 9f                   # exited with 0: nothing to say
         la    a1, sh_exited
-        j     2f
-killed: la    a1, sh_killed
+        j     3f
+1:      la    a1, sh_killed
         call  puts
-        j     newline
-faulted:
-        la    a1, sh_faulted
-2:
-        call  puts
+        j     4f
+2:      la    a1, sh_faulted
+3:      call  puts
         mv    a0, s3
         call  putn
-newline:
-        li    a1, '\n'
+4:      li    a1, '\n'
         call  putc
-        j     prompt
+9:      lw    ra, 0(sp)
+        addi  sp, sp, 3
+        ret
 
 # --- built-ins ----------------------------------------------------------------
 # Each is jumped to with s4 at the rest of its line, and ends at prompt.
@@ -594,6 +805,37 @@ unredir:
         sys
         ret
 
+# save_fds: keep the shell's standard input and output in SH_SAVEIN and
+# SH_SAVEOUT, out of children, while a command has others. Clobbers
+# a0..a3, t0.
+save_fds:
+        addi  sp, sp, -3
+        sw    ra, 0(sp)
+        li    a0, SYS_DUP2
+        li    a1, STDIN
+        li    a2, SH_SAVEIN
+        sys
+        li    a0, SH_SAVEIN
+        call  noinherit
+        li    a0, SYS_DUP2
+        li    a1, STDOUT
+        li    a2, SH_SAVEOUT
+        sys
+        li    a0, SH_SAVEOUT
+        call  noinherit
+        lw    ra, 0(sp)
+        addi  sp, sp, 3
+        ret
+
+# noinherit: keep descriptor a0 out of the children the shell starts.
+# Clobbers a0..a2.
+noinherit:
+        mv    a1, a0
+        li    a0, SYS_FDFLAGS
+        li    a2, FD_NOINHERIT
+        sys
+        ret
+
 # to_err: what puts and putc print goes to standard error, until the next
 # prompt. Clobbers t0.
 to_err: li    t0, STDERR
@@ -741,10 +983,21 @@ sh_programs:
         .align 1
 sh_fs:       .word SH_NOFS             # the file server's process number
 sh_con:      .word SH_NOCON            # the console server's process number
+sh_pipe:     .word SH_NOPIPE           # the pipe server's process number
+sh_inpipe:   .word 0                   # 1 while a pipeline starts
+sh_nseg:     .word 0                   # its commands,
+sh_segs:     .words SH_STAGES          # where each starts,
+sh_stage:    .word 0                   # the one being started,
+sh_prevr:    .word 0                   # the last pipe's read end, or -1,
+sh_bi:       .word 0                   # its built-in's table entry, or 0,
+sh_birest:   .word 0                   # and the rest of the built-in's line
+sh_npids:    .word 0                   # programs it has started,
+sh_pids:     .words SH_STAGES          # in order
 sh_outfd:    .word STDOUT              # where puts and putc print
 sh_redir:    .word 0                   # 1 while a command has redirections
 sh_fsname:   .string "fs"
 sh_conname:  .string "console"
+sh_pipename: .string "pipe"
 sh_ch:       .zero 1                   # what putc prints, and read reads
 sh_pingpong: .string "pingpong"
 sh_exit:     .string "exit"
@@ -766,6 +1019,10 @@ sh_faulted:  .string "sh: fault "
 sh_killed:   .string "sh: killed"
 sh_cancel:   .string "^C\n"
 sh_noname:   .string "sh: which file?"
+sh_nocmd:    .string "sh: a command is missing around |"
+sh_twobi:    .string "sh: one built-in to a pipeline"
+sh_many:     .string "sh: too many commands in the pipeline"
+sh_nopipe:   .string "sh: cannot make a pipe: "
 sh_sh:       .string "sh: "
 sh_colon:    .string ": "
 sh_noent:    .string "no such file or directory"

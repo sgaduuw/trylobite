@@ -42,15 +42,16 @@ builds it with `sh` as program 0, which reads a line from the console,
 runs the program it names, waits for it and says how it ended. Only
 `pingpong` (the demo above, as a program) is built into the kernel
 image; other programs are files in `/bin` on the disk, from `bin/`:
-`hello`, `fail` (which exits with 3) and `spin` (a runaway that loops
-for ever).
+`hello`, `fail` (which exits with 3), `spin` (a runaway that loops
+for ever), and two filters for pipelines, `upper` (standard input to
+output in capitals) and `wc` (counts lines, words and code points).
 It also has the built-in `exit` and the file built-ins further down,
 and stops at the end of its input. Ctrl-C ends the program the shell is
 waiting for, and at the prompt drops the line typed so far:
 
 ```bash
 tools/fs.py new disk.img 20 bin/*.s
-printf 'hello\nfail\nexit\n' > session.txt
+printf 'hello\nfail\nhello | upper | wc\nexit\n' > session.txt
 detrytus run shell.s --ram-pages 81 --input session.txt --disk disk.img
 ```
 
@@ -137,10 +138,10 @@ it, or else the one on the PATH is used.
 | `kernel/ipc.s` | messages for servers: `call`, `receive`, `reply`, `copyin`, `copyout` |
 | `kernel/desc.s` | descriptors: `read`, `write`, `iocall`, `close`, `dup2` and `give`, routed to servers, and the notice when a handle's last descriptor goes |
 | `include/kernel.s` | firmware and kernel together, without programs: included by a build such as `demo.s`, not run on its own |
-| `user/` | programs built into the kernel image: `init` (program 0 of the demo), `ping` (1) and `pong` (2); `sh` (program 0 of the shell build), `pingpong` (3), `fsd`, the file server (4), `diskd`, the disk server (5), and `consd`, the console server (6) |
-| `bin/` | programs for the disk, each assembled on its own: `hello`, `fail` and `spin` |
+| `user/` | programs built into the kernel image: `init` (program 0 of the demo), `ping` (1) and `pong` (2); `sh` (program 0 of the shell build), `pingpong` (3), `fsd`, the file server (4), `diskd`, the disk server (5), `consd`, the console server (6), and `piped`, the pipe server (7) |
+| `bin/` | programs for the disk, each assembled on its own: `hello`, `fail`, `spin`, `upper` and `wc` |
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
-| `shell.s` | the same machine, starting the shell, with sh, ping, pong, pingpong, the file server and the disk server |
+| `shell.s` | the same machine, starting the shell, with sh, ping, pong, pingpong, the file, disk, console and pipe servers |
 | `docs/filesystem.md` | the on-disk format of the filesystem |
 | `tools/fs.py` | builds and reads filesystem images on the host |
 | `tests/` | the tests, and a harness that builds the kernel with test programs |
@@ -167,7 +168,7 @@ registers mapped past them, at `V_DEVICE`.
 | 0 | firmware |
 | 1, 2 | kernel code; kernel data |
 | 3, 4, 5 | the boot address space; the kernel's shared leaf table |
-| 6 .. 5 + `NPROG` | program images 0 to `NPROG` − 1 (the demo has 3, the shell build 6) |
+| 6 .. 5 + `NPROG` | program images 0 to `NPROG` − 1 (the demo has 3, the shell build 8) |
 | 6 + `NPROG` .. `RAM_PAGES` | free pages, handed out by the allocator |
 
 ## System calls
@@ -195,6 +196,7 @@ registers mapped past them, at `V_DEVICE`.
 | 19 | `iocall(fd, op, x, y)` | a call to the server descriptor `fd` names, with `op`, an `IO_` operation (negative), its handle, `x` and `y`: the server's answer; −8 if `fd` names nothing, −10 if `op` is not an `IO_` operation. Leaves `a1` to `a5` as `call` does |
 | 20 | `read(fd, buffer, n)` | `iocall` with `IO_READ`: at least one and at most `n` trytes, 0 at the end |
 | 21 | `write(fd, buffer, n)` | `iocall` with `IO_WRITE`: how many were written |
+| 22 | `fdflags(fd, flags)` | sets descriptor `fd`'s flags: `FD_NOINHERIT` (1), a child does not get a copy, or 0: 0; −8 if `fd` names nothing, −10 another flag |
 | 23 | `call(pid, w1, w2, w3, w4)` | sends four words to process `pid` and waits for its reply: the reply's four words in `a0` to `a3`; `a0` −2 if there is no such process or it ends first, −3 if `pid` is the caller, −10 if `w1` is negative (an `IO_` operation, which only a descriptor sends) |
 | 24 | `receive()` | waits for a call: `a0` the caller, `a1` to `a4` its words; or `a0` `FROM_KERNEL` (−1) and `a1` `NOTE_ENDED` (0), `a2` a process that ended, or `a1` `NOTE_IRQ` (1), `a2` a device source the caller drives that interrupted, or `a1` `NOTE_CLOSED` (2), `a2` a handle of the caller's that no descriptor names any more |
 | 25 | `reply(pid, w1, w2, w3, w4)` | ends the call of process `pid`, which this process received: 0; −2 if `pid` is not waiting for its reply |
@@ -207,7 +209,7 @@ registers mapped past them, at `V_DEVICE`.
 | 32 | `arm(source)` | lets the source the caller drives interrupt once: 0; −21 it does not drive it |
 | 33 | `phys(address)` | the physical address of the caller's `address`, for a device to use: −12 nothing there, −21 the caller drives no device |
 
-Numbers 9, 11, 12, 14 and 22 are free: console input, blocks and
+Numbers 9, 11, 12 and 14 are free: console input, blocks and
 files are not system calls but calls to the console server, the disk
 server and the file server (below and docs/filesystem.md), which fail with their own negative numbers, −2 and
 −4 to −14: no filesystem, no such file, not a
@@ -244,7 +246,8 @@ a descriptor are calls to its server with an `IO_` operation and the
 handle. `call` refuses those operations, so a server that gets one
 knows the kernel brought it from a descriptor it gave out: a handle
 cannot be forged. A process can copy its descriptors (`dup2`) and close
-them, and a child starts with copies of its parent's; copies share the
+them, and a child starts with copies of its parent's, but those marked
+`FD_NOINHERIT` (`fdflags`; `dup2` makes an unmarked copy); copies share the
 open file, and its position, as after Unix's `dup`. When the last
 descriptor naming a handle goes (closed, overwritten by `dup2`, or its
 process ending), the kernel tells the server with a `NOTE_CLOSED`
@@ -303,7 +306,21 @@ sends standard output to a file, made empty or new, `>> PATH` to its
 end, and `< PATH` takes standard input from one, for that command alone,
 built-in or program: `hello > out`, `ls >>list`, `cat < notes`. The
 shell's own complaints go to standard error, the console, whatever is
-redirected. `tools/fs.py` stores a `.s` or `.dti` file as a
+redirected.
+
+A `|` between commands makes a **pipeline**: `hello | upper | wc`, up to
+four commands. Pipes come from a process, the **pipe server**
+(`user/piped.s`, registered as `pipe`): `PP_PIPE` gives the caller a
+read end and a write end as descriptors. A read waits for something
+to read and gives 0 once no write end is left; a write waits until all
+of it is in (a pipe holds 729 trytes) and is `E_PIPE` once no read end
+is left. The shell starts every program of the line, each with its
+pipe ends as standard input and output, before it waits for any, and
+marks its own ends `FD_NOINHERIT` so that a reader sees the end when its
+writer goes. A built-in takes one place in a pipeline (`ls | wc`,
+`hello | cat`) and runs in the shell once the programs have started;
+two would wait for each other. Ctrl-C ends the program the shell is
+waiting for, the line's first first. `tools/fs.py` stores a `.s` or `.dti` file as a
 program, in `/bin`:
 
 ```bash

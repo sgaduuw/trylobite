@@ -45,6 +45,8 @@ syscall_again:                         # resume runs a call again (ipc.s)
         beq   a0, t0, sys_dup2
         li    t0, SYS_GIVE
         beq   a0, t0, sys_give
+        li    t0, SYS_FDFLAGS
+        beq   a0, t0, sys_fdflags
         li    t0, SYS_CALL
         beq   a0, t0, sys_call_user
         li    t0, SYS_RECEIVE
