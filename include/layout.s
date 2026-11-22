@@ -209,7 +209,13 @@
         .equ  SYS_READ,  20               # read(fd, buffer, n): iocall with IO_READ
         .equ  SYS_WRITE, 21               # write(fd, buffer, n): iocall with
                                           # IO_WRITE
-        # 22 was desc, which let a process point a descriptor anywhere
+        .equ  SYS_FDFLAGS, 22             # fdflags(fd, flags): set descriptor fd's
+                                          # flags, FD_NOINHERIT or 0: 0, E_BADF,
+                                          # E_INVAL (22 was desc, which let a
+                                          # process point a descriptor anywhere)
+        .equ  FD_NOINHERIT, 1             # a child does not get a copy: for a
+                                          # descriptor a parent keeps for later,
+                                          # such as a pipe's other end
         .equ  NDESC,      9               # descriptors per process
         .equ  NHANDLE,   27               # handles a server may give, 0 to 26
         .equ  STDIN,      0
@@ -390,6 +396,18 @@
         .equ  CONSOLE_HANDLE, 0           # the console's one handle, for IO_READ
                                           # and IO_WRITE (E_BADF for another)
 
+# Pipes come from the pipe server, which registers as "pipe" with
+# protocol PIPE_PROTOCOL. Its ends are descriptors: IO_READ waits for
+# something to read, and gives 0 once every write end has closed;
+# IO_WRITE waits until all n trytes are in, and is E_PIPE once every
+# read end has closed.
+        .equ  PIPE_PROTOCOL, 1
+        .equ  PP_PIPE,    0               # pipe(): a0 = a read end's descriptor,
+                                          # a1 = its write end's; E_NOSPC (every
+                                          # pipe in use), E_MFILE (no descriptor
+                                          # free; with a1 the read end's, if that
+                                          # one was given, to close)
+
         .equ  E_NOCALL,  -1               # no system call with that number
         .equ  E_FULL,    -1               # send: the receiver's mailbox is full
         .equ  E_NOPROC,  -2               # send: no such process
@@ -428,6 +446,7 @@
         .equ  E_NOROOM, -20               # getcwd: the buffer is too small (Unix's
                                           # ERANGE; E_RANGE is puts')
         .equ  E_PERM,   -21               # drive, arm, phys: not allowed
+        .equ  E_PIPE,   -22               # pipe write: no read end is open
 
         .equ  O_RDONLY, 0                 # open: the access mode is the flags mod
         .equ  O_WRONLY, 1                 # 3. Add any of O_CREAT (make a file not
@@ -503,11 +522,12 @@
                                           # at 162, 165 and 168): 1 for each process
                                           # that has ended since receive last told it
         .equ  PCB_TURN,   171             # receive: the caller it took last
-        .equ  PCB_DESCS,  174             # NDESC descriptors, two words each: the
-                                          # server plus 1 (0 for none) and the handle
-        .equ  DESC,         6             # trytes per descriptor
-        .equ  PCB_CLOSED, PCB_DESCS + NDESC * DESC - 1   # NHANDLE trytes, 227 to
-                                          # 253 (in the words at 228 to 252): 1 for
+        .equ  PCB_DESCS,  174             # NDESC descriptors, three words each: the
+                                          # server plus 1 (0 for none), the handle
+                                          # and its flags (FD_NOINHERIT or 0)
+        .equ  DESC,         9             # trytes per descriptor
+        .equ  PCB_CLOSED, PCB_DESCS + NDESC * DESC - 1   # NHANDLE trytes, 254 to
+                                          # 280 (in the words at 255 to 279): 1 for
                                           # each of its handles that no descriptor
                                           # has named since receive last told it
         .equ  PCB_SIZE,   PCB_CLOSED + NHANDLE + 1

@@ -7,11 +7,13 @@
 #   detrytus run shell.s --ram-pages 81 --input session.txt --disk disk.img
 
         .equ  RAM_PAGES, 81            # the machine this build is for
-        .equ  NPROG, 7                 # sh, ping, pong, pingpong, the file server,
-                                       # the disk server, the console server
+        .equ  NPROG, 8                 # sh, ping, pong, pingpong, the file server,
+                                       # the disk server, the console server,
+                                       # the pipe server
         .equ  SH_FSD, 4                # which sh starts, after
         .equ  SH_DISKD, 5              # this one, after
-        .equ  SH_CONSD, 6              # this one
+        .equ  SH_CONSD, 6              # this one, and the pipe server
+        .equ  SH_PIPED, 7              # after it
 
         .include "include/kernel.s"
         .include "user/sh.s"
@@ -24,3 +26,5 @@
         .include "user/diskd.s"
         .section prog6, P_PROG6 * PAGE, V_USER
         .include "user/consd.s"
+        .section prog7, P_PROG7 * PAGE, V_USER
+        .include "user/piped.s"

@@ -131,10 +131,15 @@ def exit_with(register: str) -> str:
 
 
 # The servers a build can add, from program 3 on: the disk server, the
-# file server, which needs it, and the console server. init's first lines
-# start them in that order, so with files the disk server is process 1
-# and the file server process 2.
-SERVERS = {"disk": "user/diskd.s", "fs": "user/fsd.s", "console": "user/consd.s"}
+# file server, which needs it, the console server and the pipe server.
+# init's first lines start them in that order, so with files the disk
+# server is process 1 and the file server process 2.
+SERVERS = {
+    "disk": "user/diskd.s",
+    "fs": "user/fsd.s",
+    "console": "user/consd.s",
+    "pipe": "user/piped.s",
+}
 
 
 def start(program: int) -> str:
@@ -184,11 +189,13 @@ def build(
     files: bool = False,
     disk_server: bool = False,
     console: bool = False,
+    pipes: bool = False,
 ) -> Image:
     """The kernel with init as program 0 and prog1, prog2 to spawn; with
     disk_server, also the disk server (user/diskd.s), with files the
     file server (user/fsd.s) after it, and with console the console server
-    (user/consd.s), which init starts first."""
+    (user/consd.s), and with pipes the pipe server (user/piped.s), all of
+    which init starts first."""
     init, prog1, prog2 = (
         find_servers(p, n) for n, p in enumerate((init, prog1, prog2))
     )
@@ -196,6 +203,7 @@ def build(
         *(["disk"] if files or disk_server else []),
         *(["fs"] if files else []),
         *(["console"] if console else []),
+        *(["pipe"] if pipes else []),
     ]
     server = ""
     for k, name in enumerate(servers, 3):
@@ -346,7 +354,7 @@ def new_disk() -> Path:
 _BIN: dict[str, list[int]] = {}
 
 
-def bin_disk(blocks: int = 8, **texts: str) -> tuple[Path, int]:
+def bin_disk(blocks: int = 12, **texts: str) -> tuple[Path, int]:
     """A new disk holding a filesystem with every program of bin/ in /bin,
     as the shell expects, and these text files in /: (path, blocks)."""
     from tools.fs import Filesystem, program_file
@@ -425,6 +433,7 @@ def run(
     files: bool = False,
     disk_server: bool = False,
     console: bool = False,
+    pipes: bool = False,
 ) -> Run:
-    image = build(init, prog1, prog2, ram_pages, files, disk_server, console)
+    image = build(init, prog1, prog2, ram_pages, files, disk_server, console, pipes)
     return run_image(image, ram_pages, max_steps, harts, plug, unplug, input, disk)

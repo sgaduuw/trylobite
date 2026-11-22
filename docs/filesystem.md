@@ -304,4 +304,4 @@ directory with anything in it.
 
 ## Later
 
-Arguments for programs, and pipes. Directories of more than one block, and `rename`.
+Arguments for programs. Directories of more than one block, and `rename`.
