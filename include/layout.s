@@ -426,6 +426,14 @@
         .equ  SF_INODES,  6               # inodes a file can have (1 to 728),
         .equ  SF_IFREE,   9               # ... of them free
         .equ  STATFS,    12               # trytes statfs fills, from SF_BLOCKS - 1
+        .equ  FS_RENAME, 14               # rename(from, to): 0; what from names
+                                          # takes the name to, replacing a file of
+                                          # that name: E_BUSY (that file is open,
+                                          # or from is the root), E_ISDIR (to is a
+                                          # directory), E_EXIST (from is a
+                                          # directory and to exists, or to is the
+                                          # root), E_INVAL (. or .., or a directory
+                                          # into itself), E_NOSPC, as open fails
         .equ  PATH_MAX, 243               # trytes a path may have, its 0 not counted
 
 # Blocks come from the disk server, which registers as "disk" with

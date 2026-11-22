@@ -118,11 +118,12 @@ def test_top_shows_a_screen_each_period(shell):
 
 def test_df_counts_blocks_and_inodes(shell):
     on = bin_disk()
+    blocks = on[1]
     out = said(shell, "df\nwrite notes hello\ndf\n", on)
     rows = [line.split() for line in out.splitlines() if line.startswith("disk0")]
     before, after = ([int(n.rstrip("%")) for n in row[1:7]] for row in rows)
-    assert before[0] == after[0] == 27
-    assert before[1] + before[2] == 27
+    assert before[0] == after[0] == blocks
+    assert before[1] + before[2] == blocks
     assert after[1] == before[1] + 1  # the new file's block
     assert after[5] == before[5] - 1  # and its inode
     assert before[4] == 728

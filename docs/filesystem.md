@@ -4,7 +4,7 @@ A filesystem on detrytus' block device, shaped like a Unix one: files
 and directories are inodes, directories are files of names and inode
 numbers with `.` and `..`, and programs reach files by path through
 descriptors, with `open`, `read`, `write`, `lseek`, `readdir`, `stat`
-and `close`, and `unlink`, `mkdir` and `rmdir`. A process, the file
+and `close`, and `unlink`, `rename`, `mkdir` and `rmdir`. A process, the file
 server (`user/fsd.s`), reads and changes it, answering other processes'
 calls; `tools/fs.py` builds and changes images
 on the host. Every number below is named in `include/layout.s`, which the
@@ -163,6 +163,7 @@ file's last block) and `E_BUSY`.
 | `FS_CHDIR` (11) | `chdir(path)` | makes the directory the caller's current one; a file is `E_NOTDIR` |
 | `FS_GETCWD` (12) | `getcwd(buffer, n)` | the current directory's path from the root, ended with 0, to the buffer: its length. `E_NOROOM` (Unix's `ERANGE`) when it and its 0 need more than `n` trytes, `E_NAMETOOLONG` when it is longer than `PATH_MAX` |
 | `FS_STATFS` (13) | `statfs(buffer)` | how full the disk is, four words at the word-aligned buffer: `SF_BLOCKS` (in the filesystem) and `SF_BFREE` (free in the map), `SF_INODES` (728, inodes 1 to 728) and `SF_IFREE` (free ones). `bin/df` says them. Adding it did not move `FS_PROTOCOL`: an older client never sends it |
+| `FS_RENAME` (14) | `rename(from, to)` | gives what `from` names the name `to`, in the same directory or another; a directory moved to another parent gets that as its `..`. A file already named `to` is replaced, and freed if that was its last name; the same file under both names is left alone. Below, what it refuses |
 
 Numbers 1 to 4 and 7 were `close`, `read`, `lseek`, `readdir` and
 `write` before `FS_PROTOCOL` 2; they are descriptor calls on what
@@ -186,7 +187,13 @@ a descriptor not open for it is `E_BADF`.
 
 `unlink` and `rmdir` refuse, with `E_BUSY`, a file or directory that a
 process has open, or that is a process's current directory, where Unix
-would keep it until the last descriptor closes or the process moves. A new file or directory takes the lowest free inode and its
+would keep it until the last descriptor closes or the process moves.
+`rename` refuses to replace a file some process has open (`E_BUSY`)
+for the same reason, and never replaces a directory: one named `to` is
+`E_ISDIR` for a file and `E_EXIST` for a directory, where Unix lets a
+directory replace an empty one. A directory may not move inside itself
+(`E_INVAL`), the root may not move (`E_BUSY`) nor be replaced
+(`E_EXIST`), and neither name may be `.` or `..` (`E_INVAL`). A new file or directory takes the lowest free inode and its
 blocks the lowest free blocks.
 
 Descriptors are the kernel's, so a child inherits its parent's open
@@ -250,7 +257,9 @@ name in `/bin`, as a Unix shell searches its `PATH`, with the line's
 words (redirections left out) as its arguments. Nothing there, or
 no filesystem, is `sh: no such program: NAME`; a text file or a
 directory is `sh: not a program: NAME`. The programs in `bin/` are
-meant for `/bin`.
+meant for `/bin`: besides `hello`, `fail` and `spin`, which tests run,
+they are `echo`, `upper`, `wc`, `head` and `grep` for text, and `cp`,
+`mv` and `touch` for files (docs/kernel.md, The shell).
 
 ## Program files
 
@@ -337,4 +346,4 @@ directory with anything in it.
 
 ## Later
 
-Directories of more than one block, and `rename`.
+Directories of more than one block.
