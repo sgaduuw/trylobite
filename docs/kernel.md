@@ -162,9 +162,10 @@ prints that many trytes; with `CN_GETC` it answers with the next code
 point typed, holding the call until there is one, and `GETC_NONE` once
 the console has closed. The reader takes no hart while it waits: input
 reaches the server as an interrupt notice. `detrytus run --input FILE`
-closes the console behind the file; in `detrytus debug` the console
-stays open, `input TEXT` types more while a program waits, and `eof`
-closes it. The kernel still writes its own messages, and `putc` and
+closes the console behind the file; `detrytus run` at a terminal
+without `--input` passes each key as it is typed and closes at Ctrl-D;
+in `detrytus debug` the console stays open, `input TEXT` types more
+while a program waits, and `eof` closes it. The kernel still writes its own messages, and `putc` and
 `puts`, to the console's output directly: they are its log.
 
 Ctrl-C (code point 3) kills the console's **foreground process**, which
