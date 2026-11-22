@@ -77,10 +77,13 @@ the root's `..` is the root. An unused entry's name is zero too.
 
 ## Paths
 
-A path is names separated by slashes. It starts at the root whether or
-not it starts with one, since nothing has a current directory yet;
-slashes before, between and after names do not count, and `.` and `..`
-are ordinary entries, so `/a/./b/../b` is `/a/b`. A path has at most
+A path is names separated by slashes. One that starts with a slash
+starts at the root; any other starts at the calling process's current
+directory (below), and an empty path names nothing (`E_NOENT`). More
+slashes between and after names do not count, and `.` and `..` are
+ordinary entries, so `/a/./b/../b` is `/a/b`; the root's `..` is the
+root. `tools/fs.py` has no current directory: its paths all start at
+the root. A path has at most
 `PATH_MAX` (243) trytes.
 
 ## Files and programs
@@ -135,6 +138,8 @@ file's last block) and `E_BUSY`.
 | `FS_UNLINK` (8) | `unlink(path)` | removes a file's name from its directory, and frees the file when no name is left. A directory is `E_ISDIR`, a name `.` or `..` `E_INVAL` |
 | `FS_MKDIR` (9) | `mkdir(path)` | makes an empty directory, holding `.` and `..`: `E_EXIST` if the name is taken |
 | `FS_RMDIR` (10) | `rmdir(path)` | removes an empty directory (`E_NOTEMPTY` otherwise); the root is `E_BUSY`, a name `.` or `..` `E_INVAL` |
+| `FS_CHDIR` (11) | `chdir(path)` | makes the directory the caller's current one; a file is `E_NOTDIR` |
+| `FS_GETCWD` (12) | `getcwd(buffer, n)` | the current directory's path from the root, ended with 0, to the buffer: its length. `E_NOROOM` (Unix's `ERANGE`) when it and its 0 need more than `n` trytes, `E_NAMETOOLONG` when it is longer than `PATH_MAX` |
 
 `flags` is the access mode, `O_RDONLY` (0), `O_WRONLY` (1) or `O_RDWR`
 (2), plus any of `O_CREAT` (3: make a file that is not there),
@@ -145,8 +150,8 @@ directory opens for reading only (`E_ISDIR`), and `read` or `write` on
 a descriptor not open for it is `E_BADF`.
 
 `unlink` and `rmdir` refuse, with `E_BUSY`, a file or directory that a
-process has open, where Unix would keep it until the last descriptor
-closes. A new file or directory takes the lowest free inode and its
+process has open, or that is a process's current directory, where Unix
+would keep it until the last descriptor closes or the process moves. A new file or directory takes the lowest free inode and its
 blocks the lowest free blocks.
 
 Descriptors belong to a process and go with it: the server keeps them,
@@ -154,6 +159,14 @@ and closes them when the kernel tells it the process has ended, before
 it takes any later call. A new process has none.
 They are numbered from 0 like Unix ones, but nothing opens 0, 1 and 2
 for the console yet.
+
+Each process has a current directory, kept by the server as well and
+forgotten when the process ends. It is the root until the process calls
+`chdir`. A program started from a file with `spawnf` starts in its
+parent's current directory; one the kernel starts from its image
+(`spawn`) starts at the root. The server finds a directory's path for
+`getcwd` by climbing: each directory's `..` is its parent, and the
+parent's entry for it gives its name.
 
 ## The server's blocks
 
@@ -178,13 +191,15 @@ runs: a `bwrite` by another process is not seen in its windows.
 
 ## The shell
 
-`sh` (`user/sh.s`) starts the file server first, then has six file
+`sh` (`user/sh.s`) starts the file server first, then has eight file
 built-ins. `ls [DIR]` lists a directory,
-`/` when none is given, leaving out names that start with a dot: a
+the current one when none is given, leaving out names that start with a dot: a
 file's size and name, a directory's name and a slash. `cat PATH` prints
 a file. `write PATH TEXT` makes the file hold the rest of the line,
 replacing what it held; `rm PATH`, `mkdir PATH` and `rmdir PATH` make
-the calls of those names. They say what went wrong as Unix tools do, `sh: PATH: no such
+the calls of those names. `cd [DIR]` moves the shell to the directory,
+or to `/` with none, and `pwd` prints where it is; programs it starts
+from the disk start there. They say what went wrong as Unix tools do, `sh: PATH: no such
 file or directory`, and carry on.
 
 A command that is neither built in nor one of the programs in the
@@ -249,5 +264,4 @@ directory with anything in it.
 
 ## Later
 
-A current directory and relative paths, and descriptors 0, 1 and 2 for
-the console. Directories of more than one block, and `rename`.
+Descriptors 0, 1 and 2 for the console, and arguments for programs. Directories of more than one block, and `rename`.
