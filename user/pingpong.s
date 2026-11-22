@@ -3,7 +3,7 @@
 # that the shell's prompt comes back only once they are done.
 
         .compress
-        .section prog3, P_PROG3 * PAGE, V_USER
+        .section prog3, (P_PROG0 + 3) * PAGE, V_USER
         .gp   USER_GP                  # set by spawn
 
 pingpong:

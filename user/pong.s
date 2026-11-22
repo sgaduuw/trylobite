@@ -2,7 +2,7 @@
 # ping run; then receive three messages.
 
         .compress
-        .section prog2, P_PROG2 * PAGE, V_USER
+        .section prog2, (P_PROG0 + 2) * PAGE, V_USER
         .gp   USER_GP                  # set by spawn
 
         .equ  SPIN, 1500

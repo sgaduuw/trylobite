@@ -4,6 +4,7 @@ and only the middle nine are used."""
 import re
 
 from tests.kernel import SPAWN_BOTH, build, detrytus, exit_with, run, wait_for
+from tools import fs
 
 
 def spin_then_hart(rounds: int = 20000) -> str:
@@ -183,12 +184,12 @@ msg:    .string "A\\n"
         li    a1, 0
         sys
     """
-    result = run(init, a, b, harts=3, max_steps=4_000_000)
+    result = run(init, a, b, harts=3, max_steps=20_000_000)
     assert result.exit_code == 0
     # Precondition: both tenants of slot 1 ran on hart -1.
     assert [c for p, c in result.exits() if p == 1] == [-1, -1]
     assert result.console.count("A\n") == 1
-    assert result.console.count("B\n") == 8
+    assert result.console.count("B\n") == fs.L["NPROC"] - 1
 
 
 def test_harts_waiting_for_the_kernel_lock_sleep():

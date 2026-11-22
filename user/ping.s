@@ -2,7 +2,7 @@
 # and 3. A full mailbox means pong has not caught up: yield and retry.
 
         .compress
-        .section prog1, P_PROG1 * PAGE, V_USER
+        .section prog1, (P_PROG0 + 1) * PAGE, V_USER
         .gp   USER_GP                  # set by spawn
 
 ping:   li    a0, SYS_RECV

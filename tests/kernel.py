@@ -208,7 +208,7 @@ def build(
     server = ""
     for k, name in enumerate(servers, 3):
         server += f"""
-        .section prog{k}, P_PROG{k} * PAGE, V_USER
+        .section prog{k}, (P_PROG0 + {k}) * PAGE, V_USER
         .include "{SERVERS[name]}"
 """
     init = "".join(start(k) for k in range(3, 3 + len(servers))) + init
@@ -218,9 +218,9 @@ def build(
         .include "include/kernel.s"
         .section prog0, P_PROG0 * PAGE, V_USER
 {init}
-        .section prog1, P_PROG1 * PAGE, V_USER
+        .section prog1, (P_PROG0 + 1) * PAGE, V_USER
 {prog1}
-        .section prog2, P_PROG2 * PAGE, V_USER
+        .section prog2, (P_PROG0 + 2) * PAGE, V_USER
 {prog2}
 {server}"""
     # On stdin, .include paths start from the working directory: the root.

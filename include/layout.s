@@ -15,16 +15,13 @@
         .equ  P_BOOTROOT, 3               # the boot address space's root table
         .equ  P_BOOTMID,  4               # ... and its mid table
         .equ  P_KLEAF,    5               # the kernel's leaf table, shared by all
-        .equ  P_PROG0,    6               # program images, as loaded: the kernel
-        .equ  P_PROG1,    7               # copies one into a fresh page for
-        .equ  P_PROG2,    8               # each process it spawns. NPROG of
-        .equ  P_PROG3,    9               # them, as the build declares
-        .equ  P_PROG4,   10
-        .equ  P_PROG5,   11
-        .equ  P_PROG6,   12
-        .equ  P_PROG7,   13
-        .equ  P_PROG8,   14               # (P_FREE, the first free page, is
-                                          # include/kernel.s's: it needs NPROG)
+        .equ  P_PROG0,    6               # program images, as loaded: program n's
+                                          # at page P_PROG0 + n, NPROG of them, as
+                                          # the build declares. The kernel copies
+                                          # one into a fresh page for each process
+                                          # it spawns. (P_FREE, the first free page,
+                                          # is include/kernel.s's: it needs NPROG)
+        .equ  NPROG_MAX, 27               # programs a build may add
         .equ  POWER_PA, -2 * PAGE         # power-off register, for firmware
 
 # --- virtual memory ------------------------------------------------------------
@@ -486,7 +483,7 @@
 # One record per process, in words. Register r is saved at 3 * (r + 13), so
 # sp (r-13) is at 0 and t6 (r13) at 78; r0 has a slot that is never used.
 
-        .equ  NPROC, 9
+        .equ  NPROC, 27
         .equ  PCB_GP,      9              # saved gp
         .equ  PCB_A0,     42              # saved a0: system-call number and result
         .equ  PCB_A1,     45
@@ -524,21 +521,22 @@
                                           # V_DEVICE + PAGE * (s - 1)
         .equ  PCB_SERVES, 159             # 1 once it has called receive: it is told
                                           # of every process that ends
-        .equ  PCB_NOTES,  161             # NPROC trytes, 161 to 169 (in the words
-                                          # at 162, 165 and 168): 1 for each process
+        .equ  PCB_NOTES,  161             # NPROC trytes, 161 to 187 (in the words
+                                          # at 162 to 186): 1 for each process
                                           # that has ended since receive last told it
-        .equ  PCB_TURN,   171             # receive: the caller it took last
-        .equ  PCB_DESCS,  174             # NDESC descriptors, three words each: the
+        .equ  PCB_TURN,   189             # receive: the caller it took last
+        .equ  PCB_DESCS,  192             # NDESC descriptors, three words each: the
                                           # server plus 1 (0 for none), the handle
                                           # and its flags (FD_NOINHERIT or 0)
         .equ  DESC,         9             # trytes per descriptor
-        .equ  PCB_CLOSED, PCB_DESCS + NDESC * DESC - 1   # NHANDLE trytes, 254 to
-                                          # 280 (in the words at 255 to 279): 1 for
+        .equ  PCB_CLOSED, PCB_DESCS + NDESC * DESC - 1   # NHANDLE trytes, 272 to
+                                          # 298 (in the words at 273 to 297): 1 for
                                           # each of its handles that no descriptor
                                           # has named since receive last told it
         .equ  PCB_SIZE,   PCB_CLOSED + NHANDLE + 1
         .assert PCB_SIZE % 3 == 0, "PCB_SIZE is not whole words"
         .assert PCB_NOTES + NPROC <= PCB_TURN - 1, "PCB_NOTES runs into PCB_TURN's trytes"
+        .assert (NPROC % 3 == 0) * (NHANDLE % 3 == 0), "receive reads PCB_NOTES and PCB_CLOSED a word at a time"
         .assert PCB_IRQS + NSRC <= 125, "PCB_IRQS runs into PCB_RETRY's word"
         .equ  PAGES_PER_PROCESS, 4
 

@@ -1,6 +1,20 @@
 """Process creation, the page allocator and reclaimed memory."""
 
-from tests.kernel import DONE, EXIT, build, exit_with, run, run_image, wait_for
+from tests.kernel import (
+    DONE,
+    EXIT,
+    _assemble,
+    build,
+    exit_with,
+    run,
+    run_image,
+    wait_for,
+)
+from tools import fs
+
+NPROC = fs.L["NPROC"]
+P_FREE = fs.L["P_PROG0"] + 3  # the tests' builds have three programs
+PAGES_PER_PROCESS = fs.L["PAGES_PER_PROCESS"]
 
 WAIT = "li a0, SYS_RECV\n        sys\n        " + DONE  # holds its pages
 
@@ -60,15 +74,17 @@ def test_spawn_fails_when_memory_runs_out():
 
 
 def test_spawn_fails_when_the_table_is_full():
-    # Pages 9..48: room in memory for ten processes, but only nine slots.
-    calls = "\n        ".join(spawn(1) for _ in range(8))
+    # Room in memory for one process more than there are slots: init and
+    # NPROC - 1 children fill the table, and the next spawn finds no slot.
+    calls = "\n        ".join(spawn(1) for _ in range(NPROC - 1))
     init = f"""
         {calls}
         {spawn(1)}
         mv    a1, a0
         {EXIT}
     """
-    result = run(init, WAIT, ram_pages=49, max_steps=3_000_000)
+    pages = P_FREE + PAGES_PER_PROCESS * (NPROC + 1)
+    result = run(init, WAIT, ram_pages=pages, max_steps=10_000_000)
     assert result.code_of(0) == -1
 
 
@@ -131,11 +147,11 @@ msg_b:  .string "B\\n"
         bne   s1, t0, 1b
         {DONE}
     """
-    result = run(init, first, second, max_steps=4_000_000)
+    result = run(init, first, second, max_steps=10_000_000)
     assert result.exit_code == 0
     assert result.console.count("A\n") == 1
-    # Slots 2 to 8, then slot 1 again (slot 0 is init's): eight Bs.
-    assert result.console.count("B\n") == 8
+    # Slots 2 to NPROC - 1, then slot 1 again (slot 0 is init's).
+    assert result.console.count("B\n") == NPROC - 1
     assert [p for p, _ in result.exits()].count(1) == 2
 
 
@@ -176,3 +192,34 @@ def test_a_recycled_page_table_starts_empty():
     entries = result.words([centre + 3 * i for i in range(-3280, 3281)])
     assert sum(1 for e in entries if e) == 1
     assert entries[3280] != 0  # index 0: the process's page
+
+
+def test_a_build_may_add_up_to_nprog_max_programs():
+    # Program n is loaded at page P_PROG0 + n: the last one, NPROG_MAX - 1,
+    # starts and exits with its own number; one past it is no program.
+    last = fs.L["NPROG_MAX"] - 1
+    progs = "".join(
+        f"""
+        .section prog{n}, (P_PROG0 + {n}) * PAGE, V_USER
+        li    a1, {n}
+        {EXIT}
+"""
+        for n in range(1, last + 1)
+    )
+    image = _assemble(
+        ["-"],
+        stdin=f"""
+        .equ  RAM_PAGES, {fs.L["P_PROG0"] + last + 1 + 3 * PAGES_PER_PROCESS}
+        .equ  NPROG, {last + 1}
+        .include "include/kernel.s"
+        .section prog0, P_PROG0 * PAGE, V_USER
+        {spawn(last + 1)}
+        mv    s0, a0                 # no such program
+        {spawn(last, "s1")}
+        {wait_for("s1")}
+        add   a1, a1, s0
+        {EXIT}
+{progs}""",
+    )
+    result = run_image(image)
+    assert result.code_of(0) == last + fs.L["E_NOPROG"]

@@ -420,8 +420,9 @@ def test_descriptors_go_with_their_process():
     # files, all told, than the server keeps (NFILE), so each must be
     # closed when the kernel says no descriptor names it any more.
     child = report(*[open_("f")] * L["NDESC"], data=string("f", "f"))
+    children = L["NFILE"] // L["NDESC"] + 1
     init = f"""
-        li    s2, NPROC - 2
+        li    s2, {children}
 1:      li    a0, SYS_SPAWN
         li    a1, 1
         sys
@@ -433,9 +434,9 @@ def test_descriptors_go_with_their_process():
         {exit_with("s1")}
 """
     result = run(init, child, disk=disk(f="x"))
-    assert result.code_of(0) == 3
-    assert L["NDESC"] * (L["NPROC"] - 2) > L["NFILE"]
-    assert said(result) == list(range(L["NDESC"])) * (L["NPROC"] - 2)
+    assert result.code_of(0) == 3 + children - 1  # after the two servers
+    assert L["NDESC"] * children > L["NFILE"]
+    assert said(result) == list(range(L["NDESC"])) * children
 
 
 def test_a_server_without_pages_for_its_windows_says_so():
@@ -505,7 +506,7 @@ def test_two_processes_read_files_at_once():
         reader("/d/a", "a"),
         reader("b", "b"),
         disk=disk(10, dirs=("d",), d__a=a, b=b),
-        max_steps=20_000_000,
+        max_steps=30_000_000,
     )
     sums = sum(map(ord, a)), sum(map(ord, b))
     assert sorted(result.code_of(p) for p in (3, 4)) == sorted(sums)

@@ -50,34 +50,48 @@ sys_receive:
         addi  t3, t3, 1
         li    t1, NSRC
         ble   t3, t1, 0b
-        li    t3, 0                    # t3: a handle
-0:      add   t2, s0, t3
-        lt    t0, PCB_CLOSED(t2)
-        bnez  t0, 9f
-        addi  t3, t3, 1
+        li    t3, 0                    # t3: a handle, three at a time: a
+0:      add   t2, s0, t3               # word is 0 only if its trytes all are
+        lw    t0, PCB_CLOSED + 1(t2)
+        bnez  t0, 1f
+        addi  t3, t3, 3
         li    t1, NHANDLE
         blt   t3, t1, 0b
-        li    t3, 0                    # t3: a process number
-1:      add   t2, s0, t3
-        lt    t0, PCB_NOTES(t2)
+        li    t3, 0                    # t3: a process number, alike
+0:      add   t2, s0, t3
+        lw    t0, PCB_NOTES + 1(t2)
+        bnez  t0, 2f
+        addi  t3, t3, 3
+        li    t1, NPROC
+        blt   t3, t1, 0b
+        j     0f
+1:      lt    t0, PCB_CLOSED(t2)       # which of the three
+        bnez  t0, 9f
+        addi  t3, t3, 1
+        add   t2, s0, t3
+        j     1b
+2:      lt    t0, PCB_NOTES(t2)
         bnez  t0, 2f
         addi  t3, t3, 1
-        li    t1, NPROC
-        blt   t3, t1, 1b
+        add   t2, s0, t3
+        j     2b
 
-        call  current_pid
+0:      call  current_pid
         mv    s3, a0                   # s3: this server's number
         lw    t3, PCB_TURN(s0)
+        li    t0, PCB_SIZE
+        mul   t0, t3, t0
+        la    t2, procs                # t2: the table
+        add   s2, t2, t0               # s2: process t3
+        li    t5, NPROC * PCB_SIZE
+        add   t5, t2, t5               # t5: just past it
         li    t4, NPROC
 3:      addi  t3, t3, 1
-        li    t1, NPROC
-        blt   t3, t1, 4f
+        addi  s2, s2, PCB_SIZE
+        blt   s2, t5, 4f
         li    t3, 0
-4:      li    t0, PCB_SIZE
-        mul   t0, t3, t0
-        la    s2, procs
-        add   s2, s2, t0               # s2: process t3
-        lw    t0, PCB_STATE(s2)
+        mv    s2, t2
+4:      lw    t0, PCB_STATE(s2)
         li    t1, ST_CALL
         bne   t0, t1, 5f
         lw    t0, PCB_PEER(s2)

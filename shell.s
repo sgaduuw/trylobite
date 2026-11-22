@@ -20,11 +20,11 @@
         .include "user/ping.s"
         .include "user/pong.s"
         .include "user/pingpong.s"
-        .section prog4, P_PROG4 * PAGE, V_USER
+        .section prog4, (P_PROG0 + 4) * PAGE, V_USER
         .include "user/fsd.s"
-        .section prog5, P_PROG5 * PAGE, V_USER
+        .section prog5, (P_PROG0 + 5) * PAGE, V_USER
         .include "user/diskd.s"
-        .section prog6, P_PROG6 * PAGE, V_USER
+        .section prog6, (P_PROG0 + 6) * PAGE, V_USER
         .include "user/consd.s"
-        .section prog7, P_PROG7 * PAGE, V_USER
+        .section prog7, (P_PROG0 + 7) * PAGE, V_USER
         .include "user/piped.s"
