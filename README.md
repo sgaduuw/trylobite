@@ -137,6 +137,38 @@ is read from the file up front, so a run is the same every time;
 `detrytus debug shell.s ...` runs the same machine in the debugger,
 where `input TEXT` types more by hand.
 
+### A live session
+
+Leave out `--input` and run it at a terminal, and the shell stays up
+for you to type at:
+
+```bash
+detrytus run shell.s --ram-pages 81 --disk disk.img
+```
+
+```text
+trylobite: booting
+$ ls
+34 notes.txt
+bin/
+$ echo typed live
+typed live
+trylobite: process 6 exited with code 0
+$ spin
+trylobite: process 7 killed
+sh: killed
+$ exit
+trylobite: process 5 exited with code 0
+trylobite: process 0 exited with code 0
+trylobite: all processes exited after 4020 timer interrupts
+```
+
+Every key goes to the machine, as on a serial line: the shell echoes
+what you type, backspace erases, and Ctrl-C ends the program the shell
+waits for (here the runaway `spin`). `exit` or Ctrl-D (the end of
+input) ends the shell, and init and the machine with it; Ctrl-] stops
+the machine from outside. The terminal is put back as it was afterwards.
+
 The programs on the disk are `hello`, `fail` (exits with 3), `spin`
 (loops for ever, for Ctrl-C), `echo`, `upper` (standard input to output
 in capitals) and `wc` (lines, words and code points).
