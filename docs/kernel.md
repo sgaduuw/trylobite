@@ -219,8 +219,18 @@ no write end is left; a write waits until all of it is in (a pipe holds
 
 ## The shell
 
-`user/sh.s` is program 0 of the `shell.s` build. It starts the file,
-disk, console and pipe servers, opens the console as descriptor 0 and
+Program 0 of the `shell.s` build is `user/init.s`. It starts the
+console, pipe, disk and file servers in that order, waiting for each to
+register its name before the next, then the shell (`user/sh.s`), and
+waits for it; when the shell exits, init exits with its code, and the
+machine powers off once only servers asleep in `receive` are left. A
+server that cannot start, or registers another protocol version than
+init expects, is said on the kernel's log (`init: no server named
+disk`) and so is every server that needs it (the file server needs the
+disk server); otherwise init prints nothing.
+
+The shell finds the console, pipe and file servers by name, does
+without any that is missing, opens the console as descriptor 0 and
 copies it to 1 and 2, then reads a line at a time.
 
 **Built-ins:** `exit`, `ls [DIR]`, `cat [PATH]` (standard input without

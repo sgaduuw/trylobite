@@ -7,6 +7,6 @@
         .equ  NPROG, 3                 # init, ping and pong
 
         .include "include/kernel.s"
-        .include "user/init.s"
+        .include "user/demo-init.s"
         .include "user/ping.s"
         .include "user/pong.s"

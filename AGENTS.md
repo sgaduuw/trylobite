@@ -34,7 +34,7 @@ printf 'hello\nls bin\necho a b | upper\nexit\n' | detrytus run shell.s --ram-pa
 ```
 
 `demo.s` is the multi-hart demo (init starts ping and pong); `shell.s`
-is the shell build, which CI also runs with a disk made by `tools/fs.py`.
+is the shell build (init starts the servers, then the shell), which CI also runs with a disk made by `tools/fs.py`.
 
 The `detrytus` command is detrytus' Rust tool, installed with cargo at
 the commit `detrytus.rev` pins. Move the pin by writing a newer commit
@@ -102,14 +102,16 @@ pipe.
   machine it targets and how many programs it adds. Program images sit
   in pages from `P_PROG0`, and the free pages start after the last.
 - **Program 0 is init.** The kernel starts it and nothing else. In
-  `demo.s` it is `user/init.s`; in `shell.s` the shell is init, and
-  starts the servers itself (console, pipe, disk, file, in that order),
-  finding each with `lookup`, so the programs it runs start at process
-  5. Tests build their own init with `run(init, ...)`, which starts the
-  servers they ask for first (`tests/kernel.py`, `SERVERS`).
+  `demo.s` it is `user/demo-init.s`; in `shell.s` it is `user/init.s`,
+  which starts the servers (console, pipe, disk, file, in that order,
+  from its table `init_rows`), waiting for each to register, then the
+  shell, as process 5, and exits when the shell does. The shell finds
+  the servers with `lookup(LOOKUP_NOW)`; the programs it runs start at
+  process 6. Tests build their own init with `run(init, ...)`, which
+  starts the servers they ask for first (`tests/kernel.py`, `SERVERS`).
 - **A new program goes in `bin/`, on the disk**, unless another program
-  spawns it by number (ping and pong) or the kernel starts it (init,
-  sh). A disk program is assembled on its own, including
+  spawns it by number (ping, pong, the servers and sh) or the kernel
+  starts it (init). A disk program is assembled on its own, including
   `include/layout.s` and loading where it runs, at `V_USER`
   (docs/filesystem.md, Program files); `include/layout.s` must
   therefore assemble without `NPROG` or `RAM_PAGES`. It starts with

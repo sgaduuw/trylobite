@@ -31,7 +31,7 @@ def said(shell, typed: str, on) -> str:
     result = run_image(shell, input=typed, disk=on, max_steps=5_000_000)
     assert result.exit_code == 0, result.console
     console = result.console.removeprefix("trylobite: booting\n")
-    return console.split("trylobite: process 0 exited")[0]
+    return console.split("trylobite: process 5 exited")[0]  # the shell
 
 
 def test_ls_lists_each_file_with_its_size(shell):

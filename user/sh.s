@@ -1,13 +1,14 @@
-# Program 0 of shell.s: a shell. It reads a line, runs the program its
+# The shell of shell.s, which init (user/init.s) starts once the servers
+# are up. It reads a line, runs the program its
 # first word names, waits for it, and says how it ended if not with code
 # 0. Some words are built in: exit, and ls, cat, write, rm, mkdir, rmdir,
 # cd and pwd, which use the filesystem on the disk (docs/filesystem.md)
 # through the file server. The console is the console server's: the
 # shell points its standard input, output and error at it, which the
 # programs it starts inherit, reads and prints through them, and gives
-# the server each program it runs as the foreground, for Ctrl-C. The kernel starts the shell as init; it
-# starts the console server, then the disk server and the file server
-# that needs it, and finds the servers by their names. A word that is neither
+# the server each program it runs as the foreground, for Ctrl-C. It finds
+# the console, pipe and file servers by their names, and does without
+# one that is missing. A word that is neither
 # built in nor a program in the kernel image names a program file: a
 # path if it has a slash, else a file in /bin, and gets the line's words
 # as its arguments, the command first. It stops at the end of input.
@@ -35,7 +36,6 @@
 # two would wait for each other.
 
         .compress
-        .section prog0, P_PROG0 * PAGE, V_USER
         .gp   USER_GP                  # set by spawn
 
         .equ  LINE_MAX, 60             # characters kept from a line
@@ -54,15 +54,11 @@
         .equ  SH_EMPTY, -1             # in the line, a word of quotes alone:
                                        # no character is negative
 
-sh:     li    a0, SYS_SPAWN            # the console server
-        li    a1, SH_CONSD
+sh:     li    a0, SYS_LOOKUP           # the console server, which init
+        la    a1, sh_conname           # has started (user/init.s)
+        li    a2, LOOKUP_NOW
         sys
         bltz  a0, 1f                   # none: sh_con stays SH_NOCON
-        li    a0, SYS_LOOKUP           # wait until it is ready
-        la    a1, sh_conname
-        li    a2, LOOKUP_WAIT
-        sys
-        bltz  a0, 1f
         li    t0, CONSOLE_PROTOCOL     # calls it would misread: none at all
         bne   a1, t0, 1f
         sw    a0, sh_con
@@ -79,31 +75,19 @@ sh:     li    a0, SYS_SPAWN            # the console server
         li    a1, STDIN
         li    a2, STDERR
         sys
-1:      li    a0, SYS_SPAWN            # the pipe server
-        li    a1, SH_PIPED
+1:      li    a0, SYS_LOOKUP           # the pipe server
+        la    a1, sh_pipename
+        li    a2, LOOKUP_NOW
         sys
         bltz  a0, 1f                   # none: sh_pipe stays SH_NOPIPE
-        li    a0, SYS_LOOKUP
-        la    a1, sh_pipename
-        li    a2, LOOKUP_WAIT
-        sys
-        bltz  a0, 1f
         li    t0, PIPE_PROTOCOL
         bne   a1, t0, 1f
         sw    a0, sh_pipe
-1:      li    a0, SYS_SPAWN            # the disk server, which the
-        li    a1, SH_DISKD             # file server waits for
-        sys
-        bltz  a0, prompt               # none: no file server either
-        li    a0, SYS_SPAWN            # the file server
-        li    a1, SH_FSD
+1:      li    a0, SYS_LOOKUP           # the file server
+        la    a1, sh_fsname
+        li    a2, LOOKUP_NOW
         sys
         bltz  a0, prompt               # none: sh_fs stays SH_NOFS
-        li    a0, SYS_LOOKUP           # wait until it is ready
-        la    a1, sh_fsname
-        li    a2, LOOKUP_WAIT
-        sys
-        bltz  a0, prompt
         li    t0, FS_PROTOCOL          # calls it would misread: none at all
         bne   a1, t0, prompt
         sw    a0, sh_fs
