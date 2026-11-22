@@ -103,7 +103,7 @@ def test_exited_processes_give_their_memory_back():
         blt   s0, t0, 1b
         {DONE}
     """
-    result = run(init, DONE, ram_pages=16, max_steps=3_000_000)
+    result = run(init, DONE, ram_pages=17, max_steps=3_000_000)  # 16 + the log
     assert result.exit_code == 0
     assert sum(1 for p, _ in result.exits() if p != 0) == 4  # every child exited
 

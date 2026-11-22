@@ -35,6 +35,8 @@ sys_wait:
 sys_kill:
         li    t0, FOR_SELF
         beq   a2, t0, 1f
+        li    t0, KILL_ANY
+        beq   a2, t0, 4f
         call  drives_any
         bltz  a0, sys_return
         call  find_child_of
@@ -49,6 +51,14 @@ sys_kill:
         li    a0, 0
         j     sys_return
 3:      li    a0, KILL_ENDED
+        j     sys_return
+4:      call  proc_of                  # any but init, which the rest needs
+        bltz  a0, sys_return
+        li    a0, E_PERM
+        beqz  a1, sys_return
+        mv    a0, a1
+        call  kill_pid
+        li    a0, 0
         j     sys_return
 
 # find_child: s1 = the record of process a1, and a0 = 0, if it is a child

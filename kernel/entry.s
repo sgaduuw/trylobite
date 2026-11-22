@@ -15,6 +15,7 @@ kentry:
         call  klock_take               # the other harts wait until init runs
         la    sp, kstack_top
         call  page_init
+        call  log_init                 # the log keeps the boot report too
         call  boot_report              # what it found, before init runs
         la    t0, procs
         sw    t0, next_slot            # spawn starts with slot 0

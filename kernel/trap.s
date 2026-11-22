@@ -42,6 +42,12 @@ ktrap:
         li    t0, 0                    # csrw from zero would only read
         csrw  sscratch, t0
         mv    s0, sp                   # s0: the current process, from here on
+        csrr  t0, time                 # the ticks it ran since resume
+        lw    t1, PCB_RAN(s0)
+        sub   t0, t0, t1
+        lw    t1, PCB_CPU(s0)
+        add   t1, t1, t0
+        sw    t1, PCB_CPU(s0)
         lw    tp, PCB_HART(s0)         # tp: this hart's number (see resume)
         call  klock_take
         la    sp, kstack_top           # the one kernel stack: ours while we hold the lock
@@ -94,6 +100,7 @@ resume:
         fence.vm zero, t2
 1:      sw    tp, PCB_HART(s0)         # for ktrap, which cannot read hartid
         csrr  t0, time                 # a whole slice from now: time the
+        sw    t0, PCB_RAN(s0)          # (and it runs from now: ktrap counts)
         addi  t0, t0, QUANTUM          # kernel spent on others is not its
         csrw  stimecmp, t0
         lw    t0, PCB_PTBR(s0)

@@ -7,7 +7,10 @@
 
         .equ  SPIN, 1500
 
-pong:   li    s1, 0
+pong:   li    a0, SYS_NAME             # for ps: a program of the image
+        la    a1, pong_myname          # has no argv[0] to name it
+        sys
+        li    s1, 0
 1:      addi  s1, s1, 1
         li    t0, SPIN
         blt   s1, t0, 1b
@@ -28,4 +31,5 @@ pong:   li    s1, 0
 
         .equ  PONG_DIGIT, 10
 pong_msg: .string "pong: got ?\n"
+pong_myname: .string "pong"
         .nocompress

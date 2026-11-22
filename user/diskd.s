@@ -28,6 +28,9 @@
         .equ  DK_IDLE, -1              # dk_cur with no command in flight
 
 dk_main:
+        li    a0, SYS_NAME             # for ps: a program of the image
+        la    a1, dk_myname            # has no argv[0] to name it
+        sys
         li    a0, SYS_DRIVE
         li    a1, SRC_DISK
         sys
@@ -216,4 +219,5 @@ dk_ops: .words NPROC                   # each process's waiting call: its
 dk_blocks: .words NPROC                # operation plus 1 (0 for none), the
 dk_bufs: .words NPROC                  # block, and the buffer
 dk_name: .string "disk"
+dk_myname: .string "diskd"
         .nocompress

@@ -29,6 +29,8 @@
         .include "../kernel/ipc.s"
         .include "../kernel/desc.s"
         .include "../kernel/names.s"
+        .include "../kernel/info.s"
+        .include "../kernel/proc.s"
 
         .include "../kernel/data.s"
         .include "../kernel/pagetables.s"

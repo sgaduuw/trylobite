@@ -10,6 +10,11 @@ ticks:  .word 0                        # timer interrupts taken
 free_head:  .word 0                    # first free page, or 0 for none
 free_count: .word 0                    # how many pages are free
 next_slot:  .word 0                    # where spawn starts looking (set at boot)
+log_base:   .word 0                    # the log page's first tryte, through the
+                                       # direct map; 0 until boot gives it one
+log_pos:    .word 0                    # code points ever printed (console.s)
+sleepers:   .word 0                    # 1 while a process may be in SYS_SLEEP
+next_wake:  .word 0                    # ... and the earliest time one waits for
 
 klock:  .word 0                        # the kernel lock: 1 while a hart holds it
 idle_harts: .words NHART               # 1: the hart waits for work, by index
@@ -34,7 +39,9 @@ numbuf_end:
 
         .equ  kstack_top, P_KDATA * PAGE + 9843 - KOFF   # top of the data page
 
-msg_version:  .string "trylobite: version 0.1.0, a microkernel for detrytus, the balanced-ternary machine\n"
+kversion:     .string "0.1.0"         # pyproject.toml's version (tests/test_boot.py)
+msg_version:  .string "trylobite: version "
+msg_about:    .string ", a microkernel for detrytus, the balanced-ternary machine\n"
 msg_memory:   .string "trylobite: memory: "
 msg_pages:    .string " pages ("
 msg_trytes:   .string " trytes), "
