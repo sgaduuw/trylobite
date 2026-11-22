@@ -5,7 +5,10 @@
         .section prog0, P_PROG0 * PAGE, V_USER
         .gp   USER_GP                  # set by spawn
 
-init:   la    a1, init_msg
+init:   li    a0, SYS_NAME             # for ps: a program of the image
+        la    a1, dinit_myname         # has no argv[0] to name it
+        sys
+        la    a1, init_msg
         li    a0, SYS_PUTS
         sys
         li    a0, SYS_SPAWN
@@ -24,4 +27,5 @@ init:   la    a1, init_msg
         sys
 
 init_msg: .string "init: starting pong and ping\n"
+dinit_myname: .string "init"
         .nocompress

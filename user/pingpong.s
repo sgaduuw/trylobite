@@ -7,6 +7,9 @@
         .gp   USER_GP                  # set by spawn
 
 pingpong:
+        li    a0, SYS_NAME             # for ps: a program of the image
+        la    a1, pingpong_myname      # has no argv[0] to name it
+        sys
         la    a1, pingpong_msg
         li    a0, SYS_PUTS
         sys
@@ -33,4 +36,5 @@ pingpong:
         sys
 
 pingpong_msg: .string "pingpong: starting pong and ping\n"
+pingpong_myname: .string "pingpong"
         .nocompress

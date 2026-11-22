@@ -35,6 +35,9 @@
         .equ  PP_WRITER, 2             # or a held write
 
 pp_main:
+        li    a0, SYS_NAME             # for ps: a program of the image
+        la    a1, pp_myname            # has no argv[0] to name it
+        sys
         li    a0, SYS_REGISTER
         la    a1, pp_name
         li    a2, PIPE_PROTOCOL
@@ -384,6 +387,7 @@ pp_bufs:  .words NPROC                 # its buffer,
 pp_ns:    .words NPROC                 # its n,
 pp_dones: .words NPROC                 # and, writing, how much has gone in
 pp_name:  .string "pipe"
+pp_myname: .string "piped"
 pp_tmp:   .zero PP_CHUNK               # what one copy moves
 pp_ring:  .zero PP_NPIPE * PP_SIZE     # the pipes' buffers
         .nocompress

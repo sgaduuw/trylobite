@@ -19,7 +19,10 @@ pick:
         add   t0, t0, t1
         lw    t1, 0(t0)
         bnez  t1, hart_leave
-        la    t2, procs
+        lw    t0, sleepers
+        beqz  t0, 0f
+        call  wake_sleepers
+0:      la    t2, procs
         li    t0, NPROC * PCB_SIZE
         add   t3, t2, t0               # t3: just past the table
         mv    s1, s0
@@ -37,6 +40,8 @@ pick:
         # send or spawn, and an armed device can still wake its driver:
         # wait for work.
         lw    t0, irq_armed
+        bnez  t0, idle
+        lw    t0, sleepers             # the clock will wake a sleeper
         bnez  t0, idle
         mv    s1, t2
 6:      lw    t0, PCB_STATE(s1)
@@ -94,6 +99,11 @@ idle:
         li    t0, IE_SOFT
         bnez  tp, 2f
         li    t0, IE_SOFT + IE_EXT     # hart 0 also wakes for hot-plug events
+2:      lw    t1, sleepers             # and for the earliest sleeper's time
+        beqz  t1, 2f
+        lw    t1, next_wake
+        csrw  stimecmp, t1
+        addi  t0, t0, IE_TIMER
 2:      csrw  sie, t0
         call  klock_give
         wfi

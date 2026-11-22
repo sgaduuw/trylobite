@@ -69,6 +69,16 @@ syscall_again:                         # resume runs a call again (ipc.s)
         beq   a0, t0, sys_arm
         li    t0, SYS_PHYS
         beq   a0, t0, sys_phys
+        li    t0, SYS_LOG
+        beq   a0, t0, sys_log
+        li    t0, SYS_INFO
+        beq   a0, t0, sys_info
+        li    t0, SYS_PROC
+        beq   a0, t0, sys_proc
+        li    t0, SYS_NAME
+        beq   a0, t0, sys_name
+        li    t0, SYS_SLEEP
+        beq   a0, t0, sys_sleep
         li    a0, E_NOCALL
 
 sys_return:                            # a0: the result
@@ -96,13 +106,12 @@ sys_hart:
 # string stops at the end of what the process has mapped.
 sys_puts:
         mv    s1, a1                   # s1: where the string goes on
-        li    t5, V_CONSOLE
         mv    a0, s0
         call  uva
         beqz  a0, 2f
 1:      lt    t0, 0(a0)
         beqz  t0, 3f
-        sw    t0, 0(t5)
+        call  kout                     # printed and kept in the log
         addi  s1, s1, 1
         addi  a0, a0, 1
         addi  a1, a1, -1
@@ -269,6 +278,7 @@ spawn_args:
         add   t2, t0, t1               # t2: the next argv word, in the kernel
         li    t1, V_ARGS - V_ARGV
         add   t3, t2, t1               # t3: the next string tryte, in the kernel
+        mv    s3, t3                   # s3: argv[0], which names it
         li    t4, V_ARGS               # t4: ... and in the child
         lw    t5, PCB_A4(s0)           # t5: trytes left
         li    a1, 0                    # a1: how many arguments
@@ -292,6 +302,9 @@ spawn_args:
 3:      sw    a1, PCB_A0(s1)
         li    t0, V_ARGV
         sw    t0, PCB_A1(s1)
+        mv    a0, s3                   # its name: argv[0], or none
+        li    a1, ARG_MAX
+        call  proc_name
         mv    a0, s2
         j     sys_return
         .nocompress

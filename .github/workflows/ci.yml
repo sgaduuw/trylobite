@@ -31,13 +31,16 @@ jobs:
       - name: Use files from the shell
         run: |
           printf 'hello, disk\n' > notes
-          tools/fs.py new disk.img 20 notes bin/*.s
+          tools/fs.py new disk.img 27 notes bin/*.s
           tools/fs.py mkdir disk.img docs
           tools/fs.py put disk.img notes docs/again
-          printf 'ls\nls bin\ncat notes\ncat docs/again\nwrite docs/motd made in the shell\ncd docs\npwd\ncat again\nhello\nhello > hi\ncat < hi\nhello | upper | wc\nexit\n' | detrytus run shell.s --ram-pages 81 --input - --disk disk.img | tee out.txt
+          printf 'ls\nls bin\ncat notes\ncat docs/again\nwrite docs/motd made in the shell\ncd docs\npwd\ncat again\nhello\nhello > hi\ncat < hi\nhello | upper | wc\nps\ndf\nuname -a\nexit\n' | detrytus run shell.s --ram-pages 81 --input - --disk disk.img | tee out.txt
           grep -q 'hello from a balanced-ternary machine' out.txt
           grep -qx '/docs' out.txt
           grep -qx '1 5 38' out.txt
+          grep -qE '^ +[0-9]+ +5 run +4 +[0-9]+ ps$' out.txt
+          grep -qE '^disk0 +27 ' out.txt
+          grep -qx 'trylobite 0.1.0 detrytus' out.txt
           tools/fs.py ls disk.img docs
           tools/fs.py cat disk.img docs/motd | grep -q 'made in the shell'
           tools/fs.py cat disk.img docs/hi | grep -q 'hello from a balanced-ternary machine'

@@ -375,7 +375,7 @@ def new_disk() -> Path:
 _BIN: dict[str, list[int]] = {}
 
 
-def bin_disk(blocks: int = 13, **texts: str) -> tuple[Path, int]:
+def bin_disk(blocks: int = 27, **texts: str) -> tuple[Path, int]:
     """A new disk holding a filesystem with every program of bin/ in /bin,
     as the shell expects, and these text files in /: (path, blocks)."""
     from tools.fs import Filesystem, program_file
