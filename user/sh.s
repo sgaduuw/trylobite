@@ -10,6 +10,14 @@
 # that needs it, and finds the servers by their names. A word that is neither
 # built in nor a program in the kernel image names a program file: a
 # path if it has a slash, else a file in /bin. It stops at the end of input. Programs take no arguments yet.
+#
+# A word after the command that starts with < or > redirects: < PATH makes
+# the file standard input, > PATH standard output, made empty or new, and
+# >> PATH standard output at the file's end. The path may follow at once
+# (>out) or as the next word. The shell opens the file, points descriptor
+# 0 or 1 at it for the command, built-in or program, which a program
+# inherits, and points it back at the next prompt. Its own complaints go
+# to standard error, so they reach the console whatever is redirected.
 
         .compress
         .section prog0, P_PROG0 * PAGE, V_USER
@@ -22,6 +30,8 @@
         .equ  SH_NOFS, -1              # sh_fs with no file server: no process
                                        # has the number, so a call is E_NOPROC
         .equ  SH_NOCON, -1             # sh_con with no console server, alike
+        .equ  SH_SAVEIN, NDESC - 2     # where standard input and output wait
+        .equ  SH_SAVEOUT, NDESC - 1    # while a command has them redirected
 
 sh:     li    a0, SYS_SPAWN            # the console server
         li    a1, SH_CONSD
@@ -35,14 +45,19 @@ sh:     li    a0, SYS_SPAWN            # the console server
         li    t0, CONSOLE_PROTOCOL     # calls it would misread: none at all
         bne   a1, t0, 1f
         sw    a0, sh_con
-        li    s0, STDERR               # standard input, output and error,
-2:      li    a0, SYS_DESC             # which every program it starts
-        mv    a1, s0                   # inherits
-        lw    a2, sh_con
-        li    a3, CONSOLE_HANDLE
+        li    a0, SYS_CALL             # standard input, output and error,
+        lw    a1, sh_con               # which every program it starts
+        li    a2, CN_OPEN              # inherits: its first descriptor, 0,
+        sys                            # and two copies
+        bltz  a0, 1f
+        li    a0, SYS_DUP2
+        li    a1, STDIN
+        li    a2, STDOUT
         sys
-        addi  s0, s0, -1
-        bgez  s0, 2b
+        li    a0, SYS_DUP2
+        li    a1, STDIN
+        li    a2, STDERR
+        sys
 1:      li    a0, SYS_SPAWN            # the disk server, which the
         li    a1, SH_DISKD             # file server waits for
         sys
@@ -59,7 +74,18 @@ sh:     li    a0, SYS_SPAWN            # the console server
         li    t0, FS_PROTOCOL          # calls it would misread: none at all
         bne   a1, t0, prompt
         sw    a0, sh_fs
-prompt: la    a1, sh_prompt
+prompt: lw    t0, sh_redir             # what the last command redirected
+        beqz  t0, 1f                   # comes back
+        sw    zero, sh_redir
+        li    a1, STDIN
+        li    a2, SH_SAVEIN
+        call  unredir
+        li    a1, STDOUT
+        li    a2, SH_SAVEOUT
+        call  unredir
+1:      li    t0, STDOUT
+        sw    t0, sh_outfd
+        la    a1, sh_prompt
         call  puts
         la    s0, sh_line              # s0: the line
         mv    s1, s0                   # s1: just past what was typed
@@ -114,6 +140,89 @@ enter:  li    a1, '\n'
         mv    s4, a1                   # s4: the rest of the line
         lt    t0, 0(s0)
         beqz  t0, prompt               # an empty line
+
+# Redirections: take each word starting with < or > out of the rest of
+# the line, with the spaces before it, opening its file and pointing
+# standard input or output at it. The rest closes up behind, as typed.
+        mv    s6, s4                   # s6: where the next word is read
+        mv    s7, s4                   # s7: where what is kept goes
+r_next: mv    t2, s6                   # t2: the spaces before the word
+        li    t1, ' '
+1:      lt    t0, 0(s6)
+        bne   t0, t1, 2f
+        addi  s6, s6, 1
+        j     1b
+2:      beqz  t0, r_done               # spaces at the end go too
+        li    t1, '<'
+        beq   t0, t1, r_in
+        li    t1, '>'
+        beq   t0, t1, r_out
+        li    t1, ' '
+3:      lt    t0, 0(t2)                # a word to keep, and its spaces:
+        st    t0, 0(s7)                # s7 is never past t2
+        addi  t2, t2, 1
+        addi  s7, s7, 1
+        lt    t0, 0(t2)
+        beqz  t0, 4f
+        blt   t2, s6, 3b
+        bne   t0, t1, 3b
+4:      mv    s6, t2
+        j     r_next
+r_in:   li    s8, STDIN                # s8: the descriptor it replaces
+        li    s3, O_RDONLY             # s3: how it opens the file
+        addi  s6, s6, 1
+        j     r_path
+r_out:  li    s8, STDOUT
+        li    s3, O_WRONLY + O_CREAT + O_TRUNC
+        addi  s6, s6, 1
+        lt    t0, 0(s6)
+        li    t1, '>'
+        bne   t0, t1, r_path
+        li    s3, O_WRONLY + O_CREAT + O_APPEND
+        addi  s6, s6, 1
+r_path: lt    t0, 0(s6)                # the rest of the word, or the next
+        li    t1, ' '
+        bne   t0, t1, 1f
+        addi  s6, s6, 1
+        j     r_path
+1:      mv    s5, s6                   # s5: the path
+        beqz  t0, no_name
+2:      addi  s6, s6, 1
+        lt    s2, 0(s6)                # s2: what ends it, 0 or a space,
+        beqz  s2, 3f                   # which comes back once it is open
+        bne   s2, t1, 2b
+        st    zero, 0(s6)
+3:      li    a0, SYS_CALL
+        lw    a1, sh_fs
+        li    a2, FS_OPEN
+        mv    a3, s5
+        mv    a4, s3
+        sys
+        bltz  a0, fail
+        st    s2, 0(s6)
+        mv    s3, a0                   # s3: the file's descriptor
+        lw    t0, sh_redir             # keep the shell's own, the first time
+        bnez  t0, 4f
+        li    t0, 1
+        sw    t0, sh_redir
+        li    a0, SYS_DUP2
+        li    a1, STDIN
+        li    a2, SH_SAVEIN
+        sys
+        li    a0, SYS_DUP2
+        li    a1, STDOUT
+        li    a2, SH_SAVEOUT
+        sys
+4:      beq   s3, s8, r_next           # with no console, it may be there already
+        li    a0, SYS_DUP2
+        mv    a1, s3
+        mv    a2, s8
+        sys
+        li    a0, SYS_CLOSE
+        mv    a1, s3
+        sys
+        j     r_next
+r_done: st    zero, 0(s7)
 
         la    s2, sh_builtins          # s2: the table entry tried
 1:      lw    a0, 0(s2)
@@ -173,12 +282,14 @@ from_disk:
         beq   a0, t0, unknown
         j     started                  # cannot start it, for another reason
 not_prog:
+        call  to_err
         la    a1, sh_notprog
         call  puts
         mv    a1, s0
         j     say
 
 unknown:
+        call  to_err
         la    a1, sh_unknown
         call  puts
         mv    a1, s0
@@ -193,6 +304,7 @@ found:  li    a0, SYS_SPAWN
 started:                               # a0: the child, or why it did not start
         bgez  a0, 1f
         mv    s3, a0                   # it could not start: say why
+        call  to_err
         la    a1, sh_nostart
         call  puts
         mv    a0, s3
@@ -209,6 +321,8 @@ started:                               # a0: the child, or why it did not start
         li    a3, NO_FOREGROUND        # the console is the shell's again,
         call  fground                  # before the next program's number
         mv    a0, s2                   # can be this one's
+        call  to_err                   # what follows is about it, not output
+        mv    a0, s2
         li    t0, WAIT_KILLED
         beq   a0, t0, killed
         br3   a0, prompt, faulted      # negative cannot happen: it is ours
@@ -254,11 +368,11 @@ do_ls:  mv    a0, s4
         li    t2, '/'
         st    t2, 0(t0)
         addi  s7, t0, 1                # s7: where each name goes after them
-2:      li    a0, SYS_CALL
-        lw    a1, sh_fs
-        li    a2, FS_READDIR
-        mv    a3, s6
-        la    a4, sh_name
+2:      li    a0, SYS_IOCALL
+        mv    a1, s6
+        li    a2, IO_READDIR
+        la    a3, sh_name
+        li    a4, 0
         sys
         bltz  a0, failc
         beqz  a0, 6f                   # no more
@@ -298,17 +412,23 @@ do_ls:  mv    a0, s4
 6:      call  close_s6
         j     prompt
 
-# cat PATH: print a file, a block's worth or less at a time.
-do_cat: call  name_arg
-        call  open_s5
+# cat [PATH]: print a file, or standard input to its end, a block's
+# worth or less at a time.
+do_cat: mv    a0, s4
+        call  word
+        mv    s5, a0                   # s5: the file
+        li    s6, STDIN                # s6: what it reads
+        lt    t0, 0(s5)
+        bnez  t0, 3f
+        la    s5, sh_stdin
+        j     1f
+3:      call  open_s5
         bltz  a0, fail
-        mv    s6, a0                   # s6: its descriptor
-1:      li    a0, SYS_CALL
-        lw    a1, sh_fs
-        li    a2, FS_READ
-        mv    a3, s6
-        la    a4, sh_buf
-        li    a5, BUF_MAX
+        mv    s6, a0
+1:      li    a0, SYS_READ
+        mv    a1, s6
+        la    a2, sh_buf
+        li    a3, BUF_MAX
         sys
         bltz  a0, failc
         beqz  a0, 2f                   # the end
@@ -344,12 +464,10 @@ do_write:
         addi  t0, t0, 1
         sub   s8, t0, s7               # s8: trytes still to write
 3:      beqz  s8, 4f
-        li    a0, SYS_CALL
-        lw    a1, sh_fs
-        li    a2, FS_WRITE
-        mv    a3, s6
-        mv    a4, s7
-        mv    a5, s8
+        li    a0, SYS_WRITE
+        mv    a1, s6
+        mv    a2, s7
+        mv    a3, s8
         sys
         bltz  a0, failc
         add   s7, s7, a0
@@ -410,6 +528,7 @@ failc:  mv    s3, a0
         call  close_s6
         mv    a0, s3
 fail:   mv    s3, a0                   # s3: why
+        call  to_err
         la    a1, sh_sh
         call  puts
         mv    a1, s5
@@ -430,6 +549,7 @@ fail:   mv    s3, a0                   # s3: why
 3:      lw    a1, 3(s2)
         j     say
 no_name:
+        call  to_err
         la    a1, sh_noname
 say:
         call  puts
@@ -450,13 +570,34 @@ name_arg:
         beqz  t0, no_name
         ret
 
-# close_s6: close descriptor s6. Clobbers a0, a1.
+# close_s6: close descriptor s6, unless it is standard input, which cat
+# reads without a path. Clobbers a0, a1.
 close_s6:
-        li    a0, SYS_CALL
-        lw    a1, sh_fs
-        li    a2, FS_CLOSE
-        mv    a3, s6
+        li    a0, STDIN
+        beq   s6, a0, 1f
+        li    a0, SYS_CLOSE
+        mv    a1, s6
         sys
+1:      ret
+
+# unredir: point descriptor a1 back at what a2 kept for it, and close a2.
+# With nothing kept (no console), a1 is closed. Clobbers a0..a3.
+unredir:
+        mv    a3, a1                   # a3: the descriptor
+        li    a0, SYS_CLOSE
+        sys
+        li    a0, SYS_DUP2
+        mv    a1, a2
+        mv    a2, a3
+        sys
+        li    a0, SYS_CLOSE            # a1: what kept it
+        sys
+        ret
+
+# to_err: what puts and putc print goes to standard error, until the next
+# prompt. Clobbers t0.
+to_err: li    t0, STDERR
+        sw    t0, sh_outfd
         ret
 
 # open_s5: a0 = a descriptor for path s5, open for reading, or why not.
@@ -513,7 +654,8 @@ streq:  lt    t0, 0(a0)
         ret
 
 # puts: print the 0-terminated string at a1. putc: print code point a1,
-# which fits in a tryte. Both to standard output. Clobber a0..a5 and t0.
+# which fits in a tryte. Both to standard output, or standard error after
+# to_err. Clobber a0..a5 and t0.
 puts:   mv    a4, a1
 1:      lt    t0, 0(a4)
         beqz  t0, 2f
@@ -526,7 +668,7 @@ putc:   st    a1, sh_ch
         la    a2, sh_ch
         li    a3, 1
 3:      li    a0, SYS_WRITE
-        li    a1, STDOUT
+        lw    a1, sh_outfd
         sys
         ret
 
@@ -599,6 +741,8 @@ sh_programs:
         .align 1
 sh_fs:       .word SH_NOFS             # the file server's process number
 sh_con:      .word SH_NOCON            # the console server's process number
+sh_outfd:    .word STDOUT              # where puts and putc print
+sh_redir:    .word 0                   # 1 while a command has redirections
 sh_fsname:   .string "fs"
 sh_conname:  .string "console"
 sh_ch:       .zero 1                   # what putc prints, and read reads
@@ -637,6 +781,7 @@ sh_inval:    .string "invalid argument"
 sh_error:    .string "error "
 sh_root:     .string "/"
 sh_dot:      .string "."
+sh_stdin:    .string "standard input"
 sh_bin:      .string "/bin/"
 sh_digits:   .zero 12
 sh_digits_end: .zero 1

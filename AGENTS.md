@@ -125,12 +125,17 @@ pipe.
   process that named it (`kill(pid, for)`, drivers only). The kernel's
   own messages, `SYS_PUTC` and `SYS_PUTS`, still go straight to the
   console's output, as its log; tests print with them.
-- **Descriptors route, servers decide** (`kernel/desc.s`). A descriptor
-  is (server, handle) in the process record; `SYS_READ`/`SYS_WRITE`
-  become a `SYS_CALL` with `IO_READ`/`IO_WRITE` from the rewritten saved
-  registers, and children copy their parent's table at spawn. The kernel
-  never checks a handle: a server that answers descriptor calls must.
-  Descriptor operations are negative so a server's own stay from 0.
+- **Descriptors are capabilities** (`kernel/desc.s`). A descriptor is
+  (server, handle) in the process record, put there only by that server
+  (`SYS_GIVE`, to a process whose call it holds); `SYS_READ`,
+  `SYS_WRITE` and `SYS_IOCALL` become a `SYS_CALL` with an `IO_`
+  operation from the rewritten saved registers, and children copy their
+  parent's table at spawn. `IO_` operations are negative, and a user
+  `SYS_CALL` with a negative operation is `E_INVAL`, so a handle in one
+  is always one the server gave. The server keeps no list of holders:
+  the kernel posts `NOTE_CLOSED` (`PCB_CLOSED`) when the last
+  descriptor naming a handle goes, and clears every descriptor naming a
+  server that ends.
 - **A server asleep in `receive` runs it again when woken**
   (`PCB_RETRY`, `kernel/ipc.s`), so `receive` must change nothing
   before it finds work. Arguments are read from the saved registers,

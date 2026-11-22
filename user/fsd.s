@@ -8,8 +8,16 @@
 # its arguments in a3..a5 (include/layout.s); the reply's first word is
 # the result. The server takes one call at a time: it copies a path in
 # with copyin, and data or a name out with copyout, while it holds the
-# call. Each process's descriptors and current directory are kept here,
-# and dropped when the kernel says the process has ended.
+# call. Each process's current directory is kept here, and dropped when
+# the kernel says the process has ended.
+#
+# An open file is a record here, fs_files, whose index is a handle: open
+# gives the caller a kernel descriptor for it (SYS_GIVE), and reading,
+# writing, seeking and listing it come as descriptor calls, IO_ operations
+# with the handle, from whoever holds a copy of that descriptor: a child
+# that inherited it, or one the shell pointed standard output at. The
+# record goes when the kernel says no descriptor names it any more
+# (NOTE_CLOSED), so the server never tracks who holds it.
 #
 # Blocks come through the server's block windows, NWIN of them, which
 # the disk server ("disk", DISK_PROTOCOL) reads blocks into and writes
@@ -66,12 +74,25 @@ fs_start:
         sw    a3, fs_a2
         sw    a4, fs_a3
         sw    zero, fs_entering
-        bltz  a1, fs_inval
+        bltz  a1, fs_io
         li    t0, FS_NOPS
         bge   a1, t0, fs_inval
         li    t0, 3
         mul   t0, a1, t0
         la    t1, fs_ops
+        add   t0, t0, t1
+        lw    t0, 0(t0)
+        jalr  zero, 0(t0)
+
+# A descriptor call: an IO_ operation, the handle in fs_a1. The kernel
+# sends these only from a descriptor this server gave.
+fs_io:
+        li    t0, IO_FIRST
+        blt   a1, t0, fs_inval
+        sub   t0, a1, t0               # 0 for IO_FIRST, up to -1 - IO_FIRST
+        li    t1, 3
+        mul   t0, t0, t1
+        la    t1, fs_ioops
         add   t0, t0, t1
         lw    t0, 0(t0)
         jalr  zero, 0(t0)
@@ -85,29 +106,29 @@ fs_reply:                              # a0: the result
         sys
         j     fs_start
 
-# A process ended: close what it had open, and forget its directory.
+# A handle no descriptor names any more: its file is closed. A process
+# ended: forget its current directory.
 fs_notice:
-        li    t0, NOTE_ENDED
+        li    t0, NOTE_CLOSED
+        bne   a1, t0, 1f
+        mv    a1, a2
+        call  fs_fdaddr
+        sw    zero, FD_INO(a0)
+        j     fs_start
+1:      li    t0, NOTE_ENDED
         bne   a1, t0, fs_start
-        li    t0, NFD * FD
-        mul   t0, a2, t0
-        la    t1, fs_fds
-        add   t1, t1, t0
-        li    t2, NFD
-1:      sw    zero, FD_INO(t1)
-        addi  t1, t1, FD
-        addi  t2, t2, -1
-        bnez  t2, 1b
-        mv    s0, a2                   # and its current directory
+        mv    s0, a2
         call  fs_cwdaddr
         sw    zero, 0(a0)
         j     fs_start
 
-# open(path, flags): the lowest free descriptor, at the start of the
-# file or directory path names, for reading, writing or both (flags mod
-# 3). O_CREAT makes an empty file if the name is free, O_TRUNC empties a
-# file opened for writing, and O_APPEND writes at the end each time. A
-# directory opens for reading only.
+# open(path, flags): the caller's lowest free descriptor, at the start of
+# the file or directory path names, for reading, writing or both (flags
+# mod 3). O_CREAT makes an empty file if the name is free, O_TRUNC
+# empties a file opened for writing, and O_APPEND writes at the end each
+# time. A directory opens for reading only. The kernel finds the
+# descriptor only once the file is open, so a caller with none free gets
+# E_MFILE after O_CREAT has made the file.
 fs_open:
         call  fs_enter
         call  fs_fdfree                # one must be free, before anything changes
@@ -147,29 +168,30 @@ fs_open:
         call  fs_itrunc
 5:      mv    a0, s7
 4:      mv    s7, a0
-        call  fs_fdfree                # a1: the descriptor's record, a0 its number
+        call  fs_fdfree                # a1: the file's record, a0 its handle
         sw    s7, FD_INO(a1)
         sw    zero, FD_POS(a1)
         lw    t0, fs_a2
         sw    t0, FD_FLAGS(a1)
+        mv    s7, a1                   # s7: the record
+        mv    a2, a0
+        li    a0, SYS_GIVE
+        mv    a1, s0
+        sys
+        bgez  a0, fs_reply             # the caller's descriptor
+        sw    zero, FD_INO(s7)         # E_MFILE: it has none free
         j     fs_reply
 
-# fs_fdfree: a0 = the caller's lowest free descriptor, a1 = its record;
-# replies E_MFILE when all are in use. Clobbers t0.
+# fs_fdfree: a0 = a free file record's handle, a1 = the record; replies
+# E_MFILE when all NFILE are in use. Clobbers t0.
 fs_fdfree:
-        addi  sp, sp, -3
-        sw    ra, 0(sp)
-        li    a1, 0
-        call  fs_fdaddr
-        mv    a1, a0
-        lw    ra, 0(sp)
-        addi  sp, sp, 3
+        la    a1, fs_files
         li    a0, 0
 1:      lw    t0, FD_INO(a1)
         beqz  t0, 2f
         addi  a1, a1, FD
         addi  a0, a0, 1
-        li    t0, NFD
+        li    t0, NFILE
         blt   a0, t0, 1b
         li    a0, E_MFILE
         j     fs_reply
@@ -196,14 +218,6 @@ fs_oflags:
         ret
 9:      li    a0, E_INVAL
         ret
-
-# close(fd)
-fs_close:
-        lw    a1, fs_a1
-        call  fs_fdget
-        sw    zero, FD_INO(a0)
-        li    a0, 0
-        j     fs_reply
 
 # read(fd, buffer, n): copy up to n trytes from the file to the buffer,
 # no further than the end of the file or of the block the position is
@@ -1144,12 +1158,12 @@ fs_inodeclear:
         ret
 
 # fs_inoopen: reply E_BUSY if any process has inode a0 open, or has it as
-# its current directory. The kernel
-# tells the server of each process that ends, so every descriptor here
-# is a live process's. Clobbers t0..t2.
+# its current directory. The kernel tells the server when the last
+# descriptor for a file goes, and of each process that ends, so every
+# record here is in use. Clobbers t0..t2.
 fs_inoopen:
-        la    t1, fs_fds
-        li    t2, NPROC * NFD
+        la    t1, fs_files
+        li    t2, NFILE
 1:      lw    t0, FD_INO(t1)
         beq   t0, a0, fs_busy
         addi  t1, t1, FD
@@ -1281,22 +1295,19 @@ fs_enter:
 9:      li    a0, E_NOFS
         j     fs_reply
 
-# fs_fdaddr: a0 = the record of the caller's descriptor a1. Clobbers t0.
+# fs_fdaddr: a0 = the record of handle a1, 0 to NFILE - 1. Clobbers t0.
 fs_fdaddr:
-        li    t0, NFD
-        mul   t0, s0, t0
-        add   t0, t0, a1
-        li    a0, FD
-        mul   t0, t0, a0
-        la    a0, fs_fds
+        li    t0, FD
+        mul   t0, a1, t0
+        la    a0, fs_files
         add   a0, a0, t0
         ret
 
-# fs_fdget: as fs_fdaddr, if descriptor a1 is open; else reply E_BADF.
-# Clobbers t0.
+# fs_fdget: as fs_fdaddr, if handle a1 is an open file; else reply
+# E_BADF. Clobbers t0.
 fs_fdget:
         bltz  a1, 9f
-        li    t0, NFD
+        li    t0, NFILE
         bge   a1, t0, 9f
         addi  sp, sp, -3
         sw    ra, 0(sp)
@@ -1607,8 +1618,15 @@ fs_busy:
         j     fs_reply
 
         .equ  FS_NOPS, 13              # the operations, by FS_ number
-fs_ops: .word fs_open, fs_close, fs_read, fs_lseek, fs_readdir, fs_stat, fs_spawn
-        .word fs_write, fs_unlink, fs_mkdir, fs_rmdir, fs_chdir, fs_getcwd
+fs_ops: .word fs_open, fs_inval, fs_inval, fs_inval, fs_inval, fs_stat
+        .word fs_spawn, fs_inval, fs_unlink, fs_mkdir, fs_rmdir, fs_chdir
+        .word fs_getcwd                # 1 to 4 and 7 are descriptor calls now
+fs_ioops: .word fs_readdir, fs_lseek, fs_write, fs_read   # from IO_FIRST
+        .assert IO_READDIR == IO_FIRST, "fs_ioops must list the IO_ operations in order"
+        .assert IO_LSEEK == IO_FIRST + 1, "fs_ioops must list the IO_ operations in order"
+        .assert IO_WRITE == IO_FIRST + 2, "fs_ioops must list the IO_ operations in order"
+        .assert IO_READ == IO_FIRST + 3, "fs_ioops must list the IO_ operations in order"
+        .assert NFILE <= NHANDLE, "more files than handles to give for them"
         .assert FS_GETCWD == FS_NOPS - 1, "fs_ops must list every FS_ operation"
 
         .equ  FS_NODISK, -1            # fs_disk with no disk server: no process
@@ -1630,7 +1648,7 @@ fs_wblk: .words NWIN                   # the block each window holds, plus 1;
 fs_wuse: .words NWIN                   # 0 for none. When each was last used,
 fs_wdirty: .words NWIN                 # and 1 if it was changed since read
 fs_statbuf: .words STAT / 3
-fs_fds: .words NPROC * NFD * FD / 3    # each process's descriptors
+fs_files: .words NFILE * FD / 3        # open files, by handle
 fs_cwd: .words NPROC                   # each one's current directory, 0 the root
         .equ  FS_ZEROS, 243            # trytes of zeros a hole is read from
 fs_zeros: .zero FS_ZEROS

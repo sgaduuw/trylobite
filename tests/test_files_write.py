@@ -5,7 +5,17 @@ server writes every block it changed before it replies; tools/fs.py then
 reads the disk, checking the whole tree as it loads it."""
 
 from tests.kernel import exit_with, wait_for
-from tests.test_files import disk, lseek, open_, read, report, run, said, string
+from tests.test_files import (
+    close,
+    disk,
+    lseek,
+    open_,
+    read,
+    report,
+    run,
+    said,
+    string,
+)
 from tools import fs
 from tools.fs import PAGE, Filesystem
 
@@ -15,11 +25,10 @@ W, C, T, A = L["O_WRONLY"], L["O_CREAT"], L["O_TRUNC"], L["O_APPEND"]
 
 def write(fd: int, n: int, src: str = "text") -> str:
     return f"""
-        CALL_FS
-        li    a2, FS_WRITE
-        li    a3, {fd}
-        la    a4, {src}
-        li    a5, {n}
+        li    a0, SYS_WRITE
+        li    a1, {fd}
+        la    a2, {src}
+        li    a3, {n}
         sys"""
 
 
@@ -31,11 +40,7 @@ def call(op: str, path: str) -> str:
         sys"""
 
 
-CLOSE_0 = """
-        CALL_FS
-        li    a2, FS_CLOSE
-        li    a3, 0
-        sys"""
+CLOSE_0 = close(0)
 
 
 def after(on) -> Filesystem:
@@ -257,11 +262,10 @@ def test_two_processes_write_at_once():
         sys
         mv    s2, a0
         li    s1, 30
-1:      CALL_FS
-        li    a2, FS_WRITE
-        mv    a3, s2
-        la    a4, {p}text
-        li    a5, 7
+1:      li    a0, SYS_WRITE
+        mv    a1, s2
+        la    a2, {p}text
+        li    a3, 7
         sys
         bltz  a0, 9f
         addi  s1, s1, -1

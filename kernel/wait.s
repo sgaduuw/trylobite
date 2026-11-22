@@ -113,6 +113,7 @@ bury:
         call  ipc_ended                # servers learn of it (ipc.s)
         call  srv_ended                # its names go (names.s)
         call  drv_ended                # and its devices (devices.s)
+        call  desc_ended               # and its descriptors (desc.s)
         la    s1, procs
         li    t3, NPROC * PCB_SIZE
         add   t3, s1, t3               # t3: just past the table

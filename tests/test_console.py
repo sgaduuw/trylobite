@@ -58,7 +58,7 @@ def test_foreground_takes_a_process_number_or_nobody():
         "li s1, NO_FOREGROUND\n" + foreground("s1"),
         "li s1, NPROC\n" + foreground("s1"),
         "li s1, -2\n" + foreground("s1"),
-        "CALL_CONSOLE\n        li a2, CN_FOREGROUND + 1\n        sys",  # no such call
+        "CALL_CONSOLE\n        li a2, CN_OPEN + 1\n        sys",  # no such call
     )
     assert said(run(program)) == [0, L["E_INVAL"], L["E_INVAL"], L["E_INVAL"]]
 

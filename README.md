@@ -135,7 +135,7 @@ it, or else the one on the PATH is used.
 | `kernel/lock.s` | the kernel lock |
 | `kernel/harts.s` | starting the other harts, waking an idle one |
 | `kernel/ipc.s` | messages for servers: `call`, `receive`, `reply`, `copyin`, `copyout` |
-| `kernel/desc.s` | descriptors: `read`, `write` and `desc`, routed to servers |
+| `kernel/desc.s` | descriptors: `read`, `write`, `iocall`, `close`, `dup2` and `give`, routed to servers, and the notice when a handle's last descriptor goes |
 | `include/kernel.s` | firmware and kernel together, without programs: included by a build such as `demo.s`, not run on its own |
 | `user/` | programs built into the kernel image: `init` (program 0 of the demo), `ping` (1) and `pong` (2); `sh` (program 0 of the shell build), `pingpong` (3), `fsd`, the file server (4), `diskd`, the disk server (5), and `consd`, the console server (6) |
 | `bin/` | programs for the disk, each assembled on its own: `hello`, `fail` and `spin` |
@@ -189,11 +189,14 @@ registers mapped past them, at `V_DEVICE`.
 | 10 | `wait(pid)` | how child `pid` ended, once it has: `a0` 0 exited, 1 faulted or 2 killed, `a1` its exit code, trap cause, or 0 when killed; `a0` −2 if `pid` is not the caller's child |
 | 13 | `kill(pid, for)` | ends `pid` before it runs again, a child of the caller when `for` is `FOR_SELF` (−1), or, for a driver, a child of process `for`: 0; 1 (`KILL_ENDED`) if it had ended already; −2 if `pid` is not that process's child, −21 `for` from a process that drives nothing |
 | 15 | `spawnw(window, for)` | starts the program file whose first block is in block window `window` (docs/filesystem.md), as the caller's child when `for` is `FOR_SELF` (−1), or as the child of process `for`, whose call the caller holds: as `spawn`, with −2 when there is no window or no program in it, or `for` is not waiting for the caller |
-| 20 | `read(fd, buffer, n)` | a call to the server descriptor `fd` names, `IO_READ` with its handle, the buffer and `n`: the server's answer (at least one and at most `n` trytes, 0 at the end); −8 if `fd` names nothing. Leaves `a1` to `a5` as `call` does |
-| 21 | `write(fd, buffer, n)` | likewise with `IO_WRITE`: how many were written |
-| 22 | `desc(fd, server, handle)` | makes descriptor `fd`, 0 to 8, name `handle` at process `server`, or nothing with `NO_DESC` (−1): 0; −8 no such descriptor, −2 a negative server |
-| 23 | `call(pid, w1, w2, w3, w4)` | sends four words to process `pid` and waits for its reply: the reply's four words in `a0` to `a3`; `a0` −2 if there is no such process or it ends first, −3 if `pid` is the caller |
-| 24 | `receive()` | waits for a call: `a0` the caller, `a1` to `a4` its words; or `a0` `FROM_KERNEL` (−1) and `a1` `NOTE_ENDED` (0), `a2` a process that ended, or `a1` `NOTE_IRQ` (1), `a2` a device source the caller drives that interrupted |
+| 16 | `close(fd)` | empties descriptor `fd`: 0; −8 if it names nothing |
+| 17 | `give(pid, handle)` | puts the caller's `handle`, 0 to 26, in the lowest free descriptor of process `pid`, whose call the caller holds: the descriptor; −9 none free, −2 `pid` is not waiting for the caller, −10 no such handle |
+| 18 | `dup2(fd, to)` | makes descriptor `to` a copy of `fd`, closing what `to` held: `to`; −8 if `fd` names nothing or `to` is not 0 to 8 |
+| 19 | `iocall(fd, op, x, y)` | a call to the server descriptor `fd` names, with `op`, an `IO_` operation (negative), its handle, `x` and `y`: the server's answer; −8 if `fd` names nothing, −10 if `op` is not an `IO_` operation. Leaves `a1` to `a5` as `call` does |
+| 20 | `read(fd, buffer, n)` | `iocall` with `IO_READ`: at least one and at most `n` trytes, 0 at the end |
+| 21 | `write(fd, buffer, n)` | `iocall` with `IO_WRITE`: how many were written |
+| 23 | `call(pid, w1, w2, w3, w4)` | sends four words to process `pid` and waits for its reply: the reply's four words in `a0` to `a3`; `a0` −2 if there is no such process or it ends first, −3 if `pid` is the caller, −10 if `w1` is negative (an `IO_` operation, which only a descriptor sends) |
+| 24 | `receive()` | waits for a call: `a0` the caller, `a1` to `a4` its words; or `a0` `FROM_KERNEL` (−1) and `a1` `NOTE_ENDED` (0), `a2` a process that ended, or `a1` `NOTE_IRQ` (1), `a2` a device source the caller drives that interrupted, or `a1` `NOTE_CLOSED` (2), `a2` a handle of the caller's that no descriptor names any more |
 | 25 | `reply(pid, w1, w2, w3, w4)` | ends the call of process `pid`, which this process received: 0; −2 if `pid` is not waiting for its reply |
 | 26 | `copyin(pid, from, to, n)` | copies `n` trytes from `from` in process `pid`, whose call this process holds, to its own `to`: 0; −2 as `reply`, −12 if either range is not all mapped, when nothing is copied |
 | 27 | `copyout(pid, from, to, n)` | copies `n` trytes from its own `from` to `to` in process `pid`: as `copyin` |
@@ -204,7 +207,7 @@ registers mapped past them, at `V_DEVICE`.
 | 32 | `arm(source)` | lets the source the caller drives interrupt once: 0; −21 it does not drive it |
 | 33 | `phys(address)` | the physical address of the caller's `address`, for a device to use: −12 nothing there, −21 the caller drives no device |
 
-Numbers 9, 11, 12, 14 and 16 to 19 are free: console input, blocks and
+Numbers 9, 11, 12, 14 and 22 are free: console input, blocks and
 files are not system calls but calls to the console server, the disk
 server and the file server (below and docs/filesystem.md), which fail with their own negative numbers, −2 and
 −4 to −14: no filesystem, no such file, not a
@@ -233,17 +236,25 @@ closes it. The kernel still writes its own messages, and `putc` and
 `puts`, to the console's output directly: they are its log.
 
 **Descriptors.** Each process has nine, 0 to 8, in its record, and
-each names a server and a handle that server gave out. `read` and
-`write` on a descriptor are calls to its server, `IO_READ` or `IO_WRITE`
-with the handle; the kernel only routes them, and the server judges the
-handle and the caller as for any call. A child starts with copies of
-its parent's descriptors, so the shell points 0, 1 and 2 (`STDIN`,
-`STDOUT`, `STDERR`) at the console server, handle `CONSOLE_HANDLE`, and
-every program it runs reads and prints through them: `bin/hello` is a
-single `write(STDOUT, ...)`. A console `read` gives what has been typed,
-at least one code point and at most `n`, one to a tryte; `getc` is still
-there for a code point too large for a tryte. Files keep the file
-server's own descriptor numbers for now.
+each names a server and a handle that server gave out. Only the server
+puts one there, with `give`, into a process whose call it holds: the
+console server's `CN_OPEN` gives `CONSOLE_HANDLE`, and the file server's
+`open` gives a handle for the open file. `read`, `write` and `iocall` on
+a descriptor are calls to its server with an `IO_` operation and the
+handle. `call` refuses those operations, so a server that gets one
+knows the kernel brought it from a descriptor it gave out: a handle
+cannot be forged. A process can copy its descriptors (`dup2`) and close
+them, and a child starts with copies of its parent's; copies share the
+open file, and its position, as after Unix's `dup`. When the last
+descriptor naming a handle goes (closed, overwritten by `dup2`, or its
+process ending), the kernel tells the server with a `NOTE_CLOSED`
+notice, so a server never has to know who holds its handles; a server
+that ends takes its handles with it. The shell opens the console as 0
+and copies it to 1 and 2 (`STDIN`, `STDOUT`, `STDERR`), and every
+program it runs reads and prints through them: `bin/hello` is a single
+`write(STDOUT, ...)`. A console `read` gives what has been typed, at
+least one code point and at most `n`, one to a tryte; `getc` is still
+there for a code point too large for a tryte.
 
 Ctrl-C (code point 3) kills the console's **foreground process**, which
 `CN_FOREGROUND` names; the shell gives it each program it runs and takes
@@ -276,24 +287,30 @@ The disk can hold a filesystem, shaped like a Unix one: inodes, nested
 directories with `.` and `..`, and files reached by path through file
 descriptors (`docs/filesystem.md`). The kernel knows nothing of it: a
 process, the **file server** (`user/fsd.s`), reads it into its block
-windows and answers `call`s to open, read, write and list files and
-to make and remove files and directories, keeping each process's
-descriptors and current directory; it writes what a call changed
+windows and answers `call`s to open files and to make and remove files
+and directories, and descriptor calls to read, write and list what was
+opened, keeping each open file and each process's current directory;
+it writes what a call changed
 before it replies. It registers as `fs`, protocol `FS_PROTOCOL`, and
 clients find it by that name. `tools/fs.py` makes and
 changes filesystems on the host, and the shell's built-ins `ls [DIR]`,
-`cat PATH`, `write PATH TEXT`, `rm PATH`, `mkdir PATH`, `rmdir PATH`,
+`cat [PATH]` (standard input without one), `write PATH TEXT`, `rm PATH`, `mkdir PATH`, `rmdir PATH`,
 `cd [DIR]` and `pwd` use them. A word the shell
 does not know as a built-in or a program in the kernel image names a
 program file: a path if it holds a slash, else a file in `/bin`, which
-the file server starts as the shell's child. `tools/fs.py` stores a `.s` or `.dti` file as a
+the file server starts as the shell's child. After the command, `> PATH`
+sends standard output to a file, made empty or new, `>> PATH` to its
+end, and `< PATH` takes standard input from one, for that command alone,
+built-in or program: `hello > out`, `ls >>list`, `cat < notes`. The
+shell's own complaints go to standard error, the console, whatever is
+redirected. `tools/fs.py` stores a `.s` or `.dti` file as a
 program, in `/bin`:
 
 ```bash
 tools/fs.py new disk.img 100 notes.txt bin/*.s
 tools/fs.py mkdir disk.img docs
 tools/fs.py put disk.img README.md docs
-printf 'ls\nls bin\ncat docs/README.md\nwrite docs/motd hello\n' > session.txt
+printf 'ls\nls bin\ncat docs/README.md\nwrite docs/motd hello\nhello > docs/hi\n' > session.txt
 detrytus run shell.s --ram-pages 81 --input session.txt --disk disk.img
 ```
 

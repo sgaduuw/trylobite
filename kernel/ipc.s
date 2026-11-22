@@ -19,7 +19,12 @@
 # receive again and finds the call or the notice itself.
 
         .compress
-# call(pid, w1, w2, w3, w4)
+# call(pid, w1, w2, w3, w4). A negative w1 is an IO_ operation, which
+# only a descriptor call (desc.s) may send, from sys_call.
+sys_call_user:
+        bgez  a2, sys_call
+        li    a0, E_INVAL
+        j     sys_return
 sys_call:
         call  proc_of
         bltz  a0, sys_return
@@ -32,8 +37,9 @@ sys_call:
 8:      li    a0, E_SELF
         j     sys_return
 
-# receive(): a notice first, an interrupt's before an ending's, else the
-# next caller after the last one taken, else sleep until rouse wakes it.
+# receive(): a notice first (an interrupt's, then a closed handle's, then
+# an ending's), else the next caller after the last one taken, else sleep
+# until rouse wakes it.
 sys_receive:
         li    t0, 1
         sw    t0, PCB_SERVES(s0)
@@ -44,6 +50,13 @@ sys_receive:
         addi  t3, t3, 1
         li    t1, NSRC
         ble   t3, t1, 0b
+        li    t3, 0                    # t3: a handle
+0:      add   t2, s0, t3
+        lt    t0, PCB_CLOSED(t2)
+        bnez  t0, 9f
+        addi  t3, t3, 1
+        li    t1, NHANDLE
+        blt   t3, t1, 0b
         li    t3, 0                    # t3: a process number
 1:      add   t2, s0, t3
         lt    t0, PCB_NOTES(t2)
@@ -82,6 +95,10 @@ sys_receive:
 7:      li    t0, 0                    # a notice: source t3 interrupted
         st    t0, PCB_IRQS - 1(t2)
         li    t0, NOTE_IRQ
+        j     8f
+9:      li    t0, 0                    # a notice: handle t3 is closed
+        st    t0, PCB_CLOSED(t2)
+        li    t0, NOTE_CLOSED
 8:      sw    t0, PCB_A1(s0)
         sw    t3, PCB_A2(s0)
         li    a0, FROM_KERNEL

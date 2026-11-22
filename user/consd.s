@@ -6,11 +6,12 @@
 # one. The kernel still prints its own messages to the console's output
 # directly, and SYS_PUTC and SYS_PUTS with them: that is its log.
 #
-# A console call is a SYS_CALL with CN_GETC, CN_WRITE or CN_FOREGROUND in
-# a2 and the arguments in a3 and a4 (include/layout.s). It also answers
-# descriptor calls, IO_READ and IO_WRITE, on its one handle,
-# CONSOLE_HANDLE: the shell points standard input, output and error there
-# (SYS_DESC), so programs reach it with SYS_READ and SYS_WRITE.
+# A console call is a SYS_CALL with a CN_ operation in a2 and the
+# arguments in a3 and a4 (include/layout.s). It also answers descriptor
+# calls, IO_READ and IO_WRITE, on its one handle, CONSOLE_HANDLE, which
+# CN_OPEN gives the caller as a descriptor: the shell makes that its
+# standard input, output and error, and programs it starts inherit them,
+# so they reach the console with SYS_READ and SYS_WRITE.
 #
 # Input passes through a buffer of the server's, so that Ctrl-C can be
 # seen while nobody reads: the server reads the console only while a
@@ -67,6 +68,8 @@ cn_wait:
         beq   a1, t0, cn_write
         li    t0, CN_FOREGROUND
         beq   a1, t0, cn_fground
+        li    t0, CN_OPEN
+        beq   a1, t0, cn_open
         li    t0, IO_READ
         beq   a1, t0, cn_ioread
         li    t0, IO_WRITE
@@ -84,7 +87,9 @@ cn_answer:
 cn_notice:
         li    t0, NOTE_IRQ             # input has come, or the console
         beq   a1, t0, cn_serve         # has closed
-        li    t0, 3                    # NOTE_ENDED: a reader no longer
+        li    t0, NOTE_ENDED           # NOTE_CLOSED: its one handle needs
+        bne   a1, t0, cn_wait          # no tidying
+        li    t0, 3                    # a reader no longer
         mul   t0, a2, t0
         la    t1, cn_readers
         add   t1, t1, t0
@@ -96,6 +101,15 @@ cn_notice:
 1:      li    t0, NO_FOREGROUND
         sw    t0, cn_fg
         j     cn_wait
+
+# open(): a descriptor for the console, the caller's lowest free one.
+cn_open:
+        li    a0, SYS_GIVE
+        mv    a1, s0
+        li    a2, CONSOLE_HANDLE
+        sys
+        mv    a2, a0
+        j     cn_answer
 
 # getc(): hold the call until there is a code point for it.
 cn_getc:
