@@ -706,6 +706,32 @@ flags as #27, and the shell's `write`, `rm`, `mkdir` and `rmdir`.
   some descriptor holds is `E_BUSY`, as in #27, rather than Unix's
   keeping it until the last close.
 
+### 2026-11-22 · A current directory and relative paths
+
+- **The server keeps each process's current directory**, next to its
+  descriptors (`fs_cwd`, 0 meaning the root so a cleared slot is right),
+  and forgets it with the process's end notice. New calls `FS_CHDIR`
+  (11) and `FS_GETCWD` (12); a path not starting with `/` starts there.
+  Before, every path started at the root; that is still so while a
+  process's directory is `/`, so programs that never call `chdir` see
+  no change.
+- **Inherited through `spawnf` only.** The server knows the parent of a
+  program it starts from a file, so it copies the parent's directory;
+  the kernel's `spawn` knows nothing of directories, so those start at
+  the root. A slot freed by another hart while `spawnf` runs can send
+  the child to the root (the old holder's notice comes after); rare,
+  since slots are handed out round the table, and harmless.
+- **`getcwd` climbs `..`**, finding each directory's name in its
+  parent, rather than the server storing path strings, which `rename`
+  or a long path would make stale or overflow.
+- **A current directory is busy**: `rmdir` of one is `E_BUSY`, as for
+  an open file, so a current directory always exists.
+- **`E_NOROOM` (-20)** is getcwd's Unix `ERANGE`: `E_RANGE` was already
+  `puts`' -2, which a file call cannot use since -2 is `E_NOPROC` (no
+  server).
+- **An empty path is `E_NOENT`**, as in POSIX; it used to name the root.
+  The shell's `ls` with no argument lists `.`.
+
 ### 2026-11-22 · Servers are found by name, in the kernel
 
 The file server worked only because init started it first, as process

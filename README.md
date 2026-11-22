@@ -246,12 +246,12 @@ descriptors (`docs/filesystem.md`). The kernel knows nothing of it: a
 process, the **file server** (`user/fsd.s`), reads it into its block
 windows and answers `call`s to open, read, write and list files and
 to make and remove files and directories, keeping each process's
-descriptors; it writes what a call changed before it replies. It
-registers as `fs`, protocol `FS_PROTOCOL`, and clients find it by that
-name. `tools/fs.py` makes and
+descriptors and current directory; it writes what a call changed
+before it replies. It registers as `fs`, protocol `FS_PROTOCOL`, and
+clients find it by that name. `tools/fs.py` makes and
 changes filesystems on the host, and the shell's built-ins `ls [DIR]`,
-`cat PATH`, `write PATH TEXT`, `rm PATH`, `mkdir PATH` and `rmdir PATH`
-use them. A word the shell
+`cat PATH`, `write PATH TEXT`, `rm PATH`, `mkdir PATH`, `rmdir PATH`,
+`cd [DIR]` and `pwd` use them. A word the shell
 does not know as a built-in or a program in the kernel image names a
 program file: a path if it holds a slash, else a file in `/bin`, which
 the file server starts as the shell's child. `tools/fs.py` stores a `.s` or `.dti` file as a

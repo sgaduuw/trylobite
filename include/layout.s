@@ -267,6 +267,12 @@
         .equ  FS_MKDIR,   9               # mkdir(path): 0, E_EXIST, E_NOSPC, E_INVAL
         .equ  FS_RMDIR,  10               # rmdir(path): 0, E_NOTEMPTY, E_NOTDIR,
                                           # E_BUSY (open, or the root), E_INVAL
+        .equ  FS_CHDIR,  11               # chdir(path): 0, E_NOTDIR, as open fails.
+                                          # A path not starting with / starts there
+        .equ  FS_GETCWD, 12               # getcwd(buffer, n): the path of the current
+                                          # directory, ended with 0, at the buffer:
+                                          # its length, E_NOROOM (n too small),
+                                          # E_NAMETOOLONG, E_FAULT
         .equ  PATH_MAX, 243               # trytes a path may have, its 0 not counted
 
         .equ  E_NOCALL,  -1               # no system call with that number
@@ -300,7 +306,10 @@
         .equ  E_NOSPC,  -16               # no free block or inode, or a full directory
         .equ  E_NOTEMPTY, -17             # rmdir: it holds more than . and ..
         .equ  E_FBIG,   -18               # write: past a file's last block
-        .equ  E_BUSY,   -19               # unlink, rmdir: a process has it open
+        .equ  E_BUSY,   -19               # unlink, rmdir: a process has it open,
+                                          # or it is one's current directory
+        .equ  E_NOROOM, -20               # getcwd: the buffer is too small (Unix's
+                                          # ERANGE; E_RANGE is puts')
 
         .equ  O_RDONLY, 0                 # open: the access mode is the flags mod
         .equ  O_WRONLY, 1                 # 3. Add any of O_CREAT (make a file not

@@ -6,7 +6,7 @@ the harness builds the server in and init starts it first."""
 import re
 
 from tests import kernel
-from tests.kernel import _assemble, exit_with, new_disk, wait_for
+from tests.kernel import _assemble, exit_with, find_fs, new_disk, wait_for
 from tools import fs
 from tools.fs import PAGE, Filesystem, program_file
 
@@ -470,7 +470,7 @@ def disk_program(body: str) -> list[int]:
         .include "include/layout.s"
         .section disk, V_USER, V_USER
         .gp   USER_GP
-{body}
+{find_fs(body, 0)}
 """,
     )
     return program_file(image.path.read_bytes())
