@@ -3,14 +3,12 @@
 A filesystem on detrytus' block device, shaped like a Unix one: files
 and directories are inodes, directories are files of names and inode
 numbers with `.` and `..`, and programs reach files by path through
-descriptors, with `open`, `read`, `lseek`, `readdir`, `stat` and
-`close`. A process, the file server (`user/fsd.s`), reads it and
-answers other processes' calls; `tools/fs.py` builds and changes images
+descriptors, with `open`, `read`, `write`, `lseek`, `readdir`, `stat`
+and `close`, and `unlink`, `mkdir` and `rmdir`. A process, the file
+server (`user/fsd.s`), reads and changes it, answering other processes'
+calls; `tools/fs.py` builds and changes images
 on the host. Every number below is named in `include/layout.s`, which the
 tool reads too.
-
-For now the server only reads: files are made, changed and removed
-with the tool.
 
 ## Blocks
 
@@ -119,18 +117,37 @@ with `E_NOFS` when there is no disk or no filesystem on it (or
 disk refuses a block or names one past its end, and `E_NOMEM` when the
 kernel has no page for one of the server's windows (below). The
 others are `E_NOENT` (no such name), `E_NOTDIR` (a name on the way is a
-file), `E_NAMETOOLONG`, `E_BADF` (no such open descriptor), `E_ISDIR`,
-`E_MFILE`, `E_INVAL` and `E_NOEXEC`.
+file), `E_NAMETOOLONG`, `E_BADF` (no such open descriptor, or not open
+for this), `E_ISDIR`, `E_MFILE`, `E_INVAL`, `E_NOEXEC`, `E_EXIST`,
+`E_NOSPC` (no free block or inode), `E_NOTEMPTY`, `E_FBIG` (past a
+file's last block) and `E_BUSY`.
 
 | Operation | Call | Does |
 |-----------|------|------|
-| `FS_OPEN` (0) | `open(path, flags)` | gives the lowest free descriptor (of `NFD`, 8), at position 0 of the file or directory. `flags` is `O_RDONLY` (0), the only one yet |
+| `FS_OPEN` (0) | `open(path, flags)` | gives the lowest free descriptor (of `NFD`, 8), at position 0 of the file or directory. `flags` is below |
 | `FS_CLOSE` (1) | `close(fd)` | frees the descriptor |
 | `FS_READ` (2) | `read(fd, buffer, n)` | copies up to `n` trytes from the position, and moves it past them: how many, never past the end of the file or of the block the position is in, so a caller loops until it gets 0. A directory is `E_ISDIR` |
 | `FS_LSEEK` (3) | `lseek(fd, offset, whence)` | sets the position to `offset` from the start, where it is or the end (`SEEK_SET`, `SEEK_CUR`, `SEEK_END`): the new position. It may pass the end, but not the start |
 | `FS_READDIR` (4) | `readdir(fd, buffer)` | the next entry in use of a directory: its name to the buffer, `NAME_MAX + 1` trytes, ended with 0, and its inode as the result; 0 at the end. The position counts 21 trytes per entry, used or not. A file is `E_NOTDIR` |
 | `FS_STAT` (5) | `stat(path, buffer)` | four words at the word-aligned buffer: `ST_INO`, `ST_TYPE`, `ST_LINKS` and `ST_SIZE` |
 | `FS_SPAWN` (6) | `spawnf(path)` | starts the program file at the path as the caller's child: the server reads its first block into a window and gives it to `spawnw` with the caller as the parent. Anything but a program file is `E_NOEXEC` |
+| `FS_WRITE` (7) | `write(fd, buffer, n)` | copies up to `n` trytes to the position, or the end with `O_APPEND`, and moves it past them: how many, never past the end of the block the position is in, so a caller loops. A write past the end grows the file, leaving holes; one past its last block is `E_FBIG` |
+| `FS_UNLINK` (8) | `unlink(path)` | removes a file's name from its directory, and frees the file when no name is left. A directory is `E_ISDIR`, a name `.` or `..` `E_INVAL` |
+| `FS_MKDIR` (9) | `mkdir(path)` | makes an empty directory, holding `.` and `..`: `E_EXIST` if the name is taken |
+| `FS_RMDIR` (10) | `rmdir(path)` | removes an empty directory (`E_NOTEMPTY` otherwise); the root is `E_BUSY`, a name `.` or `..` `E_INVAL` |
+
+`flags` is the access mode, `O_RDONLY` (0), `O_WRONLY` (1) or `O_RDWR`
+(2), plus any of `O_CREAT` (3: make a file that is not there),
+`O_TRUNC` (9: empty a file opened for writing) and `O_APPEND` (27:
+write at the end each time). Being ternary digits that are 0 or 1, they
+add as Unix flags OR together; any other value is `E_INVAL`. A
+directory opens for reading only (`E_ISDIR`), and `read` or `write` on
+a descriptor not open for it is `E_BADF`.
+
+`unlink` and `rmdir` refuse, with `E_BUSY`, a file or directory that a
+process has open, where Unix would keep it until the last descriptor
+closes. A new file or directory takes the lowest free inode and its
+blocks the lowest free blocks.
 
 Descriptors belong to a process and go with it: the server keeps them,
 and closes them when the kernel tells it the process has ended, before
@@ -144,21 +161,30 @@ The server keeps blocks in its `NWIN` (9) block windows, as a cache:
 a block it needs and has not got is read with `bread` into the window
 used least recently, while the server, and so every call waiting for
 it, sleeps. A call touches at most four blocks at once (block 0, the
-inode table, and an indirect and a data block, or a directory's), so
-none it is using goes. Each window is a page the kernel makes the first
+inode table, and an indirect and a data block, or a directory's and a
+new directory's), so none it is using goes. Each window is a page the kernel makes the first
 time the server reads into it; with no free page for one, the call
 fails with `E_NOMEM`.
+
+A call that changes the filesystem first gathers the blocks it needs
+and checks everything that can fail, then changes them in its windows,
+marking them dirty, and writes each dirty one back with `bwrite` before
+it replies. So when a call returns its changes are on the disk, the
+machine may power off at any time between calls, and a call that fails
+has changed nothing. A dirty window is never the one reused.
 
 The server takes for granted that nothing else writes the disk while it
 runs: a `bwrite` by another process is not seen in its windows.
 
 ## The shell
 
-`sh` (`user/sh.s`) starts the file server first, then has two file
-built-ins: `ls [DIR]` lists a directory,
+`sh` (`user/sh.s`) starts the file server first, then has six file
+built-ins. `ls [DIR]` lists a directory,
 `/` when none is given, leaving out names that start with a dot: a
 file's size and name, a directory's name and a slash. `cat PATH` prints
-a file. They say what went wrong as Unix tools do, `sh: PATH: no such
+a file. `write PATH TEXT` makes the file hold the rest of the line,
+replacing what it held; `rm PATH`, `mkdir PATH` and `rmdir PATH` make
+the calls of those names. They say what went wrong as Unix tools do, `sh: PATH: no such
 file or directory`, and carry on.
 
 A command that is neither built in nor one of the programs in the
@@ -223,7 +249,5 @@ directory with anything in it.
 
 ## Later
 
-Writing: `open` with flags to create and truncate, `write`, `unlink`,
-`mkdir` and `rmdir`, with the cache writing changed blocks back.
-Then a current directory and relative paths, and descriptors 0, 1 and 2
-for the console.
+A current directory and relative paths, and descriptors 0, 1 and 2 for
+the console. Directories of more than one block, and `rename`.

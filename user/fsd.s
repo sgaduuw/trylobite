@@ -1,6 +1,6 @@
 # The file server (docs/filesystem.md): a process that owns the
 # filesystem on the disk and answers other processes' calls to open,
-# read and look at its files. init starts it first, so it is FS_PID.
+# read, write, make and remove its files and directories. init starts it first, so it is FS_PID.
 #
 # A file call is a SYS_CALL to FS_PID with the FS_ operation in a2 and
 # its arguments in a3..a5 (include/layout.s); the reply's first word is
@@ -12,8 +12,17 @@
 # Blocks come through the server's block windows, NWIN of them, used as
 # a cache: the least recently used goes when another block is needed.
 # The server assumes nothing else writes the disk while it runs. A call
-# needs at most four blocks at once (block 0, the inode table, an
-# indirect block and a data block), so none it holds is evicted under it.
+# needs at most six blocks at once (block 0, the inode table, a
+# directory, an indirect block, a data block or a new directory's), so
+# none it holds is evicted under it.
+#
+# A call that changes the filesystem first gathers every block it will
+# change, allocating new ones, and finds out whether it can be done
+# (E_NOSPC, E_FAULT and the rest) before it changes anything; then it
+# changes the blocks in its windows, marks them dirty, and before the
+# reply goes every dirty block is written back (fs_flush). So a call
+# that fails leaves the disk as it was, and one that is answered is on
+# the disk: there is nothing to flush at power-off.
 #
 # Not a program on its own: a build includes it in a program's section.
 # Its labels all start with fs_, since it shares the build's symbols.
@@ -43,7 +52,9 @@ fs_start:
         jalr  zero, 0(t0)
 
 fs_reply:                              # a0: the result
-        mv    a2, a0
+        sw    a0, fs_result
+        call  fs_flush                 # what the call changed, to the disk
+        lw    a2, fs_result
         mv    a1, s0
         li    a0, SYS_REPLY
         sys
@@ -65,32 +76,98 @@ fs_notice:
         j     fs_start
 
 # open(path, flags): the lowest free descriptor, at the start of the
-# file or directory path names.
+# file or directory path names, for reading, writing or both (flags mod
+# 3). O_CREAT makes an empty file if the name is free, O_TRUNC empties a
+# file opened for writing, and O_APPEND writes at the end each time. A
+# directory opens for reading only.
 fs_open:
         call  fs_enter
-        lw    t0, fs_a2
-        li    t1, O_RDONLY
-        bne   t0, t1, fs_inval
+        call  fs_fdfree                # one must be free, before anything changes
+        lw    a0, fs_a2
+        call  fs_oflags                # a0: the access mode
+        bltz  a0, fs_inval
+        sw    a0, fs_mode
+        lw    a0, fs_a2
+        li    t1, O_CREAT
+        div   a0, a0, t1
+        rem   a0, a0, t1
+        bnez  a0, 1f
         lw    a0, fs_a1
         call  fs_namei
-        mv    s2, a0                   # s2: the inode
+        j     3f
+1:      lw    a0, fs_a1
+        call  fs_namei_parent
+        beqz  a1, 3f                   # the root, which is there
+        call  fs_creat                 # a0: the inode, found or made
+        bltz  a1, 4f                   # made: empty, nothing to truncate
+3:      mv    s7, a0                   # s7: the inode
+        call  fs_iget
+        lw    t2, fs_mode
+        lw    t0, I_TYPE(a0)
+        li    t1, T_DIR
+        bne   t0, t1, 2f
+        bnez  t2, fs_isdir             # a directory, for writing
+        j     5f
+2:      beqz  t2, 5f                   # O_TRUNC only counts for writing
+        lw    t0, fs_a2
+        li    t1, O_TRUNC
+        div   t0, t0, t1
+        li    t1, 3
+        rem   t0, t0, t1
+        beqz  t0, 5f
+        mv    a0, s7
+        call  fs_itrunc
+5:      mv    a0, s7
+4:      mv    s7, a0
+        call  fs_fdfree                # a1: the descriptor's record, a0 its number
+        sw    s7, FD_INO(a1)
+        sw    zero, FD_POS(a1)
+        lw    t0, fs_a2
+        sw    t0, FD_FLAGS(a1)
+        j     fs_reply
+
+# fs_fdfree: a0 = the caller's lowest free descriptor, a1 = its record;
+# replies E_MFILE when all are in use. Clobbers t0.
+fs_fdfree:
+        addi  sp, sp, -3
+        sw    ra, 0(sp)
         li    a1, 0
-        call  fs_fdaddr                # a0: descriptor 0's record
-        li    t2, 0                    # t2: its number
-1:      lw    t0, FD_INO(a0)
+        call  fs_fdaddr
+        mv    a1, a0
+        lw    ra, 0(sp)
+        addi  sp, sp, 3
+        li    a0, 0
+1:      lw    t0, FD_INO(a1)
         beqz  t0, 2f
-        addi  a0, a0, FD
-        addi  t2, t2, 1
+        addi  a1, a1, FD
+        addi  a0, a0, 1
         li    t0, NFD
-        blt   t2, t0, 1b
+        blt   a0, t0, 1b
         li    a0, E_MFILE
         j     fs_reply
-2:      sw    s2, FD_INO(a0)
-        sw    zero, FD_POS(a0)
-        lw    t0, fs_a2
-        sw    t0, FD_FLAGS(a0)
-        mv    a0, t2
-        j     fs_reply
+2:      ret
+
+# fs_oflags: a0 = the access mode of open flags a0 (O_RDONLY, O_WRONLY or
+# O_RDWR), or E_INVAL if they are not a mode plus some of O_CREAT,
+# O_TRUNC and O_APPEND, each once. Clobbers a1, t0..t2.
+fs_oflags:
+        bltz  a0, 9f
+        li    t0, 3 * O_APPEND
+        bge   a0, t0, 9f
+        li    t1, 3
+        div   t0, a0, t1               # each flag above the mode is 0 or 1
+        li    t2, 3
+1:      beqz  t2, 2f
+        rem   a1, t0, t1
+        addi  a1, a1, -2
+        beqz  a1, 9f
+        div   t0, t0, t1
+        addi  t2, t2, -1
+        j     1b
+2:      rem   a0, a0, t1
+        ret
+9:      li    a0, E_INVAL
+        ret
 
 # close(fd)
 fs_close:
@@ -108,6 +185,11 @@ fs_read:
         lw    a1, fs_a1
         call  fs_fdget
         mv    s2, a0                   # s2: the descriptor
+        lw    t0, FD_FLAGS(s2)
+        li    t1, 3
+        rem   t0, t0, t1
+        li    t1, O_WRONLY
+        beq   t0, t1, fs_badf          # opened for writing only
         lw    s3, fs_a3                # s3: how many to copy
         bltz  s3, fs_inval
         lw    a0, FD_INO(s2)
@@ -300,6 +382,697 @@ fs_spawn:
 9:      li    a0, E_NOEXEC
         j     fs_reply
 
+# write(fd, buffer, n): copy up to n trytes from the buffer to the file
+# at the position (its end, with O_APPEND), no further than the end of
+# the block the position is in, and move the position past them: how
+# many. A block not there yet is allocated, and the indirect block too.
+fs_write:
+        call  fs_enter
+        lw    a1, fs_a1
+        call  fs_fdget
+        mv    s2, a0                   # s2: the descriptor
+        lw    t0, FD_FLAGS(s2)
+        li    t1, 3
+        rem   t0, t0, t1
+        beqz  t0, fs_badf              # opened for reading only
+        lw    s3, fs_a3                # s3: how many to copy
+        bltz  s3, fs_inval
+        lw    s4, FD_INO(s2)           # s4: the inode
+        mv    a0, s4
+        call  fs_iget
+        lw    s5, FD_POS(s2)           # s5: where to write
+        lw    t0, FD_FLAGS(s2)
+        li    t1, O_APPEND
+        div   t0, t0, t1
+        beqz  t0, 1f
+        lw    s5, I_SIZE(a0)
+1:      beqz  s3, fs_none
+        li    t2, PAGE
+        div   s6, s5, t2               # s6: the file's block to write in
+        rem   t1, s5, t2
+        sw    t1, fs_off
+        sub   t1, t2, t1               # what is left of the block
+        bge   t1, s3, 2f
+        mv    s3, t1
+2:      li    t0, NDIRECT + PAGE / 3
+        bge   s6, t0, 9f               # past what a file can hold
+        sw    zero, fs_newind
+        sw    zero, fs_newdata
+        li    s8, NO_BLOCK             # s8: the indirect block, if it counts
+        li    t0, NDIRECT
+        bge   s6, t0, 3f
+        li    t0, 3
+        mul   t0, s6, t0
+        add   t0, a0, t0
+        lw    s7, I_DIRECT(t0)         # s7: the data block, or NO_BLOCK
+        j     5f
+3:      lw    s8, I_INDIRECT(a0)
+        li    s7, NO_BLOCK
+        bnez  s8, 4f
+        li    t0, 1                    # no indirect block yet
+        sw    t0, fs_newind
+        li    a0, 0
+        call  fs_balloc
+        mv    s8, a0
+        call  fs_bnew
+        j     5f
+4:      mv    a0, s8
+        call  fs_bget
+        addi  t0, s6, -NDIRECT
+        li    t1, 3
+        mul   t0, t0, t1
+        add   t0, a0, t0
+        lw    s7, BLOCK_W0(t0)
+5:      bnez  s7, 6f
+        li    t0, 1                    # no data block yet
+        sw    t0, fs_newdata
+        li    a0, 0
+        lw    t0, fs_newind
+        beqz  t0, 0f
+        addi  a0, s8, 1                # past a new indirect block
+0:      call  fs_balloc
+        mv    s7, a0
+        call  fs_bnew
+        j     7f
+6:      mv    a0, s7
+        call  fs_bget
+
+        # Every block is here. The trytes first: a buffer that is not all
+        # the caller's fails the call before anything changes.
+7:      mv    a0, s7
+        call  fs_bget
+        lw    t0, fs_off
+        add   a3, a0, t0
+        addi  a3, a3, BLOCK_T0         # where the trytes go
+        lw    a2, fs_a2
+        mv    a4, s3
+        mv    a1, s0
+        li    a0, SYS_COPYIN
+        sys
+        bnez  a0, fs_reply
+        mv    a0, s7
+        call  fs_bdirty
+        lw    t0, fs_newind
+        lw    t1, fs_newdata
+        add   t0, t0, t1
+        beqz  t0, 8f                   # nothing allocated
+        li    a0, 0
+        call  fs_bget
+        li    t1, MAP_USED
+        add   t0, a0, s7
+        st    t1, FS_MAP(t0)
+        lw    t0, fs_newind
+        beqz  t0, 0f
+        add   t0, a0, s8
+        st    t1, FS_MAP(t0)
+0:      li    a0, 0
+        call  fs_bdirty
+8:      mv    a0, s4
+        call  fs_iget
+        li    t0, NDIRECT
+        bge   s6, t0, 1f
+        li    t0, 3
+        mul   t0, s6, t0
+        add   t0, a0, t0
+        sw    s7, I_DIRECT(t0)
+        j     2f
+1:      sw    s8, I_INDIRECT(a0)
+        mv    a0, s8
+        call  fs_bget
+        addi  t0, s6, -NDIRECT
+        li    t1, 3
+        mul   t0, t0, t1
+        add   t0, a0, t0
+        sw    s7, BLOCK_W0(t0)
+        mv    a0, s8
+        call  fs_bdirty
+2:      mv    a0, s4
+        call  fs_iget
+        add   s5, s5, s3
+        lw    t0, I_SIZE(a0)
+        bge   t0, s5, 4f
+        sw    s5, I_SIZE(a0)           # it grew
+4:      sw    s5, FD_POS(s2)
+        li    a0, FS_INODE_BLOCK
+        call  fs_bdirty
+        mv    a0, s3
+        j     fs_reply
+9:      li    a0, E_FBIG
+        j     fs_reply
+
+# unlink(path): remove a file's name, and the file once it has no other.
+# A directory is E_ISDIR (rmdir removes those), and a file some process
+# has open is E_BUSY, since a descriptor names the inode.
+fs_unlink:
+        call  fs_enter
+        lw    a0, fs_a1
+        call  fs_namei_parent
+        beqz  a1, fs_isdir             # the root
+        mv    s8, a0                   # s8: the directory
+        call  fs_dotcheck
+        mv    a0, s8
+        call  fs_dirfind
+        beqz  a0, fs_noent
+        mv    s3, a0                   # s3: the entry
+        lw    s4, D_INO(s3)            # s4: the file
+        mv    a0, s4
+        call  fs_iget
+        lw    t0, I_TYPE(a0)
+        li    t1, T_DIR
+        beq   t0, t1, fs_isdir
+        mv    a0, s4
+        call  fs_inoopen
+        mv    a0, s4
+        call  fs_truncprep             # in case this is its last name
+
+        mv    a0, s3                   # change: the entry goes
+        li    a1, NO_INO
+        la    a2, fs_noname
+        call  fs_direntset
+        mv    a0, s8
+        call  fs_dirdirty
+        mv    a0, s4
+        call  fs_iget
+        lw    t0, I_LINKS(a0)
+        addi  t0, t0, -1
+        sw    t0, I_LINKS(a0)
+        bgtz  t0, 1f
+        mv    a0, s4                   # no name left: neither is the file
+        call  fs_ifree
+1:      li    a0, FS_INODE_BLOCK
+        call  fs_bdirty
+        li    a0, 0
+        j     fs_reply
+
+# mkdir(path): a new, empty directory, holding . and ..
+fs_mkdir:
+        call  fs_enter
+        lw    a0, fs_a1
+        call  fs_namei_parent
+        beqz  a1, fs_exist             # the root
+        mv    s8, a0                   # s8: the parent
+        call  fs_nameok
+        mv    a0, s8
+        call  fs_dirfind
+        bnez  a0, fs_exist
+        beqz  a1, fs_nospc             # the parent is full
+        mv    s2, a1                   # s2: the entry to use
+        mv    s3, a2                   # s3: 1 if that grows the parent
+        call  fs_ialloc
+        mv    s4, a0                   # s4: the new directory's inode
+        li    a0, 0
+        call  fs_balloc
+        mv    s5, a0                   # s5: its block
+        call  fs_bnew
+
+        li    a0, 0                    # change
+        call  fs_bget
+        add   t0, a0, s5
+        li    t1, MAP_USED
+        st    t1, FS_MAP(t0)
+        li    a0, 0
+        call  fs_bdirty
+        mv    a0, s4
+        call  fs_iget
+        call  fs_inodeclear
+        li    t0, T_DIR
+        sw    t0, I_TYPE(a0)
+        li    t0, 2                    # its name and its .
+        sw    t0, I_LINKS(a0)
+        li    t0, 2 * DIRENT
+        sw    t0, I_SIZE(a0)
+        sw    s5, I_DIRECT(a0)
+        mv    a0, s5
+        call  fs_bget
+        addi  a0, a0, BLOCK_W0
+        mv    a1, s4
+        la    a2, fs_dot
+        call  fs_direntset
+        mv    a0, s5
+        call  fs_bget
+        addi  a0, a0, BLOCK_W0 + DIRENT
+        mv    a1, s8
+        la    a2, fs_dotdot
+        call  fs_direntset
+        mv    a0, s5
+        call  fs_bdirty
+        mv    a0, s2
+        mv    a1, s4
+        la    a2, fs_name
+        call  fs_direntset
+        mv    a0, s8
+        call  fs_iget
+        lw    t0, I_LINKS(a0)          # the new directory's ..
+        addi  t0, t0, 1
+        sw    t0, I_LINKS(a0)
+        beqz  s3, 1f
+        lw    t0, I_SIZE(a0)
+        addi  t0, t0, DIRENT
+        sw    t0, I_SIZE(a0)
+1:      mv    a0, s8
+        call  fs_dirdirty
+        li    a0, FS_INODE_BLOCK
+        call  fs_bdirty
+        li    a0, 0
+        j     fs_reply
+
+# rmdir(path): remove a directory holding nothing but . and .. . One a
+# process has open is E_BUSY, as is the root.
+fs_rmdir:
+        call  fs_enter
+        lw    a0, fs_a1
+        call  fs_namei_parent
+        beqz  a1, fs_busy              # the root
+        mv    s8, a0                   # s8: the parent
+        call  fs_dotcheck
+        mv    a0, s8
+        call  fs_dirfind
+        beqz  a0, fs_noent
+        mv    s3, a0                   # s3: the entry
+        lw    s4, D_INO(s3)            # s4: the directory to go
+        mv    a0, s4
+        call  fs_iget
+        lw    t0, I_TYPE(a0)
+        li    t1, T_DIR
+        bne   t0, t1, fs_notdir
+        lw    s5, I_SIZE(a0)
+        li    t1, DIRENT
+        div   s5, s5, t1               # s5: its entries
+        li    t1, DIRENTS
+        bgt   s5, t1, fs_eio
+        lw    a0, I_DIRECT(a0)
+        beqz  a0, fs_eio
+        call  fs_bget
+        addi  s6, a0, BLOCK_W0         # s6: the entry looked at
+1:      beqz  s5, 3f
+        lw    t0, D_INO(s6)
+        beqz  t0, 2f
+        addi  t2, s6, D_NAME           # only . and .. may be in use
+        li    t1, '.'
+        lt    t0, 0(t2)
+        bne   t0, t1, fs_notempty
+        lt    t0, 1(t2)
+        beqz  t0, 2f
+        bne   t0, t1, fs_notempty
+        lt    t0, 2(t2)
+        bnez  t0, fs_notempty
+2:      addi  s6, s6, DIRENT
+        addi  s5, s5, -1
+        j     1b
+3:      mv    a0, s4
+        call  fs_inoopen
+        mv    a0, s4
+        call  fs_truncprep
+
+        mv    a0, s3                   # change: the entry goes
+        li    a1, NO_INO
+        la    a2, fs_noname
+        call  fs_direntset
+        mv    a0, s8
+        call  fs_dirdirty
+        mv    a0, s4
+        call  fs_ifree
+        mv    a0, s8
+        call  fs_iget
+        lw    t0, I_LINKS(a0)          # its .. named the parent
+        addi  t0, t0, -1
+        sw    t0, I_LINKS(a0)
+        li    a0, FS_INODE_BLOCK
+        call  fs_bdirty
+        li    a0, 0
+        j     fs_reply
+
+# --- helpers for changing the filesystem -----------------------------------------
+
+# fs_creat: for open with O_CREAT: a0 = the inode named fs_name in
+# directory a0 and a1 = 0, if there is one; else a new, empty file of
+# that name, and a1 = -1. Clobbers a2..a4, t0..t6 and s2..s6.
+fs_creat:
+        addi  sp, sp, -6
+        sw    ra, 0(sp)
+        sw    a0, 3(sp)                # the directory
+        call  fs_dirfind
+        beqz  a0, 1f
+        lw    a0, D_INO(a0)
+        li    a1, 0
+        j     9f
+1:      beqz  a1, fs_nospc             # the directory is full
+        mv    s2, a1                   # s2: the entry to use
+        mv    s3, a2                   # s3: 1 if that grows the directory
+        call  fs_nameok
+        call  fs_ialloc
+        mv    s4, a0                   # s4: the new file
+
+        mv    a0, s4                   # change
+        call  fs_iget
+        call  fs_inodeclear
+        li    t0, T_FILE
+        sw    t0, I_TYPE(a0)
+        li    t0, 1
+        sw    t0, I_LINKS(a0)
+        mv    a0, s2
+        mv    a1, s4
+        la    a2, fs_name
+        call  fs_direntset
+        beqz  s3, 2f
+        lw    a0, 3(sp)
+        call  fs_iget
+        lw    t0, I_SIZE(a0)
+        addi  t0, t0, DIRENT
+        sw    t0, I_SIZE(a0)
+2:      lw    a0, 3(sp)
+        call  fs_dirdirty
+        li    a0, FS_INODE_BLOCK
+        call  fs_bdirty
+        mv    a0, s4
+        li    a1, -1
+9:      lw    ra, 0(sp)
+        addi  sp, sp, 6
+        ret
+
+# fs_dirfind: look fs_name up in directory a0. a0 = the address of its
+# entry in a window, or 0; a1 = an entry a new name could take, or 0 when
+# the directory is full, and a2 = 1 if that entry is past the
+# directory's end. Replies E_NOTDIR if a0 is not a directory. Clobbers
+# a3, t0..t6 and s6.
+fs_dirfind:
+        addi  sp, sp, -3
+        sw    ra, 0(sp)
+        call  fs_iget
+        lw    t0, I_TYPE(a0)
+        li    t1, T_DIR
+        bne   t0, t1, fs_notdir
+        lw    s6, I_SIZE(a0)
+        li    t1, DIRENT
+        div   s6, s6, t1               # s6: its entries
+        li    t1, DIRENTS
+        bgt   s6, t1, fs_eio
+        lw    a0, I_DIRECT(a0)
+        beqz  a0, fs_eio               # every directory has . and ..
+        call  fs_bget
+        addi  t2, a0, BLOCK_W0         # t2: the entry looked at
+        li    a1, 0
+        li    t5, 0                    # t5: its number
+1:      bge   t5, s6, 5f
+        lw    t0, D_INO(t2)
+        bnez  t0, 2f
+        bnez  a1, 4f                   # unused: the first can take a name
+        mv    a1, t2
+        j     4f
+2:      addi  t3, t2, D_NAME
+        la    t4, fs_name
+3:      lt    t0, 0(t3)
+        lt    t1, 0(t4)
+        bne   t0, t1, 4f
+        addi  t3, t3, 1
+        addi  t4, t4, 1
+        bnez  t0, 3b
+        mv    a0, t2                   # the same, to the end
+        j     9f
+4:      addi  t2, t2, DIRENT
+        addi  t5, t5, 1
+        j     1b
+5:      li    a0, 0
+        li    a2, 0
+        bnez  a1, 9f
+        li    t0, DIRENTS
+        bge   s6, t0, 9f               # full: a1 stays 0
+        mv    a1, t2                   # the entry just past the end
+        li    a2, 1
+9:      lw    ra, 0(sp)
+        addi  sp, sp, 3
+        ret
+
+# fs_dotcheck: reply E_INVAL if fs_name is . or .., which every
+# directory has and none may lose or gain. Clobbers t0, t1.
+fs_dotcheck:
+        la    t1, fs_name
+        lt    t0, 0(t1)
+        addi  t0, t0, -'.'
+        bnez  t0, 9f
+        lt    t0, 1(t1)
+        beqz  t0, fs_inval             # .
+        addi  t0, t0, -'.'
+        bnez  t0, 9f
+        lt    t0, 2(t1)
+        beqz  t0, fs_inval             # ..
+9:      ret
+
+# fs_nameok: reply E_INVAL unless fs_name may be a new name: not . or ..,
+# and no space or control character (fs_namei keeps out /). Clobbers
+# t0..t2.
+fs_nameok:
+        mv    t2, ra
+        call  fs_dotcheck
+        mv    ra, t2
+        la    t1, fs_name
+1:      lt    t0, 0(t1)
+        beqz  t0, 9f
+        li    t2, ' '
+        ble   t0, t2, fs_inval
+        addi  t1, t1, 1
+        j     1b
+9:      ret
+
+# fs_ialloc: a0 = the lowest free inode; replies E_NOSPC when there is
+# none. Clobbers a1..a3, t0..t6.
+fs_ialloc:
+        addi  sp, sp, -3
+        sw    ra, 0(sp)
+        li    a0, FS_INODE_BLOCK
+        call  fs_bget
+        addi  t1, a0, BLOCK_W0 + 2 * INODE
+        li    a0, ROOT_INO + 1
+1:      li    t0, FS_INODES
+        bge   a0, t0, fs_nospc
+        lw    t0, I_TYPE(t1)
+        beqz  t0, 2f                   # T_FREE
+        addi  t1, t1, INODE
+        addi  a0, a0, 1
+        j     1b
+2:      lw    ra, 0(sp)
+        addi  sp, sp, 3
+        ret
+
+# fs_balloc: a0 = the lowest free block from a0 on; replies E_NOSPC when
+# there is none. The map is not changed: the caller marks it, and asks
+# for a second block from past the first. Clobbers a1..a3, t0..t6.
+fs_balloc:
+        addi  sp, sp, -6
+        sw    ra, 0(sp)
+        sw    a0, 3(sp)
+        li    a0, 0
+        call  fs_bget
+        lw    t2, 3(sp)                # t2: the block looked at
+        li    t0, FS_INODE_BLOCK + 1
+        bge   t2, t0, 1f
+        mv    t2, t0
+1:      lw    t3, FS_HEAD_BLOCKS(a0)   # t3: where the filesystem ends
+2:      bge   t2, t3, fs_nospc
+        add   t0, a0, t2
+        lt    t1, FS_MAP(t0)
+        beqz  t1, 3f                   # MAP_FREE
+        addi  t2, t2, 1
+        j     2b
+3:      mv    a0, t2
+        lw    ra, 0(sp)
+        addi  sp, sp, 6
+        ret
+
+# fs_truncprep: read what fs_itrunc and fs_ifree will need for inode a0,
+# its indirect block, so that nothing they do can fail. Clobbers a0..a3,
+# t0..t6.
+fs_truncprep:
+        addi  sp, sp, -3
+        sw    ra, 0(sp)
+        call  fs_iget
+        lw    a0, I_INDIRECT(a0)
+        beqz  a0, 1f
+        call  fs_bget
+1:      lw    ra, 0(sp)
+        addi  sp, sp, 3
+        ret
+
+# fs_itrunc: empty inode a0: free each block it holds in the map, and
+# clear its size and block numbers. Marks block 0 and the inode table
+# dirty. Clobbers a0..a3, t0..t6.
+fs_itrunc:
+        addi  sp, sp, -9
+        sw    ra, 0(sp)
+        sw    a0, 3(sp)                # 3: the inode, 6: block 0
+        call  fs_truncprep
+        li    a0, 0
+        call  fs_bget
+        sw    a0, 6(sp)
+        lw    a0, 3(sp)
+        call  fs_iget
+        mv    a2, a0                   # a2: the inode
+        lw    a1, 6(sp)
+        addi  t1, a2, I_DIRECT
+        li    t2, NDIRECT
+1:      lw    t0, 0(t1)                # each direct block
+        call  fs_mapfree
+        sw    zero, 0(t1)
+        addi  t1, t1, 3
+        addi  t2, t2, -1
+        bnez  t2, 1b
+        sw    zero, I_SIZE(a2)
+        lw    a0, I_INDIRECT(a2)
+        beqz  a0, 3f
+        sw    zero, I_INDIRECT(a2)
+        mv    t0, a0
+        call  fs_mapfree
+        call  fs_bget                  # its numbers, still as they were
+        lw    a1, 6(sp)
+        addi  t1, a0, BLOCK_W0
+        li    t2, PAGE / 3
+2:      lw    t0, 0(t1)
+        call  fs_mapfree
+        addi  t1, t1, 3
+        addi  t2, t2, -1
+        bnez  t2, 2b
+3:      li    a0, 0
+        call  fs_bdirty
+        li    a0, FS_INODE_BLOCK
+        call  fs_bdirty
+        lw    ra, 0(sp)
+        addi  sp, sp, 9
+        ret
+
+# fs_mapfree: mark block t0 free in the map of block 0 at a1. NO_BLOCK,
+# and a number past the map, which only a damaged filesystem holds, are
+# left alone. Clobbers t0, t3.
+fs_mapfree:
+        blez  t0, 9f
+        li    t3, FS_MAX_BLOCKS
+        bge   t0, t3, 9f
+        add   t0, a1, t0
+        st    zero, FS_MAP(t0)         # MAP_FREE
+9:      ret
+
+# fs_ifree: fs_itrunc inode a0, then mark it unused. Clobbers as fs_itrunc.
+fs_ifree:
+        addi  sp, sp, -6
+        sw    ra, 0(sp)
+        sw    a0, 3(sp)
+        call  fs_itrunc
+        lw    a0, 3(sp)
+        call  fs_iget
+        call  fs_inodeclear
+        lw    ra, 0(sp)
+        addi  sp, sp, 6
+        ret
+
+# fs_inodeclear: zero the inode at a0: T_FREE, no links, no blocks.
+# Clobbers t0, t1.
+fs_inodeclear:
+        mv    t0, a0
+        addi  t1, a0, INODE - 3
+1:      sw    zero, 0(t0)
+        addi  t0, t0, 3
+        ble   t0, t1, 1b
+        ret
+
+# fs_inoopen: reply E_BUSY if any process has inode a0 open. The kernel
+# tells the server of each process that ends, so every descriptor here
+# is a live process's. Clobbers t0..t2.
+fs_inoopen:
+        la    t1, fs_fds
+        li    t2, NPROC * NFD
+1:      lw    t0, FD_INO(t1)
+        beq   t0, a0, fs_busy
+        addi  t1, t1, FD
+        addi  t2, t2, -1
+        bnez  t2, 1b
+        ret
+
+# fs_direntset: make the directory entry at a0 name inode a1 with the
+# string at a2, zero-padded. Clobbers a2, t0..t2.
+fs_direntset:
+        sw    a1, D_INO(a0)
+        addi  t0, a0, D_NAME
+        li    t1, NAME_MAX + 1
+1:      lt    t2, 0(a2)
+        beqz  t2, 2f
+        st    t2, 0(t0)
+        addi  t0, t0, 1
+        addi  a2, a2, 1
+        addi  t1, t1, -1
+        j     1b
+2:      st    zero, 0(t0)
+        addi  t0, t0, 1
+        addi  t1, t1, -1
+        bgtz  t1, 2b
+        ret
+
+# fs_dirdirty: mark directory a0's block dirty. Clobbers a0..a3, t0..t6.
+fs_dirdirty:
+        addi  sp, sp, -3
+        sw    ra, 0(sp)
+        call  fs_iget
+        lw    a0, I_DIRECT(a0)
+        call  fs_bdirty
+        lw    ra, 0(sp)
+        addi  sp, sp, 3
+        ret
+
+# fs_bnew: a0 = the centre of a window holding block a0, all zeros: a
+# block just allocated, whatever the disk held there. Clobbers as fs_bget.
+fs_bnew:
+        addi  sp, sp, -3
+        sw    ra, 0(sp)
+        call  fs_bget
+        addi  t0, a0, -9840
+        addi  t1, a0, 9840
+1:      sw    zero, 0(t0)
+        addi  t0, t0, 3
+        ble   t0, t1, 1b
+        lw    ra, 0(sp)
+        addi  sp, sp, 3
+        ret
+
+# fs_bdirty: mark the window holding block a0 changed, so fs_flush
+# writes it. Clobbers t0..t2.
+fs_bdirty:
+        addi  t2, a0, 1
+        la    t1, fs_wblk
+        li    t0, NWIN
+1:      lw    a0, 0(t1)
+        beq   a0, t2, 2f
+        addi  t1, t1, 3
+        addi  t0, t0, -1
+        bnez  t0, 1b
+        ret                            # not here: cannot happen
+2:      li    t0, 1
+        sw    t0, NWIN * 6(t1)         # fs_wdirty
+        ret
+
+# fs_flush: write every changed window back to its block. A block the
+# disk refuses makes the reply E_IO. Clobbers a0..a2, t0..t3.
+fs_flush:
+        li    t3, 0                    # t3: the window
+1:      li    t0, 3
+        mul   t0, t3, t0
+        la    t1, fs_wdirty
+        add   t1, t1, t0
+        lw    t2, 0(t1)
+        beqz  t2, 2f
+        sw    zero, 0(t1)
+        la    t1, fs_wblk
+        add   t1, t1, t0
+        lw    a1, 0(t1)
+        addi  a1, a1, -1
+        mv    a2, t3
+        li    a0, SYS_BWRITE
+        sys
+        beqz  a0, 2f
+        li    t0, E_IO
+        sw    t0, fs_result
+2:      addi  t3, t3, 1
+        li    t0, NWIN
+        blt   t3, t0, 1b
+        ret
+
 # --- helpers --------------------------------------------------------------------
 
 # fs_enter: check the disk holds a filesystem; else reply E_NOFS.
@@ -364,9 +1137,11 @@ fs_bget:
         la    t1, fs_wblk
         li    t0, 0                    # t0: the window looked at
         li    t4, 0                    # t4: the one to take, if none has it
-        lw    t5, fs_wuse              # t5: when that was last used
+        li    t5, 1000000000           # t5: when that was last used
 1:      lw    t2, 0(t1)
         beq   t2, t6, 4f               # it is here
+        lw    t2, NWIN * 6(t1)         # fs_wdirty: kept until written
+        bnez  t2, 2f
         lw    t2, NWIN * 3(t1)         # fs_wuse
         bge   t2, t5, 2f
         mv    t4, t0
@@ -505,7 +1280,16 @@ fs_getpath:
 # Replies E_FAULT, E_NAMETOOLONG, E_NOTDIR, E_NOENT, or as fs_bget does.
 # Clobbers a0..a4, t0..t6 and s2..s8.
 fs_namei:
-        addi  sp, sp, -3
+        sw    zero, fs_parent
+        j     0f
+# fs_namei_parent: as fs_namei, for a call that makes or removes what
+# the path names: a0 = the directory its last name is in, with that name
+# in fs_name, and a1 = 1; or a1 = 0 when the path names the root, which
+# has no name. Clobbers as fs_namei.
+fs_namei_parent:
+        li    t0, 1
+        sw    t0, fs_parent
+0:      addi  sp, sp, -3
         sw    ra, 0(sp)
         call  fs_getpath
         la    s2, fs_path              # s2: where we are in the path
@@ -528,7 +1312,16 @@ fs_namei:
         li    t1, '/'
         bne   t0, t1, 3b
 4:      st    zero, 0(t2)
-        mv    a0, s3                   # look it up in directory s3
+        lw    t0, fs_parent
+        beqz  t0, 0f
+        mv    t1, s2                   # the last name? Then s3 is its directory
+5:      lt    t0, 0(t1)
+        beqz  t0, 10f
+        li    t2, '/'
+        bne   t0, t2, 0f
+        addi  t1, t1, 1
+        j     5b
+0:      mv    a0, s3                   # look it up in directory s3
         call  fs_iget
         lw    t0, I_TYPE(a0)
         li    t1, T_DIR
@@ -560,7 +1353,10 @@ fs_namei:
         j     5b
 8:      lw    s3, D_INO(t2)
         j     1b
-9:      mv    a0, s3
+9:      li    a1, 0                    # no name at all: the root
+        j     11f
+10:     li    a1, 1
+11:     mv    a0, s3
         lw    ra, 0(sp)
         addi  sp, sp, 3
         ret
@@ -590,22 +1386,48 @@ fs_isdir:
 fs_eio:
         li    a0, E_IO
         j     fs_reply
+fs_badf:
+        li    a0, E_BADF
+        j     fs_reply
+fs_exist:
+        li    a0, E_EXIST
+        j     fs_reply
+fs_nospc:
+        li    a0, E_NOSPC
+        j     fs_reply
+fs_notempty:
+        li    a0, E_NOTEMPTY
+        j     fs_reply
+fs_busy:
+        li    a0, E_BUSY
+        j     fs_reply
 
-        .equ  FS_NOPS, 7               # the operations, by FS_ number
+        .equ  FS_NOPS, 11              # the operations, by FS_ number
 fs_ops: .word fs_open, fs_close, fs_read, fs_lseek, fs_readdir, fs_stat, fs_spawn
-        .assert FS_SPAWN == FS_NOPS - 1, "fs_ops must list every FS_ operation"
+        .word fs_write, fs_unlink, fs_mkdir, fs_rmdir
+        .assert FS_RMDIR == FS_NOPS - 1, "fs_ops must list every FS_ operation"
 
 fs_a1:  .word 0                        # the call's arguments
 fs_a2:  .word 0
 fs_a3:  .word 0
 fs_entering: .word 0                   # 1 while fs_enter reads block 0
 fs_clock: .word 0                      # counts fs_bget calls
+fs_result: .word 0                     # what fs_reply answers
+fs_mode: .word 0                       # open: the access mode
+fs_off: .word 0                        # write: the position in its block,
+fs_newind: .word 0                     # 1 if the indirect block is new,
+fs_newdata: .word 0                    # 1 if the data block is new
+fs_parent: .word 0                     # 1: fs_namei stops before the last name
 fs_wblk: .words NWIN                   # the block each window holds, plus 1;
-fs_wuse: .words NWIN                   # 0 for none. When each was last used
+fs_wuse: .words NWIN                   # 0 for none. When each was last used,
+fs_wdirty: .words NWIN                 # and 1 if it was changed since read
 fs_statbuf: .words STAT / 3
 fs_fds: .words NPROC * NFD * FD / 3    # each process's descriptors
         .equ  FS_ZEROS, 243            # trytes of zeros a hole is read from
 fs_zeros: .zero FS_ZEROS
 fs_name: .zero NAME_MAX + 1
+fs_dot: .string "."
+fs_dotdot: .string ".."
+fs_noname: .string ""
 fs_path: .zero PATH_MAX + 1
         .nocompress

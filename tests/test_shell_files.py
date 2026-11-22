@@ -1,5 +1,5 @@
-"""The shell's file built-ins, ls and cat, on the filesystem of
-docs/filesystem.md, through the kernel's file calls. tools/fs.py makes
+"""The shell's file built-ins, ls, cat, write, rm, mkdir and rmdir, on the
+filesystem of docs/filesystem.md, through the file server. tools/fs.py makes
 the disks."""
 
 import pytest
@@ -106,3 +106,49 @@ def test_a_disk_without_a_filesystem_is_reported(shell):
         "$ ls\nsh: /: no filesystem on the disk\n$ \n"
     )
     assert "sh: x: no filesystem on the disk\n" in said(shell, "cat x\n", None)
+
+
+def test_write_makes_a_file_the_tool_can_read(shell):
+    on = disk()
+    out = said(shell, "write motd  welcome to   ternary\ncat motd\n", on)
+    assert out == (
+        "$ write motd  welcome to   ternary\n$ cat motd\nwelcome to   ternary\n$ \n"
+    )
+    assert Filesystem.load(on[0]).read("motd") == "welcome to   ternary\n"
+
+
+def test_write_replaces_a_file_and_frees_what_it_held(shell):
+    on = disk(motd="x" * (2 * PAGE))
+    said(shell, "write motd new text\n", on)
+    made = Filesystem.load(on[0])
+    assert made.read("motd") == "new text\n"
+    assert len(made.free_blocks()) == 8 - 4  # 0, 1, / and motd's one block
+
+
+def test_mkdir_rm_and_rmdir(shell):
+    on = disk()
+    out = said(
+        shell,
+        "mkdir docs\nwrite docs/a one\nmkdir docs\nrmdir docs\nrm docs\n"
+        "ls docs\nrm docs/a\nrmdir docs\nls\nrm nope\n",
+        on,
+    )
+    assert out == (
+        "$ mkdir docs\n$ write docs/a one\n"
+        "$ mkdir docs\nsh: docs: file exists\n"
+        "$ rmdir docs\nsh: docs: directory not empty\n"
+        "$ rm docs\nsh: docs: is a directory\n"
+        "$ ls docs\n4 a\n$ rm docs/a\n$ rmdir docs\n$ ls\n"
+        "$ rm nope\nsh: nope: no such file or directory\n$ \n"
+    )
+    made = Filesystem.load(on[0])
+    assert made.listdir() == []
+    assert made.free_blocks() == list(range(3, 8))
+
+
+def test_a_full_disk_is_said(shell):
+    on = disk(4, a="first\n")  # block 3 is the only data block, and a's
+    out = said(shell, "write b more\nmkdir d\ncat a\n", on)
+    assert "sh: b: no space left\n" in out
+    assert "sh: d: no space left\n" in out
+    assert out.endswith("$ cat a\nfirst\n$ \n")

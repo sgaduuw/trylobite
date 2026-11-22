@@ -100,7 +100,10 @@ pipe.
   start the server first so it gets that number (the shell does; tests
   pass `files=True` to `run`). The server shares its build's symbol
   table, so its labels all start with `fs_`. Each call starts on a fresh
-  stack, so a failure anywhere just jumps to a reply tail.
+  stack, so a failure anywhere just jumps to a reply tail. A call that
+  changes the disk gathers and checks everything first, then changes
+  its windows and marks them dirty; `fs_reply` writes them back before
+  replying, so a window is never left dirty between calls.
 - **A server asleep in `receive` runs it again when woken**
   (`PCB_RETRY`, `kernel/ipc.s`), so `receive` must change nothing
   before it finds work. Arguments are read from the saved registers,
