@@ -16,6 +16,7 @@
         .section kernel, P_KCODE * PAGE - 9840, P_KCODE * PAGE - 9840 - KOFF
         .gp   kgp
         .include "../kernel/entry.s"
+        .include "../kernel/boot.s"
         .include "../kernel/trap.s"
         .include "../kernel/syscall.s"
         .include "../kernel/sched.s"

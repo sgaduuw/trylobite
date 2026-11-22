@@ -22,9 +22,8 @@ def test_a_session_runs_programs_and_reports_how_they_ended(shell):
     # Init is process 0; 1 to 4 are the console, pipe, disk and file
     # servers, which it starts first, and 5 is the shell.
     result = session(shell, "hello\nfail\nnope\nexit\n")
-    transcript, _ = result.console.rsplit(" timer interrupts", 1)
+    transcript, _ = result.after_boot.rsplit(" timer interrupts", 1)
     assert transcript.rsplit(" ", 1)[0] == (
-        "trylobite: booting\n"
         "$ hello\n"
         "hello from a balanced-ternary machine\n"
         "trylobite: process 6 exited with code 0\n"
@@ -98,7 +97,7 @@ def test_a_word_without_a_slash_is_looked_for_in_bin(shell):
 def test_ls_lists_the_programs_on_the_disk(shell):
     result = session(shell, "ls bin\nfail\n")
     assert "sh: exit 3\n" in result.console
-    assert [line.split()[1] for line in result.console.splitlines()[2:8]] == [
+    assert [line.split()[1] for line in result.after_boot.splitlines()[1:7]] == [
         "echo",
         "fail",
         "hello",

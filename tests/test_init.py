@@ -4,6 +4,17 @@ order and then the shell."""
 from tests.kernel import ROOT, _assemble, assemble_file, bin_disk, run_image
 
 
+def trouble(console: str) -> list[str]:
+    """init's lines other than those it says as each server and the shell
+    start (tests/test_boot.py)."""
+    return [
+        line
+        for line in console.splitlines()
+        if line.startswith("init:")
+        and not line.startswith(("init: started ", "init: starting sh"))
+    ]
+
+
 def shell_build(**numbers: int):
     """shell.s with some of the program numbers init starts changed."""
     source = (ROOT / "shell.s").read_text()
@@ -25,7 +36,15 @@ def test_init_starts_the_servers_before_the_shell_and_ends_after_it():
         "trylobite: process 5 exited with code 0",  # the shell,
         "trylobite: process 0 exited with code 0",  # then init
     ]
-    assert not any(line.startswith("init:") for line in lines)  # quiet
+    # Only the boot lines (tests/test_boot.py): nothing went wrong.
+    said = [line for line in lines if line.startswith("init:")]
+    assert said == [
+        "init: started console, process 1",
+        "init: started pipe, process 2",
+        "init: started disk, process 3",
+        "init: started fs, process 4",
+        "init: starting sh",
+    ]
 
 
 def test_a_server_that_cannot_start_takes_what_needs_it_down():
@@ -34,7 +53,10 @@ def test_a_server_that_cannot_start_takes_what_needs_it_down():
     result = run_image(shell_build(INIT_DISKD=27), input="ls\nhello\n", disk=bin_disk())
     assert result.exit_code == 0, result.console
     console = result.console
-    assert "init: no server named disk\ninit: no server named fs\n$ " in console
+    assert (
+        "init: no server named disk\ninit: no server named fs\ninit: starting sh\n$ "
+        in console
+    )
     assert "$ ls\nsh: .: no filesystem on the disk\n" in console
     assert "$ hello\nsh: no such program: hello\n" in console
 
@@ -42,7 +64,9 @@ def test_a_server_that_cannot_start_takes_what_needs_it_down():
 def test_a_server_init_does_not_need_can_be_missing():
     # Without the pipe server the rest still starts.
     result = run_image(shell_build(INIT_PIPED=27), input="ls\n", disk=bin_disk())
-    assert "init: no server named pipe\n$ ls\nbin/\n" in result.console
+    assert trouble(result.console) == ["init: no server named pipe"]
+    assert "init: started fs, process 3\n" in result.console
+    assert "$ ls\nbin/\n" in result.console
     assert "init: no server named fs" not in result.console
 
 
@@ -114,8 +138,7 @@ def test_a_server_that_ends_is_started_again_until_init_gives_up():
     )
     result = run_image(image, max_steps=10_000_000)
     assert result.exit_code == 0, result.console
-    init = [line for line in result.console.splitlines() if line.startswith("init:")]
-    assert init == ["init: pipe ended, starting it again"] * 3 + [
+    assert trouble(result.console) == ["init: pipe ended, starting it again"] * 3 + [
         "init: pipe ended too often, giving up on it"
     ]
     assert result.console.count(" killed\n") == 4  # the shell, each time
@@ -137,8 +160,7 @@ def test_what_needs_a_server_that_ends_is_started_again_with_it():
     assert "trylobite: process 4 killed\n" in console  # the file server
     assert "trylobite: process 5 killed\n" in console  # the shell
     # Given up on the disk server, init leaves the file server down too.
-    init = [line for line in console.splitlines() if line.startswith("init:")]
-    assert init[-2:] == [
+    assert trouble(console)[-2:] == [
         "init: disk ended too often, giving up on it",
         "init: no server named fs",
     ]

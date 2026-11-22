@@ -114,7 +114,7 @@ def shell():
 def said(shell, typed: str, on=None) -> str:
     result = run_image(shell, input=typed, disk=on or bin_disk(), max_steps=8_000_000)
     assert result.exit_code == 0, result.console
-    console = result.console.removeprefix("trylobite: booting\n")
+    console = result.after_boot
     return re.sub(r"trylobite: [^\n]*\n", "", console)
 
 

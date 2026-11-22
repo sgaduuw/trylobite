@@ -7,7 +7,34 @@ kernel would do itself. The [README](../README.md) gives the overview;
 file server's protocol; [`include/layout.s`](../include/layout.s) every
 number named here.
 
-## Memory
+## Booting
+
+The firmware enters the kernel on hart 0, which sets up its page
+allocator and then says what it found, on its log, before it starts
+init (`kernel/boot.s`). This is the boot of the `shell.s` build, with
+a disk of 100 blocks:
+
+```text
+trylobite: version 0.1.0, a microkernel for detrytus, the balanced-ternary machine
+trylobite: memory: 81 pages (1594323 trytes), 67 free
+trylobite: harts: 1
+trylobite: irq0: interrupt controller, 2 sources, at page -13
+trylobite: cons0: console, at page -1
+trylobite: disk0: block device, 100 blocks, at page -14
+trylobite: process table: 27 slots, 9 programs in the image
+trylobite: starting init
+```
+
+Memory is the RAM the build is for (`RAM_PAGES`), and free what is
+left after the kernel and the program images, before init has any.
+Harts counts those present among the middle nine, which the kernel
+starts once init exists. The interrupt controller and the disk are read
+from the devices themselves (their `SOURCES` and `BLOCKS` registers,
+detrytus platform.md); a machine without `--disk` has `no disk`. Each
+line starts `trylobite: `, as all the kernel's lines do, so a reader
+of the log can tell them from a program's. Init then says each server
+it starts (The shell, below).
+
 
 Every address space has three regions, one per mid-table entry:
 
@@ -243,9 +270,12 @@ then waits in `receive` for its children to end:
 
 A server that cannot start, or registers another protocol version than
 init expects, is said on the kernel's log (`init: no server named
-disk`) and so is every server that needs it; otherwise init prints
-nothing. A server that ends before it registers leaves init waiting for
-its name; if nothing else can run, the kernel reports a deadlock.
+disk`) and so is every server that needs it. As each server
+registers, init says so with its process number (`init: started disk,
+process 3`), and it says `init: starting sh` before each start of the
+shell, which prints its prompt at once. A server that ends before it
+registers leaves init waiting for its name; if nothing else can run,
+the kernel reports a deadlock.
 
 The shell finds the console, pipe and file servers by name, does
 without any that is missing, opens the console as descriptor 0 and

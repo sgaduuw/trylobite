@@ -13,6 +13,7 @@ from tests.kernel import (
     GETC,
     ROOT,
     SPAWN_BOTH,
+    after_boot,
     assemble_file,
     bin_disk,
     build,
@@ -102,8 +103,7 @@ def test_the_shell_waits_at_its_prompt_for_what_is_typed():
             disk=bin_disk(),
         )
     )
-    assert out.startswith(
-        "trylobite: booting\n"
+    assert after_boot(out).startswith(
         "$ hello\n"
         "hello from a balanced-ternary machine\n"
         "trylobite: process 6 exited with code 0\n"

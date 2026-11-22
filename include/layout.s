@@ -107,6 +107,8 @@
 # Every device source is routed to hart 0, which handles hot-plug events
 # too. Source s's registers are at V_IRQ + 9*s + IRQ_*.
 
+        .equ  P_IRQ, -13                  # the interrupt controller's physical page
+        .equ  IRQ_SOURCES, 3              # with V_IRQ: the highest source number
         .equ  IRQ_CLAIM, -3               # with V_IRQ: take a source to serve, 0 if none
         .equ  IRQ_COMPLETE, 0             # with V_IRQ: done serving the source written
         .equ  IRQ_ENABLE, 0               # with V_IRQ + 9*s: +1 lets source s interrupt

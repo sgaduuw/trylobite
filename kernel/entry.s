@@ -1,7 +1,8 @@
 # Kernel entry: the firmware drops here in ring 0, running on the boot
-# address space. Hart 0 sets up traps, the page allocator and the timer,
-# spawns program 0 (init), starts the other harts and runs init. The
-# other harts enter at ksecondary and look for work.
+# address space. Hart 0 sets up traps and the page allocator, says what
+# it found (boot.s), spawns program 0 (init), starts the other harts and
+# the timer and runs init. The other harts enter at ksecondary and look
+# for work.
 
         .compress
 kentry:
@@ -13,10 +14,8 @@ kentry:
         csrw  sscratch, t0             # zero while in the kernel (see ktrap)
         call  klock_take               # the other harts wait until init runs
         la    sp, kstack_top
-        la    a0, msg_boot
-        call  kputs
-
         call  page_init
+        call  boot_report              # what it found, before init runs
         la    t0, procs
         sw    t0, next_slot            # spawn starts with slot 0
         li    a1, 0
