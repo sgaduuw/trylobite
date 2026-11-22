@@ -6,7 +6,7 @@ the harness builds the server in and init starts it first."""
 import re
 
 from tests import kernel
-from tests.kernel import _assemble, exit_with, find_servers, new_disk, wait_for
+from tests.kernel import EXIT, _assemble, exit_with, find_servers, new_disk, wait_for
 from tools import fs
 from tools.fs import PAGE, Filesystem, program_file
 
@@ -100,21 +100,27 @@ def open_(path: str, flags: str = "O_RDONLY") -> str:
 def read(fd: int | str, n: int | str, to: str = "buf") -> str:
     load = "la" if to.isidentifier() else "li"  # a label, or an address
     return f"""
-        CALL_FS
-        li    a2, FS_READ
-        li    a3, {fd}
-        {load}    a4, {to}
-        li    a5, {n}
+        li    a0, SYS_READ
+        li    a1, {fd}
+        {load}    a2, {to}
+        li    a3, {n}
         sys"""
 
 
 def lseek(fd: int, offset: int, whence: str) -> str:
     return f"""
-        CALL_FS
-        li    a2, FS_LSEEK
-        li    a3, {fd}
-        li    a4, {offset}
-        li    a5, {whence}
+        li    a0, SYS_IOCALL
+        li    a1, {fd}
+        li    a2, IO_LSEEK
+        li    a3, {offset}
+        li    a4, {whence}
+        sys"""
+
+
+def close(fd: int | str) -> str:
+    return f"""
+        li    a0, SYS_CLOSE
+        li    a1, {fd}
         sys"""
 
 
@@ -200,34 +206,20 @@ def test_what_cannot_be_opened_says_why():
     ]
 
 
-def test_descriptors_are_the_lowest_free_and_there_are_nfd():
+def test_descriptors_are_the_lowest_free_and_there_are_ndesc():
+    # Open's descriptor is the kernel's (kernel/desc.s): the caller's lowest
+    # free one, of NDESC.
     program = report(
-        *[open_("f")] * (L["NFD"] + 1),
-        """
-        CALL_FS
-        li    a2, FS_CLOSE
-        li    a3, 3
-        sys""",
+        *[open_("f")] * (L["NDESC"] + 1),
+        close(3),
         open_("f"),
-        """
-        CALL_FS
-        li    a2, FS_CLOSE
-        li    a3, 3
-        sys""",
-        """
-        CALL_FS
-        li    a2, FS_CLOSE
-        li    a3, 3
-        sys""",
-        """
-        CALL_FS
-        li    a2, FS_CLOSE
-        li    a3, NFD
-        sys""",
+        close(3),
+        close(3),
+        close("NDESC"),
         data=string("f", "f"),
     )
     assert said(run(program, disk=disk(f="x"))) == [
-        *range(L["NFD"]),
+        *range(L["NDESC"]),
         L["E_MFILE"],
         0,
         3,
@@ -235,6 +227,62 @@ def test_descriptors_are_the_lowest_free_and_there_are_nfd():
         L["E_BADF"],
         L["E_BADF"],
     ]
+
+
+def test_closing_frees_the_file_for_another_open():
+    # More opens than the server keeps files: each close lets the kernel
+    # tell the server the file's handle is free.
+    step = open_("f") + "\n        mv    s1, a0" + close(0) + "\n        mv    a0, s1"
+    program = report(*[step] * (L["NFILE"] + 2), data=string("f", "f"))
+    assert said(run(program, disk=disk(f="x"))) == [0] * (L["NFILE"] + 2)
+
+
+def test_copies_of_a_descriptor_share_the_file_and_its_position():
+    # dup2 copies the descriptor, so both name one open file, as after
+    # Unix's dup; a child's inherited copy does too.
+    child = f"""
+        .gp   USER_GP
+        {read(4, 1, to="cbuf")}
+        lt    a1, cbuf
+        {EXIT}
+cbuf:   .zero 1
+"""
+    init = report(
+        open_("f"),
+        "li a0, SYS_DUP2\n        li a1, 0\n        li a2, 4\n        sys",
+        read(0, 1),
+        "lt a0, buf",
+        read(4, 1),
+        "lt a0, buf",
+        f"li a0, SYS_SPAWN\n        li a1, 1\n        sys\n        mv s1, a0\n"
+        f"        {wait_for('s1')}\n        mv a0, a1",
+        read(0, 1),
+        "lt a0, buf",
+        data=string("f", "f"),
+    )
+    assert said(run(init, child, disk=disk(f="abcd"))) == [
+        0,
+        4,
+        1,
+        ord("a"),
+        1,
+        ord("b"),
+        ord("c"),  # what the child read
+        1,
+        ord("d"),
+    ]
+
+
+def test_the_old_descriptor_calls_are_gone():
+    # Close, read, lseek, readdir and write were FS_ calls; they are
+    # descriptor calls now, and the numbers are refused.
+    def call(op: int) -> str:
+        return f"CALL_FS\n        li a2, {op}\n        li a3, 0\n        sys"
+
+    program = report(
+        open_("f"), *[call(op) for op in (1, 2, 3, 4, 7)], data=string("f", "f")
+    )
+    assert said(run(program, disk=disk(f="x"))) == [0] + [L["E_INVAL"]] * 5
 
 
 def test_reads_and_seeks_that_cannot_be_done():
@@ -267,13 +315,18 @@ def test_reads_and_seeks_that_cannot_be_done():
     ]
 
 
+def readdir(fd: int) -> str:
+    return f"""
+        li    a0, SYS_IOCALL
+        li    a1, {fd}
+        li    a2, IO_READDIR
+        la    a3, buf
+        sys"""
+
+
 def test_readdir_gives_each_entry_in_use_and_then_0():
-    step = """
-        CALL_FS
-        li    a2, FS_READDIR
-        li    a3, 0
-        la    a4, buf
-        sys
+    step = f"""
+        {readdir(0)}
         mv    s1, a0
         blez  a0, 1f
         li    a0, SYS_PUTS
@@ -289,12 +342,7 @@ def test_readdir_gives_each_entry_in_use_and_then_0():
         lseek(0, 0, "SEEK_SET"),
         step,
         open_("f"),
-        """
-        CALL_FS
-        li    a2, FS_READDIR
-        li    a3, 1
-        la    a4, buf
-        sys""",
+        readdir(1),
         data=string("d", "/d") + string("f", "/d/one"),
     )
     made = disk(dirs=("d",), d__one="1", d__gone="", d__three="3")
@@ -368,11 +416,10 @@ def test_without_a_filesystem_there_are_no_files():
 
 
 def test_descriptors_go_with_their_process():
-    # Each child opens every descriptor and exits with them open. Slots
-    # are handed out round the table, so the last, after NPROC - 3 others,
-    # gets process number 3 again, and finds them all free: the server
-    # closed the first one's when the kernel said it had ended.
-    child = report(*[open_("f")] * L["NFD"], data=string("f", "f"))
+    # Each child opens every descriptor and exits with them open: more
+    # files, all told, than the server keeps (NFILE), so each must be
+    # closed when the kernel says no descriptor names it any more.
+    child = report(*[open_("f")] * L["NDESC"], data=string("f", "f"))
     init = f"""
         li    s2, NPROC - 2
 1:      li    a0, SYS_SPAWN
@@ -387,7 +434,8 @@ def test_descriptors_go_with_their_process():
 """
     result = run(init, child, disk=disk(f="x"))
     assert result.code_of(0) == 3
-    assert said(result) == list(range(L["NFD"])) * (L["NPROC"] - 2)
+    assert L["NDESC"] * (L["NPROC"] - 2) > L["NFILE"]
+    assert said(result) == list(range(L["NDESC"])) * (L["NPROC"] - 2)
 
 
 def test_a_server_without_pages_for_its_windows_says_so():
@@ -412,11 +460,10 @@ def reader(path: str, p: str = "r") -> str:
         bltz  a0, 9f
         mv    s2, a0                   # s2: the descriptor
         li    s1, 0                    # s1: the sum of what it read
-1:      CALL_FS
-      li    a2, FS_READ
-        mv    a3, s2
-        la    a4, {p}buf
-        li    a5, 7
+1:      li    a0, SYS_READ
+        mv    a1, s2
+        la    a2, {p}buf
+        li    a3, 7
         sys
         blez  a0, 3f
         la    t0, {p}buf

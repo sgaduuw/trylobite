@@ -126,6 +126,19 @@ first word, in `a0`, is the result:
         sys                            # a0: a descriptor, or why not
 ```
 
+The descriptor `open` gives is the kernel's (README, Descriptors): the
+caller reads, writes, seeks and lists through it with the descriptor
+calls, which reach the server as `IO_` operations with the file's
+handle, and closes it with `close`:
+
+```asm
+        li    a0, SYS_READ
+        mv    a1, s0                   # the descriptor
+        la    a2, buffer
+        li    a3, 243
+        sys                            # a0: how many, 0 at the end, or why not
+```
+
 A path is a 0-terminated string in the caller's memory, and a buffer a
 range of it: its page, or a block window it has (otherwise `E_FAULT`);
 the server copies them with `copyin` and `copyout`. Each call fails
@@ -141,19 +154,26 @@ file's last block) and `E_BUSY`.
 
 | Operation | Call | Does |
 |-----------|------|------|
-| `FS_OPEN` (0) | `open(path, flags)` | gives the lowest free descriptor (of `NFD`, 8), at position 0 of the file or directory. `flags` is below |
-| `FS_CLOSE` (1) | `close(fd)` | frees the descriptor |
-| `FS_READ` (2) | `read(fd, buffer, n)` | copies up to `n` trytes from the position, and moves it past them: how many, never past the end of the file or of the block the position is in, so a caller loops until it gets 0. A directory is `E_ISDIR` |
-| `FS_LSEEK` (3) | `lseek(fd, offset, whence)` | sets the position to `offset` from the start, where it is or the end (`SEEK_SET`, `SEEK_CUR`, `SEEK_END`): the new position. It may pass the end, but not the start |
-| `FS_READDIR` (4) | `readdir(fd, buffer)` | the next entry in use of a directory: its name to the buffer, `NAME_MAX + 1` trytes, ended with 0, and its inode as the result; 0 at the end. The position counts 21 trytes per entry, used or not. A file is `E_NOTDIR` |
+| `FS_OPEN` (0) | `open(path, flags)` | gives the caller's lowest free descriptor (of `NDESC`, 9), at position 0 of the file or directory. `flags` is below. `E_MFILE` when the caller has no descriptor free, or the server has `NFILE` (27) files open; with `O_CREAT` the file may have been made by then |
 | `FS_STAT` (5) | `stat(path, buffer)` | four words at the word-aligned buffer: `ST_INO`, `ST_TYPE`, `ST_LINKS` and `ST_SIZE` |
 | `FS_SPAWN` (6) | `spawnf(path)` | starts the program file at the path as the caller's child: the server reads its first block into a window and gives it to `spawnw` with the caller as the parent. Anything but a program file is `E_NOEXEC` |
-| `FS_WRITE` (7) | `write(fd, buffer, n)` | copies up to `n` trytes to the position, or the end with `O_APPEND`, and moves it past them: how many, never past the end of the block the position is in, so a caller loops. A write past the end grows the file, leaving holes; one past its last block is `E_FBIG` |
 | `FS_UNLINK` (8) | `unlink(path)` | removes a file's name from its directory, and frees the file when no name is left. A directory is `E_ISDIR`, a name `.` or `..` `E_INVAL` |
 | `FS_MKDIR` (9) | `mkdir(path)` | makes an empty directory, holding `.` and `..`: `E_EXIST` if the name is taken |
 | `FS_RMDIR` (10) | `rmdir(path)` | removes an empty directory (`E_NOTEMPTY` otherwise); the root is `E_BUSY`, a name `.` or `..` `E_INVAL` |
 | `FS_CHDIR` (11) | `chdir(path)` | makes the directory the caller's current one; a file is `E_NOTDIR` |
 | `FS_GETCWD` (12) | `getcwd(buffer, n)` | the current directory's path from the root, ended with 0, to the buffer: its length. `E_NOROOM` (Unix's `ERANGE`) when it and its 0 need more than `n` trytes, `E_NAMETOOLONG` when it is longer than `PATH_MAX` |
+
+Numbers 1 to 4 and 7 were `close`, `read`, `lseek`, `readdir` and
+`write` before `FS_PROTOCOL` 2; they are descriptor calls on what
+`open` gave now:
+
+| Descriptor call | Does |
+|-----------------|------|
+| `close(fd)` | empties the descriptor; the file closes when no descriptor names it |
+| `read(fd, buffer, n)` | copies up to `n` trytes from the position, and moves it past them: how many, never past the end of the file or of the block the position is in, so a caller loops until it gets 0. A directory is `E_ISDIR` |
+| `write(fd, buffer, n)` | copies up to `n` trytes to the position, or the end with `O_APPEND`, and moves it past them: how many, never past the end of the block the position is in, so a caller loops. A write past the end grows the file, leaving holes; one past its last block is `E_FBIG` |
+| `iocall(fd, IO_LSEEK, offset, whence)` | sets the position to `offset` from the start, where it is or the end (`SEEK_SET`, `SEEK_CUR`, `SEEK_END`): the new position. It may pass the end, but not the start |
+| `iocall(fd, IO_READDIR, buffer, 0)` | the next entry in use of a directory: its name to the buffer, `NAME_MAX + 1` trytes, ended with 0, and its inode as the result; 0 at the end. The position counts 21 trytes per entry, used or not. A file is `E_NOTDIR` |
 
 `flags` is the access mode, `O_RDONLY` (0), `O_WRONLY` (1) or `O_RDWR`
 (2), plus any of `O_CREAT` (3: make a file that is not there),
@@ -168,11 +188,13 @@ process has open, or that is a process's current directory, where Unix
 would keep it until the last descriptor closes or the process moves. A new file or directory takes the lowest free inode and its
 blocks the lowest free blocks.
 
-Descriptors belong to a process and go with it: the server keeps them,
-and closes them when the kernel tells it the process has ended, before
-it takes any later call. A new process has none.
-They are numbered from 0 like Unix ones, but nothing opens 0, 1 and 2
-for the console yet.
+Descriptors are the kernel's, so a child inherits its parent's open
+files, and the shell can point a program's standard input or output at
+one (`<`, `>`, `>>`). Copies share the open file and its position. The
+server keeps one record per open file, its handle the record's index,
+and frees it when the kernel says no descriptor names it any more
+(`NOTE_CLOSED`), before it takes any later call: so a file closed, or
+held only by a process that ended, can be removed at once.
 
 Each process has a current directory, kept by the server as well and
 forgotten when the process ends. It is the root until the process calls
@@ -282,4 +304,4 @@ directory with anything in it.
 
 ## Later
 
-Descriptors 0, 1 and 2 for the console, and arguments for programs. Directories of more than one block, and `rename`.
+Arguments for programs, and pipes. Directories of more than one block, and `rename`.

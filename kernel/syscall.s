@@ -37,10 +37,16 @@ syscall_again:                         # resume runs a call again (ipc.s)
         beq   a0, t0, sys_read
         li    t0, SYS_WRITE
         beq   a0, t0, sys_write
-        li    t0, SYS_DESC
-        beq   a0, t0, sys_desc
+        li    t0, SYS_IOCALL
+        beq   a0, t0, sys_iocall
+        li    t0, SYS_CLOSE
+        beq   a0, t0, sys_close
+        li    t0, SYS_DUP2
+        beq   a0, t0, sys_dup2
+        li    t0, SYS_GIVE
+        beq   a0, t0, sys_give
         li    t0, SYS_CALL
-        beq   a0, t0, sys_call
+        beq   a0, t0, sys_call_user
         li    t0, SYS_RECEIVE
         beq   a0, t0, sys_receive
         li    t0, SYS_REPLY

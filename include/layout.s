@@ -177,34 +177,54 @@
                                           # number, E_NOSLOT, E_NOPROG, E_NOMEM,
                                           # E_NOPROC
         .equ  FOR_SELF, -1                # spawnw, kill: the caller is the parent
-        # 16 to 19 were the kernel's file calls: files are the file server's now
+        # 16 to 22 were the kernel's file calls: files are the file server's now
 
 # Descriptors (README, Descriptors). Each process has NDESC of them, 0 to
 # NDESC - 1, in its record: each names a server and a handle that server
-# gave out, or nothing. read and write on a descriptor are calls to its
-# server, IO_READ or IO_WRITE with the handle in a3, the buffer in a4 and
-# the count in a5; they return the reply's first word, and leave a1 to a5
-# as a call does. A child starts with copies of its parent's descriptors,
-# so 0, 1 and 2 (standard input, output and error) pass down; the shell
-# points them at the console. The kernel checks nothing but the number:
-# the server judges the handle, and the caller, as for any call.
-        .equ  SYS_READ,  20               # read(fd, buffer, n): the server's
-                                          # answer; E_BADF (nothing there)
-        .equ  SYS_WRITE, 21               # write(fd, buffer, n): likewise
-        .equ  SYS_DESC,  22               # desc(fd, server, handle): make fd name
-                                          # handle at server, or nothing with
-                                          # server NO_DESC: 0; E_BADF (no such fd)
-        .equ  NO_DESC,   -1               # desc: close the descriptor
+# gave out, or nothing. Only a server puts one there, with give, into a
+# process whose call it holds; a process can copy and close its own, and
+# a child starts with copies of its parent's, so 0, 1 and 2 (standard
+# input, output and error) pass down. A descriptor call (read, write,
+# iocall) is a call to the descriptor's server with an IO_ operation, the
+# handle in a3 and two arguments in a4 and a5; it returns the reply's
+# first word and leaves a1 to a5 as a call does. IO_ operations are
+# negative, and SYS_CALL refuses them, so a server that gets one knows
+# the kernel brought it from a descriptor it gave out: a handle is a
+# capability. When the last descriptor naming a handle goes (close, dup2
+# over it, or its process ending), its server gets a NOTE_CLOSED notice.
+        .equ  SYS_CLOSE, 16               # close(fd): 0, E_BADF
+        .equ  SYS_GIVE,  17               # give(pid, handle): put handle 0 to
+                                          # NHANDLE - 1 of the caller's in process
+                                          # pid's lowest free descriptor; pid must
+                                          # wait for the caller's reply: the
+                                          # descriptor, E_MFILE (none free),
+                                          # E_NOPROC, E_INVAL (no such handle)
+        .equ  SYS_DUP2,  18               # dup2(fd, to): make descriptor to a copy
+                                          # of fd, closing what it held: to,
+                                          # E_BADF
+        .equ  SYS_IOCALL, 19              # iocall(fd, op, x, y): the descriptor
+                                          # call op (an IO_ operation) with x and
+                                          # y: the server's answer; E_BADF, E_INVAL
+                                          # (op not an IO_ operation)
+        .equ  SYS_READ,  20               # read(fd, buffer, n): iocall with IO_READ
+        .equ  SYS_WRITE, 21               # write(fd, buffer, n): iocall with
+                                          # IO_WRITE
+        # 22 was desc, which let a process point a descriptor anywhere
         .equ  NDESC,      9               # descriptors per process
+        .equ  NHANDLE,   27               # handles a server may give, 0 to 26
         .equ  STDIN,      0
         .equ  STDOUT,     1
         .equ  STDERR,     2
-        .equ  IO_READ,   -1               # descriptor calls: read(handle, buffer,
-                                          # n), at least 1 and at most n trytes,
-                                          # waiting for one; 0 at the end
+        .equ  IO_READ,   -1               # read(handle, buffer, n): at least 1
+                                          # and at most n trytes, waiting for one
+                                          # if the server waits; 0 at the end
         .equ  IO_WRITE,  -2               # write(handle, buffer, n): how many
-                                          # Negative, so that every server's own
-                                          # operations, from 0, stay as they are
+        .equ  IO_LSEEK,  -3               # lseek(handle, offset, whence): the new
+                                          # position (files)
+        .equ  IO_READDIR, -4              # readdir(handle, buffer): the next
+                                          # entry's inode, its name to the buffer;
+                                          # 0 at the end (directories)
+        .equ  IO_FIRST,  -4               # the lowest IO_ operation
 
 # Messages for servers (README, Messages). A message is four words, a2 to
 # a5 as sent; a server answers each call with a reply of four words.
@@ -226,6 +246,8 @@
         .equ  NOTE_ENDED, 0               # ... a process ended, its number in a2
         .equ  NOTE_IRQ, 1                 # ... device source a2, which the
                                           # receiver drives, interrupted
+        .equ  NOTE_CLOSED, 2              # ... no descriptor names handle a2 of
+                                          # the receiver's any more
 
 # Server names (README, Names). A server registers a name and the
 # version of the protocol it speaks once it is ready to take calls; a
@@ -294,33 +316,32 @@
 # it, or no file server), E_IO (the disk refused a block, or holds
 # nonsense), and those taking a path or buffer with E_FAULT (it is not all
 # in the caller's page or a block window it has).
-        .equ  FS_PROTOCOL, 1              # the calls below, as they are now: a
+#
+# An open file is a kernel descriptor (Descriptors, above), so it is
+# read and written with SYS_READ and SYS_WRITE, sought with IO_LSEEK and
+# listed with IO_READDIR (SYS_IOCALL), and closed with SYS_CLOSE; a child
+# inherits it. As descriptor calls: read(buffer, n): how many (0 at the
+# end; never past the end of a block), E_BADF (not open for reading),
+# E_ISDIR, E_INVAL. write(buffer, n): how many (never past the end of a
+# block), E_BADF (not open for writing), E_INVAL, E_NOSPC, E_FBIG.
+# lseek(offset, whence): the new position, E_INVAL. readdir(buffer): the
+# next entry's inode, its name to the buffer (NAME_MAX + 1 trytes); 0 at
+# the end; E_NOTDIR.
+        .equ  FS_PROTOCOL, 2              # the calls below, as they are now: a
                                           # change a client would misread moves it on
-        .equ  FS_OPEN,    0               # open(path, flags): the lowest free
-                                          # descriptor, E_NOENT, E_NOTDIR,
-                                          # E_NAMETOOLONG, E_MFILE, E_INVAL,
+        .equ  FS_OPEN,    0               # open(path, flags): the caller's lowest
+                                          # free descriptor, E_NOENT, E_NOTDIR,
+                                          # E_NAMETOOLONG, E_MFILE (no descriptor
+                                          # free, or NFILE files open), E_INVAL,
                                           # E_ISDIR (a directory, to write);
                                           # with O_CREAT also E_NOSPC
-        .equ  FS_CLOSE,   1               # close(fd): 0, E_BADF
-        .equ  FS_READ,    2               # read(fd, buffer, n): how many (0 at the
-                                          # end; never past the end of a block),
-                                          # E_BADF (not open for reading),
-                                          # E_ISDIR, E_INVAL
-        .equ  FS_LSEEK,   3               # lseek(fd, offset, whence): the new
-                                          # position, E_BADF, E_INVAL
-        .equ  FS_READDIR, 4               # readdir(fd, buffer): the next entry's
-                                          # inode, its name to the buffer
-                                          # (NAME_MAX + 1 trytes); 0 at the end;
-                                          # E_BADF, E_NOTDIR
+        # 1 to 4 were close, read, lseek and readdir: descriptor calls now
         .equ  FS_STAT,    5               # stat(path, buffer): 0, the ST_ words at
                                           # the buffer; as open fails
         .equ  FS_SPAWN,   6               # spawnf(path): starts the program file
                                           # as the caller's child: as spawnw, and
                                           # E_NOEXEC for no program, as open fails
-        .equ  FS_WRITE,   7               # write(fd, buffer, n): how many (never
-                                          # past the end of a block), E_BADF (not
-                                          # open for writing), E_INVAL, E_NOSPC,
-                                          # E_FBIG
+        # 7 was write
         .equ  FS_UNLINK,  8               # unlink(path): 0, E_ISDIR, E_BUSY (open),
                                           # E_INVAL (. or ..), as open fails
         .equ  FS_MKDIR,   9               # mkdir(path): 0, E_EXIST, E_NOSPC, E_INVAL
@@ -363,8 +384,11 @@
                                           # kills it, or to nobody with
                                           # NO_FOREGROUND: 0, E_INVAL. The server
                                           # takes it back when the process ends
-        .equ  CONSOLE_HANDLE, 0           # the console, for IO_READ and IO_WRITE
-                                          # (descriptor calls; E_BADF for another)
+        .equ  CN_OPEN,    3               # open(): give the caller a descriptor
+                                          # for the console: its lowest free one,
+                                          # E_MFILE
+        .equ  CONSOLE_HANDLE, 0           # the console's one handle, for IO_READ
+                                          # and IO_WRITE (E_BADF for another)
 
         .equ  E_NOCALL,  -1               # no system call with that number
         .equ  E_FULL,    -1               # send: the receiver's mailbox is full
@@ -411,8 +435,9 @@
         .equ  O_CREAT,  3                 # writing) and O_APPEND (write at its end,
         .equ  O_TRUNC,  9                 # each time): ternary digits of 0 or 1,
         .equ  O_APPEND, 27                # so they add as Unix flags OR together
-        .equ  NFD, 8                      # descriptors per process, 0 to 7, kept
-        .equ  FD,           9             # by the file server: three words each,
+        .equ  NFILE, 27                   # files the file server keeps open, a
+        .equ  FD,           9             # record each, its handle the index:
+                                          # three words each,
         .equ  FD_INO,       0             # the inode, NO_INO when closed,
         .equ  FD_POS,       3             # the position, in trytes,
         .equ  FD_FLAGS,     6             # and what open was given
@@ -481,7 +506,12 @@
         .equ  PCB_DESCS,  174             # NDESC descriptors, two words each: the
                                           # server plus 1 (0 for none) and the handle
         .equ  DESC,         6             # trytes per descriptor
-        .equ  PCB_SIZE,   PCB_DESCS + NDESC * DESC
+        .equ  PCB_CLOSED, PCB_DESCS + NDESC * DESC - 1   # NHANDLE trytes, 227 to
+                                          # 253 (in the words at 228 to 252): 1 for
+                                          # each of its handles that no descriptor
+                                          # has named since receive last told it
+        .equ  PCB_SIZE,   PCB_CLOSED + NHANDLE + 1
+        .assert PCB_SIZE % 3 == 0, "PCB_SIZE is not whole words"
         .assert PCB_NOTES + NPROC <= PCB_TURN - 1, "PCB_NOTES runs into PCB_TURN's trytes"
         .assert PCB_IRQS + NSRC <= 125, "PCB_IRQS runs into PCB_RETRY's word"
         .equ  PAGES_PER_PROCESS, 4

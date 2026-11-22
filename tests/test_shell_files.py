@@ -73,14 +73,14 @@ def test_cat_reads_a_file_over_several_blocks(shell):
 
 def test_failures_are_said_and_the_shell_goes_on(shell):
     on = disk(dirs=("d",), f="text\n")
-    out = said(shell, "cat nope\ncat d\nls f\ncat f/x\nls nope\ncat\n", on)
+    out = said(shell, "cat nope\ncat d\nls f\ncat f/x\nls nope\nrm\n", on)
     assert out == (
         "$ cat nope\nsh: nope: no such file or directory\n"
         "$ cat d\nsh: d: is a directory\n"
         "$ ls f\nsh: f: not a directory\n"
         "$ cat f/x\nsh: f/x: not a directory\n"
         "$ ls nope\nsh: nope: no such file or directory\n"
-        "$ cat\nsh: which file?\n$ \n"
+        "$ rm\nsh: which file?\n$ \n"
     )
 
 
@@ -93,7 +93,7 @@ def test_a_name_too_long_is_said(shell):
 
 
 def test_the_shell_does_not_run_out_of_descriptors(shell):
-    # Each built-in closes what it opened, failing or not: more than NFD (8)
+    # Each built-in closes what it opened, failing or not: more than NDESC (9)
     # of them still work.
     on = disk(dirs=("d",), f="x\n")
     out = said(shell, "cat f\nls f\n" * 6 + "cat f\n", on)

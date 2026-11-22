@@ -882,3 +882,49 @@ inherit them, so `bin/hello` is one `write(STDOUT, ...)`.
 - **Files keep the file server's numbers for now.** Moving them into the
   table needs the file server to hand out handles per open, close and
   dup notices, and inheritance of a handle the server keys by process.
+
+### 2026-11-22 · Files in the kernel's descriptors, and redirection
+
+Eelco asked for open files in the same table as 0, 1 and 2, then shell
+redirection with `<`, `>` (and `>>`). Files were the file server's own
+numbers, per process, so a child could not inherit one and the shell
+could not hand one to a program.
+
+- **Descriptors became capabilities.** With `desc`, any process could
+  point a descriptor at any (server, handle). For the console that did
+  not matter; for files, handle 4 would be somebody else's open file.
+  Now only the server puts a descriptor in a table, with `give(pid,
+  handle)`, and only into a process whose call it holds; `desc` is gone.
+  A user `call` with a negative (`IO_`) operation is refused, so an
+  `IO_` call always comes from a descriptor the server gave, and the
+  handle in it is trusted. Copying (`dup2`) and closing stay the
+  holder's. This is the Mach port / seL4 capability shape, kept as
+  small as two words per descriptor.
+- **The kernel says when a handle is free** (`NOTE_CLOSED`, a tryte
+  per handle in the server's record, `PCB_CLOSED`), when the last
+  descriptor naming it goes: close, `dup2` over it, or its process
+  ending. The check scans all 81 descriptors; at this size that is
+  cheaper than reference counts the kernel would have to keep right.
+  So the file server keeps one record per open file (`fs_files`,
+  `NFILE` 27, the handle its index), with no idea who holds it, and
+  copies share the position, as after Unix's `dup`. `give` clears a
+  notice not yet taken for the handle, since it is named again.
+- **A server that ends takes its handles with it**: the kernel clears
+  every descriptor naming it, so a later process with its number never
+  sees calls for handles it did not give, and a holder gets `E_BADF`.
+- **`open` with `O_CREAT` and no free descriptor** makes the file and
+  then fails with `E_MFILE`: the server learns the descriptor only by
+  giving it. Taking a descriptor first would need a way to take one
+  back. Accepted as an edge.
+- **`FS_PROTOCOL` 2**: `close`, `read`, `lseek`, `readdir` and `write`
+  left the file protocol for `close`, `read`, `write` and `iocall(fd,
+  IO_LSEEK or IO_READDIR, x, y)`. The console server gained `CN_OPEN`;
+  the shell opens it as 0 and `dup2`s it to 1 and 2.
+- **Redirection in the shell.** A word after the command starting with
+  `<` or `>` (path attached or next) is taken out of the line, its file
+  opened and `dup2`ed onto 0 or 1, after keeping the shell's own in
+  descriptors 7 and 8; the next prompt puts them back. It applies to
+  built-ins as to programs, so `cat` without a path reads standard
+  input. The shell's complaints go to standard error, so `cat nope >
+  out` still says why on the console. `cat>out`, with no space after
+  the command, is not split: the command is the first word.
