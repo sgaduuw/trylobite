@@ -6,8 +6,8 @@
 # its arguments in a3..a5 (include/layout.s); the reply's first word is
 # the result. The server takes one call at a time: it copies a path in
 # with copyin, and data or a name out with copyout, while it holds the
-# call. Each process's descriptors are kept here, and dropped when the
-# kernel says the process has ended.
+# call. Each process's descriptors and current directory are kept here,
+# and dropped when the kernel says the process has ended.
 #
 # Blocks come through the server's block windows, NWIN of them, used as
 # a cache: the least recently used goes when another block is needed.
@@ -37,6 +37,7 @@ fs_start:
         li    t0, FROM_KERNEL
         beq   a0, t0, fs_notice
         mv    s0, a0                   # s0: the caller
+        sw    a0, fs_caller
         sw    a2, fs_a1
         sw    a3, fs_a2
         sw    a4, fs_a3
@@ -60,7 +61,7 @@ fs_reply:                              # a0: the result
         sys
         j     fs_start
 
-# A process ended: close what it had open.
+# A process ended: close what it had open, and forget its directory.
 fs_notice:
         li    t0, NOTE_ENDED
         bne   a1, t0, fs_start
@@ -73,6 +74,9 @@ fs_notice:
         addi  t1, t1, FD
         addi  t2, t2, -1
         bnez  t2, 1b
+        mv    s0, a2                   # and its current directory
+        call  fs_cwdaddr
+        sw    zero, 0(a0)
         j     fs_start
 
 # open(path, flags): the lowest free descriptor, at the start of the
@@ -353,7 +357,11 @@ fs_stat:
         j     fs_reply                 # 0, or E_FAULT
 
 # spawnf(path): start the program file path names, as the caller's
-# child, from its first block in one of the server's windows.
+# child, from its first block in one of the server's windows. The child
+# starts in the caller's current directory. (Should the slot it takes be
+# freed while this call runs, by another hart, the notice of that ends
+# comes after and sends the child to the root: harmless, and rare, since
+# the kernel hands slots out round the table.)
 fs_spawn:
         call  fs_enter
         lw    a0, fs_a1
@@ -378,6 +386,16 @@ fs_spawn:
         mv    a2, s0                   # the caller is the parent
         li    a0, SYS_SPAWNW
         sys
+        bltz  a0, fs_reply
+        mv    s2, a0                   # s2: the child, which starts in the
+        call  fs_cwdaddr               # caller's directory
+        lw    s3, 0(a0)
+        mv    s0, s2
+        call  fs_cwdaddr
+        sw    s3, 0(a0)
+        lw    a1, fs_caller
+        mv    s0, a1
+        mv    a0, s2
         j     fs_reply
 9:      li    a0, E_NOEXEC
         j     fs_reply
@@ -702,6 +720,92 @@ fs_rmdir:
         li    a0, 0
         j     fs_reply
 
+# chdir(path): make the directory path names the caller's current one.
+fs_chdir:
+        call  fs_enter
+        lw    a0, fs_a1
+        call  fs_namei
+        mv    s2, a0                   # s2: its inode
+        call  fs_iget
+        lw    t0, I_TYPE(a0)
+        li    t1, T_DIR
+        bne   t0, t1, fs_notdir
+        call  fs_cwdaddr
+        sw    s2, 0(a0)
+        j     fs_none
+
+# getcwd(buffer, n): the path from the root to the caller's current
+# directory, ended with 0, to the buffer if n trytes hold it: its length.
+# It is put together from the end of fs_path back, a name at a time:
+# each directory's .. is its parent, and the parent's entry for it its
+# name.
+fs_getcwd:
+        call  fs_enter
+        call  fs_cwdaddr
+        lw    s2, 0(a0)                # s2: the directory reached
+        bnez  s2, 0f
+        li    s2, ROOT_INO
+0:      la    s3, fs_path + PATH_MAX   # s3: where the path starts so far
+        st    zero, 0(s3)
+1:      li    t0, ROOT_INO
+        beq   s2, t0, 5f
+        la    t0, fs_name              # its parent: its entry ..
+        li    t1, '.'
+        st    t1, 0(t0)
+        st    t1, 1(t0)
+        st    zero, 2(t0)
+        mv    a0, s2
+        call  fs_dirfind
+        beqz  a0, fs_eio
+        lw    s4, D_INO(a0)            # s4: the parent
+        mv    a0, s4
+        mv    a1, s2
+        call  fs_dirino
+        beqz  a0, fs_eio               # the parent has no name for it
+        addi  t1, a0, D_NAME
+        li    t2, 0                    # t2: the name's length
+2:      add   t0, t1, t2
+        lt    t0, 0(t0)
+        beqz  t0, 3f
+        addi  t2, t2, 1
+        j     2b
+3:      sub   s3, s3, t2
+        addi  s3, s3, -1               # room for a slash and the name
+        la    t0, fs_path
+        blt   s3, t0, fs_toolong
+        li    t0, '/'
+        st    t0, 0(s3)
+        addi  t3, s3, 1
+4:      beqz  t2, 6f
+        lt    t0, 0(t1)
+        st    t0, 0(t3)
+        addi  t1, t1, 1
+        addi  t3, t3, 1
+        addi  t2, t2, -1
+        j     4b
+6:      mv    s2, s4
+        j     1b
+5:      la    t0, fs_path + PATH_MAX   # the root alone is /
+        bne   s3, t0, 7f
+        addi  s3, s3, -1
+        li    t1, '/'
+        st    t1, 0(s3)
+7:      la    t0, fs_path + PATH_MAX
+        sub   s5, t0, s3               # s5: its length
+        addi  a4, s5, 1
+        lw    t0, fs_a2
+        bgt   a4, t0, 8f
+        li    a0, SYS_COPYOUT
+        mv    a1, s0
+        mv    a2, s3
+        lw    a3, fs_a1
+        sys
+        bnez  a0, fs_fault
+        mv    a0, s5
+        j     fs_reply
+8:      li    a0, E_NOROOM
+        j     fs_reply
+
 # --- helpers for changing the filesystem -----------------------------------------
 
 # fs_creat: for open with O_CREAT: a0 = the inode named fs_name in
@@ -801,6 +905,48 @@ fs_dirfind:
         li    a2, 1
 9:      lw    ra, 0(sp)
         addi  sp, sp, 3
+        ret
+
+# fs_cwdaddr: a0 = where the current directory of process s0 is kept.
+# Clobbers t0.
+fs_cwdaddr:
+        li    t0, 3
+        mul   t0, s0, t0
+        la    a0, fs_cwd
+        add   a0, a0, t0
+        ret
+
+# fs_dirino: a0 = the address of the entry of directory a0 that names
+# inode a1, in a window, or 0. Replies E_NOTDIR if a0 is not a
+# directory. Clobbers a1..a3, t0..t6 and s6.
+fs_dirino:
+        addi  sp, sp, -6
+        sw    ra, 0(sp)
+        sw    a1, 3(sp)
+        call  fs_iget
+        lw    t0, I_TYPE(a0)
+        li    t1, T_DIR
+        bne   t0, t1, fs_notdir
+        lw    s6, I_SIZE(a0)
+        li    t1, DIRENT
+        div   s6, s6, t1               # s6: its entries
+        li    t1, DIRENTS
+        bgt   s6, t1, fs_eio
+        lw    a0, I_DIRECT(a0)
+        beqz  a0, fs_eio
+        call  fs_bget
+        addi  t2, a0, BLOCK_W0         # t2: the entry looked at
+        lw    t3, 3(sp)
+1:      beqz  s6, 8f
+        lw    t0, D_INO(t2)
+        beq   t0, t3, 9f
+        addi  t2, t2, DIRENT
+        addi  s6, s6, -1
+        j     1b
+8:      li    t2, 0
+9:      mv    a0, t2
+        lw    ra, 0(sp)
+        addi  sp, sp, 6
         ret
 
 # fs_dotcheck: reply E_INVAL if fs_name is . or .., which every
@@ -973,7 +1119,8 @@ fs_inodeclear:
         ble   t0, t1, 1b
         ret
 
-# fs_inoopen: reply E_BUSY if any process has inode a0 open. The kernel
+# fs_inoopen: reply E_BUSY if any process has inode a0 open, or has it as
+# its current directory. The kernel
 # tells the server of each process that ends, so every descriptor here
 # is a live process's. Clobbers t0..t2.
 fs_inoopen:
@@ -984,6 +1131,13 @@ fs_inoopen:
         addi  t1, t1, FD
         addi  t2, t2, -1
         bnez  t2, 1b
+        la    t1, fs_cwd               # nor anyone's current directory
+        li    t2, NPROC
+2:      lw    t0, 0(t1)
+        beq   t0, a0, fs_busy
+        addi  t1, t1, 3
+        addi  t2, t2, -1
+        bnez  t2, 2b
         ret
 
 # fs_direntset: make the directory entry at a0 name inode a1 with the
@@ -1072,6 +1226,7 @@ fs_flush:
         li    t0, NWIN
         blt   t3, t0, 1b
         ret
+
 
 # --- helpers --------------------------------------------------------------------
 
@@ -1276,7 +1431,9 @@ fs_getpath:
 
 # fs_namei: a0 = the inode the path at a0, in the caller's memory, names.
 # Each name is looked up in the directory reached so far, starting at
-# the root; slashes before, between and after names do not count.
+# the root if the path starts with a slash, else at the caller's current
+# directory; more slashes between and after names do not count, and an
+# empty path is E_NOENT.
 # Replies E_FAULT, E_NAMETOOLONG, E_NOTDIR, E_NOENT, or as fs_bget does.
 # Clobbers a0..a4, t0..t6 and s2..s8.
 fs_namei:
@@ -1294,6 +1451,14 @@ fs_namei_parent:
         call  fs_getpath
         la    s2, fs_path              # s2: where we are in the path
         li    s3, ROOT_INO             # s3: the inode reached
+        lt    t0, 0(s2)
+        beqz  t0, fs_noent             # an empty path names nothing
+        li    t1, '/'
+        beq   t0, t1, 1f
+        call  fs_cwdaddr               # no slash first: from the caller's
+        lw    t0, 0(a0)                # directory, 0 while it is the root
+        beqz  t0, 1f
+        mv    s3, t0
 1:      lt    t0, 0(s2)
         beqz  t0, 9f                   # the end
         li    t1, '/'
@@ -1402,11 +1567,12 @@ fs_busy:
         li    a0, E_BUSY
         j     fs_reply
 
-        .equ  FS_NOPS, 11              # the operations, by FS_ number
+        .equ  FS_NOPS, 13              # the operations, by FS_ number
 fs_ops: .word fs_open, fs_close, fs_read, fs_lseek, fs_readdir, fs_stat, fs_spawn
-        .word fs_write, fs_unlink, fs_mkdir, fs_rmdir
-        .assert FS_RMDIR == FS_NOPS - 1, "fs_ops must list every FS_ operation"
+        .word fs_write, fs_unlink, fs_mkdir, fs_rmdir, fs_chdir, fs_getcwd
+        .assert FS_GETCWD == FS_NOPS - 1, "fs_ops must list every FS_ operation"
 
+fs_caller: .word 0                     # who made the call
 fs_a1:  .word 0                        # the call's arguments
 fs_a2:  .word 0
 fs_a3:  .word 0
@@ -1423,6 +1589,7 @@ fs_wuse: .words NWIN                   # 0 for none. When each was last used,
 fs_wdirty: .words NWIN                 # and 1 if it was changed since read
 fs_statbuf: .words STAT / 3
 fs_fds: .words NPROC * NFD * FD / 3    # each process's descriptors
+fs_cwd: .words NPROC                   # each one's current directory, 0 the root
         .equ  FS_ZEROS, 243            # trytes of zeros a hole is read from
 fs_zeros: .zero FS_ZEROS
 fs_name: .zero NAME_MAX + 1

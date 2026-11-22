@@ -103,7 +103,7 @@ def test_the_shell_does_not_run_out_of_descriptors(shell):
 def test_a_disk_without_a_filesystem_is_reported(shell):
     blank = (new_disk(), 3)
     assert said(shell, "ls\n", blank) == (
-        "$ ls\nsh: /: no filesystem on the disk\n$ \n"
+        "$ ls\nsh: .: no filesystem on the disk\n$ \n"
     )
     assert "sh: x: no filesystem on the disk\n" in said(shell, "cat x\n", None)
 
@@ -152,3 +152,21 @@ def test_a_full_disk_is_said(shell):
     assert "sh: b: no space left\n" in out
     assert "sh: d: no space left\n" in out
     assert out.endswith("$ cat a\nfirst\n$ \n")
+
+
+def test_cd_pwd_and_relative_paths(shell):
+    on = disk(dirs=("docs",), docs__a="in docs\n", top="at the top\n")
+    out = said(
+        shell,
+        "pwd\ncd docs\npwd\nls\ncat a\ncat ../top\nmkdir sub\ncd sub\npwd\n"
+        "rmdir /docs/sub\ncd nope\ncd /docs/a\ncd\npwd\nls docs\n",
+        on,
+    )
+    assert out == (
+        "$ pwd\n/\n$ cd docs\n$ pwd\n/docs\n$ ls\n8 a\n$ cat a\nin docs\n"
+        "$ cat ../top\nat the top\n$ mkdir sub\n$ cd sub\n$ pwd\n/docs/sub\n"
+        "$ rmdir /docs/sub\nsh: /docs/sub: busy\n"
+        "$ cd nope\nsh: nope: no such file or directory\n"
+        "$ cd /docs/a\nsh: /docs/a: not a directory\n"
+        "$ cd\n$ pwd\n/\n$ ls docs\n8 a\nsub/\n$ \n"
+    )

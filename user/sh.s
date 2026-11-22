@@ -1,7 +1,7 @@
 # Program 0 of shell.s: a shell. It reads a line, runs the program its
 # first word names, waits for it, and says how it ended if not with code
-# 0. Some words are built in: exit, and ls, cat, write, rm, mkdir and
-# rmdir, which use the filesystem on the disk (docs/filesystem.md) through the file server,
+# 0. Some words are built in: exit, and ls, cat, write, rm, mkdir, rmdir,
+# cd and pwd, which use the filesystem on the disk (docs/filesystem.md) through the file server,
 # which the shell starts first, as init, so that it is FS_PID. A word that is neither built in nor a program in the kernel
 # image names a program file: a path if it has a slash, else a file in
 # /bin. It stops at the end of input. Programs take no arguments yet.
@@ -200,14 +200,14 @@ do_exit:
         li    a1, 0
         sys
 
-# ls [DIR]: each entry of DIR, or of /, but those whose names start with
+# ls [DIR]: each entry of DIR, or of the current directory, but those whose names start with
 # a dot: a file's size and name, a directory's name and a slash.
 do_ls:  mv    a0, s4
         call  word
         mv    s5, a0                   # s5: the directory
         lt    t0, 0(s5)
         bnez  t0, 1f
-        la    s5, sh_root
+        la    s5, sh_dot
 1:      call  open_s5
         bltz  a0, fail
         mv    s6, a0                   # s6: its descriptor
@@ -323,6 +323,36 @@ do_write:
         j     3b
 4:      call  close_s6
         j     prompt
+
+# cd [DIR]: make DIR the current directory, or / with none; programs
+# the shell starts from the disk start in it.
+do_cd:  mv    a0, s4
+        call  word
+        mv    s5, a0                   # s5: the directory
+        lt    t0, 0(s5)
+        bnez  t0, 1f
+        la    s5, sh_root
+1:      li    a0, SYS_CALL
+        li    a1, FS_PID
+        li    a2, FS_CHDIR
+        mv    a3, s5
+        sys
+        bltz  a0, fail
+        j     prompt
+
+# pwd: print the current directory's path.
+do_pwd: li    a0, SYS_CALL
+        li    a1, FS_PID
+        li    a2, FS_GETCWD
+        la    a3, sh_buf
+        li    a4, BUF_MAX + 1
+        sys
+        la    s5, sh_dot
+        bltz  a0, fail
+        li    a0, SYS_PUTS
+        la    a1, sh_buf
+        sys
+        j     newline
 
 # rm PATH, mkdir PATH, rmdir PATH: one call each, on the path.
 do_rm:  li    s8, FS_UNLINK
@@ -483,6 +513,8 @@ sh_builtins:
         .word sh_rm, do_rm
         .word sh_mkdir, do_mkdir
         .word sh_rmdir, do_rmdir
+        .word sh_cd, do_cd
+        .word sh_pwd, do_pwd
         .word 0
 
 # Each entry: a failure from a file call, and what to say about it.
@@ -514,6 +546,8 @@ sh_write:    .string "write"
 sh_rm:       .string "rm"
 sh_mkdir:    .string "mkdir"
 sh_rmdir:    .string "rmdir"
+sh_cd:       .string "cd"
+sh_pwd:      .string "pwd"
 sh_prompt:   .string "$ "
 sh_rubout:   .tryte BS, ' ', BS, 0     # back, blank, back: the assembler has no \b
 sh_unknown:  .string "sh: no such program: "
@@ -538,6 +572,7 @@ sh_busy:     .string "busy"
 sh_inval:    .string "invalid argument"
 sh_error:    .string "error "
 sh_root:     .string "/"
+sh_dot:      .string "."
 sh_bin:      .string "/bin/"
 sh_digits:   .zero 12
 sh_digits_end: .zero 1
