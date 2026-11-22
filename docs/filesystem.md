@@ -265,7 +265,7 @@ tools/fs.py cat disk.img docs/old
 tools/fs.py rm disk.img docs/old
 detrytus asm bin/hello.s -o hello.dti
 tools/fs.py put disk.img hello.dti               # a program: /bin/hello
-detrytus run shell.s --ram-pages 40 --disk disk.img
+detrytus run shell.s --ram-pages 81 --disk disk.img
 ```
 
 Images are detrytus disk files, two bytes per tryte, as long as the
