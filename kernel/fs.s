@@ -9,94 +9,30 @@
 
         .compress
 # open(path, flags): the lowest free descriptor, at the start of the
-# file or directory path names, for reading, writing or both (flags mod
-# 3). O_CREAT makes an empty file if the name is free, O_TRUNC empties a
-# file opened for writing, and O_APPEND writes at the end each time. A
-# directory opens for reading only.
+# file or directory path names.
 sys_open:
         call  fs_enter
-        call  fd_free                  # one must be free, before anything changes
-        lw    a0, PCB_A2(s0)
-        call  oflags                   # a0: the access mode
-        bltz  a0, fs_inval
-        mv    s8, a0                   # s8: the access mode
-        lw    a0, PCB_A2(s0)
-        li    t1, O_CREAT
-        div   a0, a0, t1
-        rem   a0, a0, t1
-        bnez  a0, 1f
+        lw    t0, PCB_A2(s0)
+        li    t1, O_RDONLY
+        bne   t0, t1, fs_inval
         lw    a0, PCB_A1(s0)
-        call  namei
-        j     3f
-1:      lw    a0, PCB_A1(s0)
-        call  namei_parent
-        beqz  a1, 3f                   # the root, which is there
-        call  creat                    # a0: the inode, found or made
-        bltz  a1, 4f                   # made: empty, nothing to truncate
-3:      mv    s7, a0                   # s7: the inode
-        call  iget
-        lw    t0, I_TYPE(a0)
-        li    t1, T_DIR
-        bne   t0, t1, 2f
-        bnez  s8, fs_isdir             # a directory, for writing
-        j     5f
-2:      beqz  s8, 5f                   # O_TRUNC only counts for writing
-        lw    t0, PCB_A2(s0)
-        li    t1, O_TRUNC
-        div   t0, t0, t1
-        li    t1, 3
-        rem   t0, t0, t1
-        beqz  t0, 5f
-        mv    a0, s7
-        call  trunc_prep
-        mv    a0, s7
-        call  itrunc
-        call  disk_kick
-5:      mv    a0, s7
-4:      mv    s7, a0
-        call  fd_free                  # a1: the descriptor's record, a0 its number
-        sw    s7, FD_INO(a1)
-        sw    zero, FD_POS(a1)
-        lw    t0, PCB_A2(s0)
-        sw    t0, FD_FLAGS(a1)
-        j     sys_return
-
-# fd_free: a0 = the caller's lowest free descriptor, a1 = its record;
-# E_MFILE ends the call when all are in use. Clobbers t0.
-fd_free:
-        addi  a1, s0, PCB_FDS
-        li    a0, 0
-1:      lw    t0, FD_INO(a1)
+        call  namei                    # a0: the inode
+        addi  t1, s0, PCB_FDS          # t1: the descriptor tried
+        li    t2, 0                    # t2: its number
+1:      lw    t0, FD_INO(t1)
         beqz  t0, 2f
-        addi  a1, a1, FD
-        addi  a0, a0, 1
+        addi  t1, t1, FD
+        addi  t2, t2, 1
         li    t0, NFD
-        blt   a0, t0, 1b
+        blt   t2, t0, 1b
         li    a0, E_MFILE
         j     sys_return
-2:      ret
-
-# oflags: a0 = the access mode of open flags a0 (O_RDONLY, O_WRONLY or
-# O_RDWR), or E_INVAL if they are not a mode plus some of O_CREAT,
-# O_TRUNC and O_APPEND, each once. Clobbers a1, t0..t2.
-oflags:
-        bltz  a0, 9f
-        li    t0, 3 * O_APPEND
-        bge   a0, t0, 9f
-        li    t1, 3
-        div   t0, a0, t1               # each flag above the mode is 0 or 1
-        li    t2, 3
-1:      beqz  t2, 2f
-        rem   a1, t0, t1
-        addi  a1, a1, -2
-        beqz  a1, 9f
-        div   t0, t0, t1
-        addi  t2, t2, -1
-        j     1b
-2:      rem   a0, a0, t1
-        ret
-9:      li    a0, E_INVAL
-        ret
+2:      sw    a0, FD_INO(t1)
+        sw    zero, FD_POS(t1)
+        lw    t0, PCB_A2(s0)
+        sw    t0, FD_FLAGS(t1)
+        mv    a0, t2
+        j     sys_return
 
 # close(fd)
 sys_close:
@@ -112,11 +48,6 @@ sys_read:
         call  sua_on
         call  fdget
         mv    s2, a0                   # s2: the descriptor
-        lw    t0, FD_FLAGS(s2)
-        li    t1, 3
-        rem   t0, t0, t1
-        li    t1, O_WRONLY
-        beq   t0, t1, fs_badf          # opened for writing only
         lw    s3, PCB_A3(s0)           # s3: how many to copy
         bltz  s3, fs_inval
         lw    a0, PCB_A2(s0)
@@ -422,18 +353,9 @@ bmap:
 # Each name is looked up in the directory reached so far, starting at
 # the root; slashes before, between and after names do not count. Ends
 # the call with E_FAULT, E_NAMETOOLONG, E_NOTDIR, E_NOENT, or as bget
-# does. a1 = 0. Clobbers a0, t0..t5 and s2..s7.
+# does. Clobbers a0, a1, t0..t5 and s2..s6.
 namei:
-        li    s7, 0                    # s7: 1 to stop before the last name
-        j     0f
-
-# namei_parent: as namei, for a call that makes or removes the path's
-# last name: a0 = the directory that name belongs in, and a1 = 1, with
-# the name in kname, unlooked-up. A path with no names, the root, gives
-# a0 = ROOT_INO and a1 = 0. Clobbers as namei.
-namei_parent:
-        li    s7, 1
-0:      addi  sp, sp, -3
+        addi  sp, sp, -3
         sw    ra, 0(sp)
         mv    s2, a0                   # s2: where we are in the path
         li    t0, V_USER - 9841
@@ -464,19 +386,7 @@ namei_parent:
         li    t1, '/'
         bne   t0, t1, 3b
 4:      st    zero, 0(t2)
-        beqz  s7, 5f
-        mv    t2, s2                   # is it the last name?
-6:      bgt   t2, s4, fs_fault
-        lt    t0, 0(t2)
-        beqz  t0, 7f
-        addi  t2, t2, 1
-        li    t1, '/'
-        beq   t0, t1, 6b
-        j     5f                       # more to come
-7:      mv    a0, s3
-        li    a1, 1
-        j     namei_done
-5:      mv    a0, s3                   # look it up in directory s3
+        mv    a0, s3                   # look it up in directory s3
         call  iget
         lw    t0, I_TYPE(a0)
         li    t1, T_DIR
@@ -509,8 +419,6 @@ namei_parent:
 8:      lw    s3, D_INO(t2)
         j     1b
 9:      mv    a0, s3
-        li    a1, 0
-namei_done:
         lw    ra, 0(sp)
         addi  sp, sp, 3
         ret
@@ -539,8 +447,5 @@ fs_isdir:
         j     sys_return
 fs_eio:
         li    a0, E_IO
-        j     sys_return
-fs_badf:
-        li    a0, E_BADF
         j     sys_return
         .nocompress

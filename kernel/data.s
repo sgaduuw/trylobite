@@ -18,8 +18,7 @@ epochs: .words NPROC                   # tenants each slot has had (see resume)
 seen:   .words NHART * NPROC           # the epoch each hart last flushed, by slot
 
 disk_user: .word 0                     # the process whose command is in
-                                       # flight, DISK_FLUSH for a write-back
-                                       # (flush_slot's), or 0 for none
+                                       # flight, or 0 for none
 disk_list: .word 0                     # that command's page: its list
 
 foreground: .word NO_FOREGROUND        # the process Ctrl-C kills (input.s)
@@ -33,12 +32,8 @@ procs:  .words NPROC * PCB_SIZE / 3     # the process table
 conin:  .words CONIN_MAX               # console input, a ring (input.s)
 
 bufs:   .words NBUF * BUF / 3          # the block cache's slots (cache.s)
-buf_clock: .word 0
-flush_slot: .word 0                    # the slot being written back                     # counts bget calls: BUF_USED's clock
+buf_clock: .word 0                     # counts bget calls: BUF_USED's clock
 kname:  .zero NAME_MAX + 1             # the name namei looks up
-kdot:   .string "."                    # names every directory has
-kdotdot: .string ".."
-knone:  .tryte 0                       # the empty name, of an unused entry
 
 numbuf: .zero 16
 numbuf_end:

@@ -100,9 +100,9 @@ disk_start:
         ret
 
 # disk_irq: the command in flight has finished. Tell its process how it
-# went, and start the next waiting one, or else write back a dirty block.
-# A block read for the cache is kept there (buf_filled), and every
-# process waiting for the cache tries again. Clobbers a0, s1 and t0..t5.
+# went, and start the next waiting one. A block read for the cache is
+# kept there (buf_filled), and every process waiting for some block
+# being read tries again. Clobbers a0, s1 and t0..t5.
 disk_irq:
         addi  sp, sp, -3
         sw    ra, 0(sp)
@@ -112,13 +112,7 @@ disk_irq:
         lw    s1, disk_user
         beqz  s1, 9f                   # nothing was asked of it
         sw    zero, disk_user
-        li    t0, DISK_FLUSH
-        bne   s1, t0, 0f
-        call  buf_written              # a write-back
-        call  buf_wake                 # a slot may be free for a waiter
-        la    s1, procs + (NPROC - 1) * PCB_SIZE   # look from the first
-        j     5f
-0:      li    a0, 0
+        li    a0, 0
         li    t0, BLOCK_FAILED
         bne   t1, t0, 1f
         li    a0, E_IO
@@ -131,7 +125,7 @@ disk_irq:
         sw    t0, PCB_STATE(s1)
         call  wake_one
         call  buf_wake
-5:      la    t3, procs + NPROC * PCB_SIZE
+        la    t3, procs + NPROC * PCB_SIZE
         li    t4, NPROC
 2:      addi  s1, s1, PCB_SIZE         # the next waiting process, s1's turn last
         blt   s1, t3, 3f
@@ -143,7 +137,6 @@ disk_irq:
         j     9f
 4:      addi  t4, t4, -1
         bnez  t4, 2b
-        call  disk_kick                # nobody waits: write back a block
 9:      lw    ra, 0(sp)
         addi  sp, sp, 3
         ret

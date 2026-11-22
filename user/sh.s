@@ -1,8 +1,8 @@
 # Program 0 of shell.s: a shell. It reads a line, runs the program its
 # first word names, waits for it, and says how it ended if not with code
-# 0. Some words are built in: exit, and ls, cat, write, rm, mkdir and
-# rmdir, which use the filesystem on the disk (docs/filesystem.md)
-# through the kernel's file calls. A word that is neither built in nor a program in the kernel
+# 0. Some words are built in: exit, and ls and cat, which read the
+# filesystem on the disk (docs/filesystem.md) through the kernel's file
+# calls. A word that is neither built in nor a program in the kernel
 # image names a program file: a path if it has a slash, else a file in
 # /bin. It stops at the end of input. Programs take no arguments yet.
 
@@ -281,54 +281,6 @@ do_cat: call  name_arg
 2:      call  close_s6
         j     prompt
 
-# write PATH TEXT: make PATH hold the rest of the line and a newline,
-# replacing what it held.
-do_write:
-        call  name_arg
-        mv    s7, a1                   # s7: the text
-        li    a0, SYS_OPEN
-        mv    a1, s5
-        li    a2, O_WRONLY + O_CREAT + O_TRUNC
-        sys
-        bltz  a0, fail
-        mv    s6, a0                   # s6: its descriptor
-        mv    t0, s7                   # the newline goes where the line ends
-1:      lt    t1, 0(t0)
-        beqz  t1, 2f
-        addi  t0, t0, 1
-        j     1b
-2:      li    t1, '\n'
-        st    t1, 0(t0)
-        addi  t0, t0, 1
-        sub   s8, t0, s7               # s8: trytes still to write
-3:      beqz  s8, 4f
-        li    a0, SYS_WRITE
-        mv    a1, s6
-        mv    a2, s7
-        mv    a3, s8
-        sys
-        bltz  a0, failc
-        add   s7, s7, a0
-        sub   s8, s8, a0
-        j     3b
-4:      call  close_s6
-        j     prompt
-
-# rm PATH, mkdir PATH, rmdir PATH: one call each, on the path.
-do_rm:  li    s8, SYS_UNLINK
-        j     1f
-do_mkdir:
-        li    s8, SYS_MKDIR
-        j     1f
-do_rmdir:
-        li    s8, SYS_RMDIR
-1:      call  name_arg
-        mv    a0, s8
-        mv    a1, s5
-        sys
-        bltz  a0, fail
-        j     prompt
-
 # failc: close descriptor s6, then fail. fail: say why a call about path
 # s5 failed with a0, as Unix tools do, and go back to the prompt.
 failc:  mv    s3, a0
@@ -455,10 +407,6 @@ sh_builtins:
         .word sh_exit, do_exit
         .word sh_ls, do_ls
         .word sh_cat, do_cat
-        .word sh_write, do_write
-        .word sh_rm, do_rm
-        .word sh_mkdir, do_mkdir
-        .word sh_rmdir, do_rmdir
         .word 0
 
 # Each entry: a failure from a file call, and what to say about it.
@@ -468,11 +416,6 @@ sh_errors:
         .word E_ISDIR, sh_isdir
         .word E_NOFS, sh_nofs
         .word E_NAMETOOLONG, sh_toolong
-        .word E_EXIST, sh_exist
-        .word E_NOSPC, sh_nospc
-        .word E_NOTEMPTY, sh_notempty
-        .word E_BUSY, sh_busy
-        .word E_INVAL, sh_inval
         .word 0
 
 # Each entry: the name, and the program number to spawn; 0 ends it.
@@ -485,10 +428,6 @@ sh_pingpong: .string "pingpong"
 sh_exit:     .string "exit"
 sh_ls:       .string "ls"
 sh_cat:      .string "cat"
-sh_write:    .string "write"
-sh_rm:       .string "rm"
-sh_mkdir:    .string "mkdir"
-sh_rmdir:    .string "rmdir"
 sh_prompt:   .string "$ "
 sh_rubout:   .tryte BS, ' ', BS, 0     # back, blank, back: the assembler has no \b
 sh_unknown:  .string "sh: no such program: "
@@ -506,11 +445,6 @@ sh_notdir:   .string "not a directory"
 sh_isdir:    .string "is a directory"
 sh_nofs:     .string "no filesystem on the disk"
 sh_toolong:  .string "name too long"
-sh_exist:    .string "file exists"
-sh_nospc:    .string "no space left"
-sh_notempty: .string "directory not empty"
-sh_busy:     .string "busy"
-sh_inval:    .string "invalid argument"
 sh_error:    .string "error "
 sh_root:     .string "/"
 sh_bin:      .string "/bin/"

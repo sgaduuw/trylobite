@@ -59,14 +59,6 @@ syscall_again:                         # resume runs an abandoned call again
         beq   a0, t0, sys_stat
         li    t0, SYS_SPAWNF
         beq   a0, t0, sys_spawnf
-        li    t0, SYS_WRITE
-        beq   a0, t0, sys_write
-        li    t0, SYS_UNLINK
-        beq   a0, t0, sys_unlink
-        li    t0, SYS_MKDIR
-        beq   a0, t0, sys_mkdir
-        li    t0, SYS_RMDIR
-        beq   a0, t0, sys_rmdir
         li    a0, E_NOCALL
 
 sys_return:                            # a0: the result

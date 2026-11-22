@@ -3,12 +3,14 @@
 A filesystem on detrytus' block device, shaped like a Unix one: files
 and directories are inodes, directories are files of names and inode
 numbers with `.` and `..`, and programs reach files by path through
-descriptors, with `open`, `read`, `write`, `lseek`, `readdir`, `stat`
-and `close`, and `unlink`, `mkdir` and `rmdir`. The kernel reads and
-changes it (`kernel/fs.s`) through a cache of blocks
+descriptors, with `open`, `read`, `lseek`, `readdir`, `stat` and
+`close`. The kernel reads it (`kernel/fs.s`) through a cache of blocks
 (`kernel/cache.s`); `tools/fs.py` builds and changes images on the
 host. Every number below is named in `include/layout.s`, which the
 tool reads too.
+
+For now the kernel only reads: files are made, changed and removed
+with the tool.
 
 ## Blocks
 
@@ -101,37 +103,18 @@ range of it: its page, or its block window once it has one (otherwise
 filesystem on it, `E_IO` when the disk refuses a block or names one
 past its end, and `E_NOMEM` when the cache has no room (below). The
 others are `E_NOENT` (no such name), `E_NOTDIR` (a name on the way is a
-file), `E_NAMETOOLONG`, `E_BADF` (no such open descriptor, or not open
-for this), `E_ISDIR`, `E_MFILE`, `E_INVAL`, `E_NOEXEC`, `E_EXIST`,
-`E_NOSPC` (no free block or inode), `E_NOTEMPTY`, `E_FBIG` (past a
-file's last block) and `E_BUSY`.
+file), `E_NAMETOOLONG`, `E_BADF` (no such open descriptor), `E_ISDIR`,
+`E_MFILE`, `E_INVAL` and `E_NOEXEC`.
 
 | Number | Call | Does |
 |--------|------|------|
-| 16 | `open(path, flags)` | gives the lowest free descriptor (of `NFD`, 8), at position 0 of the file or directory. `flags` is below |
+| 16 | `open(path, flags)` | gives the lowest free descriptor (of `NFD`, 8), at position 0 of the file or directory. `flags` is `O_RDONLY` (0), the only one yet |
 | 17 | `close(fd)` | frees the descriptor |
 | 18 | `read(fd, buffer, n)` | copies up to `n` trytes from the position, and moves it past them: how many, never past the end of the file or of the block the position is in, so a caller loops until it gets 0. A directory is `E_ISDIR` |
 | 19 | `lseek(fd, offset, whence)` | sets the position to `offset` from the start, where it is or the end (`SEEK_SET`, `SEEK_CUR`, `SEEK_END`): the new position. It may pass the end, but not the start |
 | 20 | `readdir(fd, buffer)` | the next entry in use of a directory: its name to the buffer, `NAME_MAX + 1` trytes, ended with 0, and its inode as the result; 0 at the end. The position counts 21 trytes per entry, used or not. A file is `E_NOTDIR` |
 | 21 | `stat(path, buffer)` | four words at the word-aligned buffer: `ST_INO`, `ST_TYPE`, `ST_LINKS` and `ST_SIZE` |
 | 22 | `spawnf(path)` | starts the program file at the path, as `spawnw` does from the window; anything but a program file is `E_NOEXEC` |
-| 23 | `write(fd, buffer, n)` | copies up to `n` trytes to the position, or the end with `O_APPEND`, and moves it past them: how many, never past the end of the block the position is in, so a caller loops. A write past the end grows the file, leaving holes; one past its last block is `E_FBIG` |
-| 24 | `unlink(path)` | removes a file's name from its directory, and frees the file when no name is left. A directory is `E_ISDIR`, a name `.` or `..` `E_INVAL` |
-| 25 | `mkdir(path)` | makes an empty directory, holding `.` and `..`: `E_EXIST` if the name is taken |
-| 26 | `rmdir(path)` | removes an empty directory (`E_NOTEMPTY` otherwise); the root is `E_BUSY`, a name `.` or `..` `E_INVAL` |
-
-`flags` is the access mode, `O_RDONLY` (0), `O_WRONLY` (1) or `O_RDWR`
-(2), plus any of `O_CREAT` (3: make a file that is not there),
-`O_TRUNC` (9: empty a file opened for writing) and `O_APPEND` (27:
-write at the end each time). Being ternary digits that are 0 or 1, they
-add as Unix flags OR together; any other value is `E_INVAL`. A
-directory opens for reading only (`E_ISDIR`), and `read` or `write` on
-a descriptor not open for it is `E_BADF`.
-
-`unlink` and `rmdir` refuse, with `E_BUSY`, a file or directory that a
-process has open, where Unix would keep it until the last descriptor
-closes. A new file or directory takes the lowest free inode and its
-blocks the lowest free blocks.
 
 Descriptors belong to a process and go with it; a new process has none.
 They are numbered from 0 like Unix ones, but nothing opens 0, 1 and 2
@@ -150,28 +133,20 @@ half done.
 
 So a call needs room in the cache for every block it touches at once:
 block 0, the inode table, and one block per directory on its path, plus
-a file's indirect and data block, or the new directory's block. That is why a path has at most 6
+a file's indirect and data block. That is why a path has at most 6
 names. A call never evicts a block it has used itself; with too few
 free pages for the blocks it needs, it fails with `E_NOMEM` rather than
 evict and read the same blocks for ever.
-
-A call that changes blocks changes them in the cache and marks them
-dirty. When the disk has nothing else to do the cache writes a dirty
-block back, one at a time, and before the machine powers off it writes
-them all, so a run leaves the disk whole. A dirty block is never
-evicted: a call that needs its page waits for it to be written.
 
 `bread` and `bwrite` reach blocks past the cache. A `bwrite` drops the
 cache's copy of its block, so the filesystem reads it again.
 
 ## The shell
 
-`sh` (`user/sh.s`) has six file built-ins. `ls [DIR]` lists a
-directory, `/` when none is given, leaving out names that start with a
-dot: a file's size and name, a directory's name and a slash. `cat PATH`
-prints a file. `write PATH TEXT` makes the file hold the rest of the
-line, replacing what it held; `rm PATH`, `mkdir PATH` and `rmdir PATH`
-call the system calls of those names. They say what went wrong as Unix tools do, `sh: PATH: no such
+`sh` (`user/sh.s`) has two file built-ins: `ls [DIR]` lists a directory,
+`/` when none is given, leaving out names that start with a dot: a
+file's size and name, a directory's name and a slash. `cat PATH` prints
+a file. They say what went wrong as Unix tools do, `sh: PATH: no such
 file or directory`, and carry on.
 
 A command that is neither built in nor one of the programs in the
@@ -236,5 +211,7 @@ directory with anything in it.
 
 ## Later
 
-A current directory and relative paths, and descriptors 0, 1 and 2 for
-the console. Directories of more than one block, and `rename`.
+Writing: `open` with flags to create and truncate, `write`, `unlink`,
+`mkdir` and `rmdir`, with the cache writing changed blocks back.
+Then a current directory and relative paths, and descriptors 0, 1 and 2
+for the console.

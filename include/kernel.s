@@ -28,7 +28,6 @@
         .include "../kernel/input.s"
         .include "../kernel/cache.s"
         .include "../kernel/fs.s"
-        .include "../kernel/fswrite.s"
 
         .include "../kernel/data.s"
         .include "../kernel/pagetables.s"

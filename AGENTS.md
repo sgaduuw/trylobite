@@ -99,11 +99,7 @@ pipe.
   (`kernel/fs.s`) read blocks through `bget`, which on a miss starts
   the read and abandons the call; the caller runs it again from the
   start once the block is in (`kernel/cache.s`). So a file call changes
-  nothing, in memory or in its record, before its last `bget`, `bgetw`
-  or `bnew`, then makes all its changes, marking each block it changed
-  with `bdirty`. A block it will change is gathered with `bgetw`, which
-  also waits out a write-back of it, or `bnew`; once gathered, `bget`
-  only finds it again. It fails
+  nothing, in memory or in its record, before its last `bget`, and fails
   by jumping to `sys_return` with the reason from wherever it is.
   Arguments are read from the saved registers, `a3` included
   (`PCB_A3`), each time it runs.
