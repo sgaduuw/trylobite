@@ -166,7 +166,7 @@ def test_what_cannot_be_opened_says_why():
         open_("through"),
         open_("long"),
         open_("deep"),
-        open_("f", "1"),  # only O_RDONLY, yet
+        open_("f", "6"),  # O_CREAT twice: no such flags
         """
         li    a0, SYS_OPEN
         li    a1, V_USER - 9842

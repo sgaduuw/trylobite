@@ -176,9 +176,11 @@
 # (the disk refused a block, or holds nonsense) or E_NOMEM (no page for
 # the kernel's block cache), and those taking a path or buffer with
 # E_FAULT (it is not all in the caller's page or block window).
-        .equ  SYS_OPEN,  16               # open path a1 with flags a2 (O_RDONLY):
+        .equ  SYS_OPEN,  16               # open path a1 with flags a2 (O_ below):
                                           # the lowest free descriptor, E_NOENT,
-                                          # E_NOTDIR, E_NAMETOOLONG, E_MFILE, E_INVAL
+                                          # E_NOTDIR, E_NAMETOOLONG, E_MFILE,
+                                          # E_INVAL, E_ISDIR; with O_CREAT also
+                                          # E_NOSPC
         .equ  SYS_CLOSE, 17               # close descriptor a1: 0, E_BADF
         .equ  SYS_READ,  18               # read up to a3 trytes from descriptor a1
                                           # to a2: how many (0 at the end of the
@@ -196,6 +198,16 @@
         .equ  SYS_SPAWNF, 22              # start the program file at path a1: as
                                           # spawnw, E_NOEXEC for no program, and
                                           # as open fails
+        .equ  SYS_WRITE, 23               # write up to a3 trytes from a2 to
+                                          # descriptor a1: how many (never past
+                                          # the end of a block), E_BADF, E_INVAL,
+                                          # E_NOSPC, E_FBIG
+        .equ  SYS_UNLINK, 24              # remove file path a1: 0, E_ISDIR,
+                                          # E_BUSY (open), and as open fails
+        .equ  SYS_MKDIR, 25               # make directory path a1: 0, E_EXIST,
+                                          # E_NOSPC, and as open fails
+        .equ  SYS_RMDIR, 26               # remove empty directory path a1: 0,
+                                          # E_NOTEMPTY, E_BUSY, and as open fails
 
         .equ  E_NOCALL,  -1               # no system call with that number
         .equ  E_FULL,    -1               # send: the receiver's mailbox is full
@@ -221,8 +233,19 @@
         .equ  E_FAULT,  -12               # a path or buffer outside the caller
         .equ  E_NOEXEC, -13               # spawnf: not a program file
         .equ  E_IO,     -14               # the disk refused (bread, bwrite, files)
+        .equ  E_EXIST,  -15               # mkdir: the name is taken
+        .equ  E_NOSPC,  -16               # no free block or inode, or the
+                                          # directory is full
+        .equ  E_NOTEMPTY, -17             # rmdir: it holds more than . and ..
+        .equ  E_FBIG,   -18               # write: past what a file can hold
+        .equ  E_BUSY,   -19               # a process has it open; or the root
 
-        .equ  O_RDONLY, 0                 # open: for reading, the only way yet
+        .equ  O_RDONLY, 0                 # open: for reading, writing or both:
+        .equ  O_WRONLY, 1                 # the flags mod 3. Add any of
+        .equ  O_RDWR,   2                 # O_CREAT (make a file not there),
+        .equ  O_CREAT,  3                 # O_TRUNC (empty a file opened for
+        .equ  O_TRUNC,  9                 # writing) and O_APPEND (write at
+        .equ  O_APPEND, 27                # its end, each time)
         .equ  NFD, 8                      # descriptors per process, 0 to 7
         .equ  SEEK_SET, 0                 # lseek: from the start,
         .equ  SEEK_CUR, 1                 # from where it is,
@@ -307,6 +330,10 @@
         .equ  BUF_EMPTY,   0
         .equ  BUF_VALID,   1              # holds the block
         .equ  BUF_FILLING, 2              # a command is reading the block into it
+        .equ  BUF_DIRTY,   3              # holds the block, changed since read
+        .equ  BUF_WRITING, 4              # holds it, being written back
+        .equ  DISK_FLUSH,  1              # disk_user during a write-back: kernel
+                                          # addresses, records', are negative
 
 # --- the filesystem (docs/filesystem.md) ----------------------------------------
 # Block 0 holds a header and the map of free blocks, block 1 the inodes;

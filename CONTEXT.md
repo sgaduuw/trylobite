@@ -621,3 +621,34 @@ what this change builds.
 - **The shell lost `write` and `rm`** for now: they wrote the old format
   through the block window. They come back over `write` and `unlink`
   system calls in the next step.
+
+### 2026-11-22 · Writing files: write-back cache, E_BUSY, ternary flags
+
+- **Calls gather, then commit.** `write`, `unlink`, `mkdir`, `rmdir`
+  and `open` with `O_CREAT` or `O_TRUNC` follow the read side's rule:
+  every block they will change is in the cache (`bgetw`, or `bnew` for
+  a block just allocated, which needs no read) before anything changes,
+  so a call abandoned on a miss and run again does no harm, and a full
+  disk (`E_NOSPC`) is found before anything is half done.
+- **Write-back, not write-through.** A changed block is marked dirty
+  and written when the disk has nothing else to do; one command at a
+  time, as the disk takes them. A dirty block cannot be evicted, so a
+  call that needs room waits for one to be written rather than failing.
+  The kernel writes every dirty block before it powers off, so a run
+  that ends leaves a whole filesystem. There is no `sync` and no
+  journal: a crash mid-run can lose what was written since the disk
+  last caught up.
+- **`write` stops at a block's end**, as `read` does, so a call needs
+  at most one data block and one indirect block more than a read.
+- **Removing what is open is `E_BUSY`.** POSIX keeps an unlinked file
+  alive until its last descriptor closes. That needs an orphan list
+  and freeing in `close` and process exit, which may need blocks and so
+  sleep where nothing sleeps now. Refusing is simpler, and nothing here
+  needs the POSIX behaviour yet.
+- **Flags are ternary digits.** The access mode is the flags mod 3
+  (`O_RDONLY` 0, `O_WRONLY` 1, `O_RDWR` 2), and `O_CREAT`, `O_TRUNC` and
+  `O_APPEND` are 3, 9 and 27, each digit 0 or 1, so they add like Unix
+  flags OR together. Anything else is `E_INVAL`.
+- **The shell has `write`, `rm`, `mkdir` and `rmdir` again**, over the
+  system calls. `write PATH TEXT` puts one line in a file, replacing
+  it, since the shell has no redirection yet.

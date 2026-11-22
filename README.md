@@ -191,17 +191,21 @@ block cache takes up to 8 more pages, as it needs them.
 | 13 | `kill(pid)` | ends child `pid` before it runs again: 0; −2 if `pid` is not the caller's child |
 | 14 | `foreground(pid)` | gives the console to child `pid`, so that Ctrl-C kills it, or to nobody with `NO_FOREGROUND` (−1): 0; −2 if `pid` is not the caller's child |
 | 15 | `spawnw()` | starts the program file whose first block is in the block window (docs/filesystem.md): as `spawn`, with −2 when there is no window or no program in it |
-| 16 | `open(path, flags)` | the lowest free file descriptor, for reading (`O_RDONLY`, the only flag yet) |
+| 16 | `open(path, flags)` | the lowest free file descriptor: `O_RDONLY`, `O_WRONLY` or `O_RDWR`, plus any of `O_CREAT`, `O_TRUNC` and `O_APPEND` |
 | 17 | `close(fd)` | 0 |
 | 18 | `read(fd, buffer, n)` | how many trytes it copied, at most `n` and never past the end of the file or of a block; 0 at the end |
 | 19 | `lseek(fd, offset, whence)` | the new position, from the start, where it is, or the end (`SEEK_SET`, `SEEK_CUR`, `SEEK_END`) |
 | 20 | `readdir(fd, buffer)` | the inode of the directory's next entry, its name in the buffer; 0 at the end |
 | 21 | `stat(path, buffer)` | 0, with the inode, type, links and size in four words at the buffer |
 | 22 | `spawnf(path)` | starts the program file at the path: as `spawn` |
+| 23 | `write(fd, buffer, n)` | how many trytes it wrote, at most `n` and never past the end of a block |
+| 24 | `unlink(path)` | removes a file's name, and the file with its last: 0 |
+| 25 | `mkdir(path)` | makes an empty directory: 0 |
+| 26 | `rmdir(path)` | removes an empty directory: 0 |
 
-The file calls (16 to 22) fail with their own negative numbers, −4 to
-−14: no filesystem, no such file, not a directory, a bad descriptor and
-so on, each named in `include/layout.s` (`E_NOENT`, `E_BADF`, ...).
+The file calls (16 to 26) fail with their own negative numbers, −4 to
+−19: no filesystem, no such file, not a directory, a bad descriptor, no
+space left and so on, each named in `include/layout.s` (`E_NOENT`, `E_BADF`, ...).
 
 A call whose result is a status, or a value that is never negative,
 reports failure with a negative number; `include/layout.s` names each
@@ -240,9 +244,11 @@ The disk can hold a filesystem, shaped like a Unix one: inodes, nested
 directories with `.` and `..`, and files reached by path through file
 descriptors (`docs/filesystem.md`). The kernel reads it through a cache
 of blocks; a call that needs a block not in the cache sleeps until the
-disk has read it, then runs again from the start. It is read-only for
-now. `tools/fs.py` makes and changes filesystems on the host, and the
-shell's built-ins `ls [DIR]` and `cat PATH` read them. A word the shell
+disk has read it, then runs again from the start, and the blocks a call
+changes are written back while the disk is idle, and all of them before
+the machine powers off. `tools/fs.py` makes and changes filesystems on
+the host, and the shell's built-ins `ls [DIR]`, `cat PATH`, `write PATH
+TEXT`, `rm PATH`, `mkdir PATH` and `rmdir PATH` use them. A word the shell
 does not know as a built-in or a program in the kernel image names a
 program file: a path if it holds a slash, else a file in `/bin`, which
 `spawnf` starts. `tools/fs.py` stores a `.s` or `.dti` file as a
@@ -252,7 +258,7 @@ program, in `/bin`:
 tools/fs.py new disk.img 100 notes.txt bin/*.s
 tools/fs.py mkdir disk.img docs
 tools/fs.py put disk.img README.md docs
-printf 'ls\nls bin\ncat docs/README.md\n' > session.txt
+printf 'ls\nls bin\nwrite docs/motd hello\ncat docs/motd\n' > session.txt
 detrytus run shell.s --ram-pages 40 --input session.txt --disk disk.img
 ```
 

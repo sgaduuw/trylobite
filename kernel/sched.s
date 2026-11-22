@@ -49,8 +49,15 @@ pick:
         addi  s1, s1, PCB_SIZE
         blt   s1, t3, 6b
 
-        # Nothing runs anywhere. Someone still waiting means nobody will
-        # wake them.
+        # Nothing runs anywhere. Dirty blocks go to the disk before
+        # anything else, as the kernel cannot power off with them in
+        # memory: the disk's interrupt wakes hart 0 when each is done.
+        call  buf_busy
+        bnez  a0, idle
+        # Someone still waiting means nobody will wake them.
+        la    t2, procs
+        li    t0, NPROC * PCB_SIZE
+        add   t3, t2, t0
         mv    s1, t2
 4:      lw    t0, PCB_STATE(s1)
         li    t1, ST_RECV
