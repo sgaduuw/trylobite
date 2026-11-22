@@ -1042,3 +1042,26 @@ point to.
   scheduler's pick, the console server's reader scans) costs a shell
   session about 3% more steps, and some IPC-heavy tests got larger step
   limits.
+
+### 2026-11-22 · init starts the servers; the shell only runs commands
+
+- **A separate program 0.** The shell used to be init and start the
+  servers itself, so the boot order lived in shell code and nothing
+  outlived a shell that faulted. `user/init.s` now starts them from a
+  table (program, name, protocol version, the row it needs), waiting
+  for each name with `LOOKUP_WAIT`, then the shell, and exits with the
+  shell's code when the shell exits, which keeps "end of input powers
+  off" and every session test as it was. Restarting what dies is the
+  next step (design: restart the dead server and whatever needs it,
+  the shell last, at most 3 times).
+- **The table is assembled in.** Drivers have to come from the kernel
+  image anyway; a startup file on disk can come later, for disk
+  programs only.
+- **Quiet unless something is wrong.** Init logs a server it could not
+  bring up, and every row that needs it, on the kernel's log; when all
+  is well it prints nothing, so sessions read as before.
+- **The shell looks up, it does not wait.** Init starts it only once the
+  servers are registered, so `LOOKUP_NOW` finds them, and a missing one
+  leaves the shell running without it, as before.
+- The demo's starter became `user/demo-init.s`, so `init` names one
+  program.

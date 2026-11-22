@@ -107,18 +107,18 @@ bin/
 $ cat notes.txt
 Ternary computers count in trits.
 $ fail
-trylobite: process 5 exited with code 3
+trylobite: process 6 exited with code 3
 sh: exit 3
 $ echo "one   arg" two
 one   arg two
-trylobite: process 6 exited with code 0
-$ hello | upper | wc
 trylobite: process 7 exited with code 0
+$ hello | upper | wc
 trylobite: process 8 exited with code 0
+trylobite: process 9 exited with code 0
 1 5 38
-trylobite: process 5 exited with code 0
+trylobite: process 10 exited with code 0
 $ cat notes.txt | upper > shout
-trylobite: process 6 exited with code 0
+trylobite: process 11 exited with code 0
 $ cat shout
 TERNARY COMPUTERS COUNT IN TRITS.
 $ mkdir docs
@@ -126,8 +126,9 @@ $ cd docs
 $ pwd
 /docs
 $ exit
+trylobite: process 5 exited with code 0
 trylobite: process 0 exited with code 0
-trylobite: all processes exited after 127 timer interrupts
+trylobite: all processes exited after 132 timer interrupts
 ```
 
 The lines starting `trylobite:` are the kernel's log. The disk image
@@ -153,11 +154,13 @@ while it runs, and the kernel reports each.
           └──▶ piped (pipes)
 
   every arrow is a call through the kernel: call / receive / reply
+  init, program 0, starts the servers and then sh
 ```
 
 | Process | Name | Job |
 |---------|------|-----|
-| `user/sh.s` | | the shell; starts the servers below |
+| `user/init.s` | | program 0: starts the servers below in order, then the shell |
+| `user/sh.s` | | the shell |
 | `user/fsd.s` | `fs` | the file server: paths, directories, open files, starting programs from the disk |
 | `user/diskd.s` | `disk` | drives the block device, moving blocks by DMA |
 | `user/consd.s` | `console` | drives the console: input, output, Ctrl-C for the foreground program |
@@ -214,7 +217,7 @@ emulator, so trylobite has never run on hardware.
 | `kernel/lock.s` | the kernel lock |
 | `kernel/data.s` | the process table, buffers, messages |
 | `kernel/pagetables.s` | the boot address space and the kernel's shared leaf table |
-| `user/` | programs built into the kernel image: `init`, `ping` and `pong` for the demo; `sh`, `pingpong` and the servers `fsd`, `diskd`, `consd` and `piped` for the shell |
+| `user/` | programs built into the kernel image: `demo-init`, `ping` and `pong` for the demo; `init`, `sh`, `pingpong` and the servers `fsd`, `diskd`, `consd` and `piped` for the shell |
 | `bin/` | programs for the disk, each assembled on its own: `hello`, `fail`, `spin`, `echo`, `upper`, `wc` |
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
 | `shell.s` | an 81-page machine starting the shell and its servers |
