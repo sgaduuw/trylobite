@@ -993,3 +993,21 @@ count standard input. Now a program starts as a C program does, with
   looks up itself, as Unix's `wc` names each and totals two or more;
   `echo` is new, the smallest use of argv. The test disks grew a block
   for it.
+
+### 2026-11-22 · Quoting in the shell
+
+- **Unix's three quotes, and no more.** `'...'` keeps everything, `"..."`
+  everything but `\"` and `\\`, and `\` the one character after it, so
+  an argument can hold a space and a quoted `|`, `<` or `>` neither
+  pipes nor redirects. With no variables, globs or command substitution
+  there is nothing else for `"..."` to let through. An unclosed quote is
+  refused rather than read as more lines, since the shell reads one
+  line at a time; a `\` at the line's end is itself.
+- **One pass over the line, before anything splits it.** Quotes can span
+  a `|`, so they are undone first, in place (nothing grows). What the
+  splitting, pipe and redirection code look for is a space, `|`, `<` or
+  `>`, so a quoted one is stored negated, which no typed character is,
+  and that code is unchanged; `word`, which every built-in and argument
+  goes through, negates it back, as do the redirection path and
+  `write`'s text. A word of quotes alone becomes `SH_EMPTY` so that it is
+  still a word, an empty argument, as `echo a "" b` gives in Unix.
