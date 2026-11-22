@@ -22,7 +22,7 @@ def said(shell, typed: str, on=None) -> str:
         shell, input=typed, disk=on or bin_disk(13), max_steps=10_000_000
     )
     assert result.exit_code == 0, result.console
-    console = result.console.removeprefix("trylobite: booting\n")
+    console = result.after_boot
     return re.sub(r"trylobite: [^\n]*\n", "", console)
 
 

@@ -227,6 +227,23 @@ def build(
     return _assemble(["-"], stdin=source)
 
 
+# The kernel's boot report ends with this line, and init in shell.s ends
+# its own (each server it started) with the second, just before the shell
+# prints its first prompt.
+BOOT_END = "trylobite: starting init\n"
+SHELL_START = "init: starting sh\n"
+
+
+def after_boot(console: str) -> str:
+    """What a console printed after the boot report: after the kernel's
+    lines up to starting init, and after init's up to starting the shell
+    when it starts one."""
+    _, found, rest = console.partition(BOOT_END)
+    assert found, console
+    _, found, shell = rest.partition(SHELL_START)
+    return shell if found else rest
+
+
 @dataclass
 class Run:
     console: str
@@ -268,6 +285,10 @@ class Run:
         )
         assert [int(a) for a, _ in found] == addresses, done.stdout[-500:]
         return [int(v) if v else None for _, v in found]
+
+    @property
+    def after_boot(self) -> str:
+        return after_boot(self.console)
 
     def exits(self) -> list[tuple[int, int]]:
         """(process, exit code) from the kernel's messages, in order."""

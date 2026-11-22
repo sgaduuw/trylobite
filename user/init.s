@@ -16,7 +16,9 @@
 #
 # A server that cannot start, or does not register the protocol version
 # init expects, is said on the kernel's log and left down, and so is
-# every row that needs it. When all is well init prints nothing.
+# every row that needs it. Each server init starts is said with its
+# process number once it has registered, and the shell before it starts,
+# since the shell prints at once: the end of the boot report.
 
         .compress
         .gp   USER_GP                  # set by spawn
@@ -82,6 +84,7 @@ init_srvend:
         ble   t0, t1, 1f
         la    a2, init_giveup
 1:      lw    a1, ROW_NAME(s0)
+        li    a3, 0
         call  init_say
         mv    a0, s3                   # what needs it goes too
         call  init_stopneed
@@ -108,10 +111,12 @@ init_shend:
         li    t1, INIT_RETRIES
         bgt   t0, t1, 2f
         la    a2, init_again
+        li    a3, 0
         call  init_say
         call  init_startsh
         j     init_watch
 2:      la    a2, init_giveup
+        li    a3, 0
         call  init_say
         li    a0, SYS_EXIT
         li    a1, INIT_LOST
@@ -161,11 +166,19 @@ init_start:
         lw    t0, ROW_VERSION(s0)
         bne   a1, t0, 3f               # calls to it would be misread
         sw    s3, 0(s1)
+        la    a1, init_started         # "started fs, process 4"
+        lw    a2, ROW_NAME(s0)
+        la    a3, init_process
+        mv    a0, s3
+        call  init_number
+        mv    a4, a0
+        call  init_say
         j     4f
 3:      li    t0, INIT_RETRIES + 1     # no use trying again
         sw    t0, 0(s2)
 5:      la    a1, init_noserver
         lw    a2, ROW_NAME(s0)
+        li    a3, 0
         call  init_say
 4:      addi  s0, s0, ROW
         addi  s1, s1, 3
@@ -229,6 +242,14 @@ init_stopsh:
 # init_startsh: start the shell. Init has nothing left to look after
 # without one: if it cannot start, init exits.
 init_startsh:
+        addi  sp, sp, -3
+        sw    ra, 0(sp)
+        la    a1, init_starting
+        la    a2, init_shname
+        li    a3, 0
+        call  init_say
+        lw    ra, 0(sp)
+        addi  sp, sp, 3
         li    a0, SYS_SPAWN
         li    a1, INIT_SH
         sys
@@ -239,8 +260,10 @@ init_startsh:
         li    a1, INIT_LOST
         sys
 
-# init_say: "init: ", the strings at a1 and a2, and a newline, on the
-# kernel's log, in one puts so that no other line lands inside it.
+# init_say: "init: ", the strings at a1, a2, a3 and a4, as many as are
+# not 0 (a2 onwards are read only when the one before is not 0), and a
+# newline, on the kernel's log, in one puts so that no other line lands
+# inside it.
 init_say:
         la    t0, init_line            # t0: where the next tryte goes
         la    t1, init_said
@@ -257,8 +280,10 @@ init_say:
         addi  t0, t0, 1
         addi  a1, a1, 1
         j     3b
-4:      mv    a1, a2
-        li    a2, 0
+4:      mv    a1, a2                   # the next string along
+        mv    a2, a3
+        mv    a3, a4
+        li    a4, 0
         bnez  a1, 3b
         li    t2, '\n'
         st    t2, 0(t0)
@@ -266,6 +291,22 @@ init_say:
         li    a0, SYS_PUTS
         la    a1, init_line
         sys
+        ret
+
+# init_number: a0 = a string of a0's digits, for a0 >= 0, in
+# init_digits. Clobbers t0, t1.
+init_number:
+        mv    t1, a0
+        la    a0, init_digits_end
+        st    zero, 0(a0)
+1:      li    t0, 10
+        rem   t0, t1, t0
+        addi  t0, t0, '0'
+        addi  a0, a0, -1
+        st    t0, 0(a0)
+        li    t0, 10
+        div   t1, t1, t0
+        bnez  t1, 1b
         ret
 
 # The servers, in the order they start: a row needs one above it.
@@ -284,6 +325,11 @@ init_shtries: .word 0                  # and how often it has started again
 init_said:     .string "init: "
 init_line:     .zero 60                # what init_say prints: 48 trytes at
                                        # most, its 0 included
+init_digits:   .zero 9                 # init_number's digits, and its 0
+init_digits_end: .zero 1
+init_started:  .string "started "
+init_process:  .string ", process "
+init_starting: .string "starting "
 init_noserver: .string "no server named "
 init_again:    .string " ended, starting it again"
 init_giveup:   .string " ended too often, giving up on it"

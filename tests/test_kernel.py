@@ -23,7 +23,7 @@ def test_demo_boots_spawns_passes_messages_and_powers_off():
     result = run_image(assemble_file(ROOT / "demo.s"))
     assert result.exit_code == 0
     lines = result.console.splitlines()
-    assert lines[:2] == ["trylobite: booting", "init: starting pong and ping"]
+    assert result.after_boot.startswith("init: starting pong and ping\n")
     sent = [ln for ln in lines if ln.startswith("ping: sending")]
     got = [ln for ln in lines if ln.startswith("pong: got")]
     assert sent == [f"ping: sending {n}" for n in (1, 2, 3)]

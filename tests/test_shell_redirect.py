@@ -18,7 +18,7 @@ def said(shell, typed: str, on) -> str:
     """What the shell printed between booting and its exit."""
     result = run_image(shell, input=typed, disk=on, max_steps=8_000_000)
     assert result.exit_code == 0, result.console
-    console = result.console.removeprefix("trylobite: booting\n")
+    console = result.after_boot
     console = "".join(
         line
         for line in console.splitlines(keepends=True)

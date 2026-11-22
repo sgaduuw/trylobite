@@ -75,7 +75,14 @@ detrytus run demo.s --ram-pages 40 --harts 3
 ```
 
 ```text
-trylobite: booting
+trylobite: version 0.1.0, a microkernel for detrytus, the balanced-ternary machine
+trylobite: memory: 40 pages (787320 trytes), 32 free
+trylobite: harts: 3
+trylobite: irq0: interrupt controller, 2 sources, at page -13
+trylobite: cons0: console, at page -1
+trylobite: disk0: block device, no disk, at page -14
+trylobite: process table: 27 slots, 3 programs in the image
+trylobite: starting init
 init: starting pong and ping
 trylobite: process 0 exited with code 0
 ping: sending 1
@@ -100,7 +107,19 @@ detrytus run shell.s --ram-pages 81 --input session.txt --disk disk.img
 ```
 
 ```text
-trylobite: booting
+trylobite: version 0.1.0, a microkernel for detrytus, the balanced-ternary machine
+trylobite: memory: 81 pages (1594323 trytes), 67 free
+trylobite: harts: 1
+trylobite: irq0: interrupt controller, 2 sources, at page -13
+trylobite: cons0: console, at page -1
+trylobite: disk0: block device, 100 blocks, at page -14
+trylobite: process table: 27 slots, 9 programs in the image
+trylobite: starting init
+init: started console, process 1
+init: started pipe, process 2
+init: started disk, process 3
+init: started fs, process 4
+init: starting sh
 $ ls
 34 notes.txt
 bin/
@@ -131,7 +150,10 @@ trylobite: process 0 exited with code 0
 trylobite: all processes exited after 132 timer interrupts
 ```
 
-The lines starting `trylobite:` are the kernel's log. The disk image
+The lines starting `trylobite:` are the kernel's log. It opens with
+the boot report, what the kernel found (memory, harts, devices, the
+process table) before it starts init, and init then says each server
+it starts, with its process number, and the shell. The disk image
 keeps what the session wrote (`tools/fs.py cat disk.img shout`). Input
 is read from the file up front, so a run is the same every time;
 `detrytus debug shell.s ...` runs the same machine in the debugger,
@@ -147,7 +169,19 @@ detrytus run shell.s --ram-pages 81 --disk disk.img
 ```
 
 ```text
-trylobite: booting
+trylobite: version 0.1.0, a microkernel for detrytus, the balanced-ternary machine
+trylobite: memory: 81 pages (1594323 trytes), 67 free
+trylobite: harts: 1
+trylobite: irq0: interrupt controller, 2 sources, at page -13
+trylobite: cons0: console, at page -1
+trylobite: disk0: block device, 100 blocks, at page -14
+trylobite: process table: 27 slots, 9 programs in the image
+trylobite: starting init
+init: started console, process 1
+init: started pipe, process 2
+init: started disk, process 3
+init: started fs, process 4
+init: starting sh
 $ ls
 34 notes.txt
 bin/
@@ -235,6 +269,7 @@ emulator, so trylobite has never run on hardware.
 | `include/kernel.s` | firmware and kernel together, without programs: included by a build such as `demo.s` |
 | `firmware/boot.s` | ring +1: delegate exceptions, enter the kernel |
 | `kernel/entry.s` | kernel start: traps, process table, timer |
+| `kernel/boot.s` | the boot report: what the kernel found, before init starts |
 | `kernel/trap.s` | trap entry and exit, faults, kills, panics |
 | `kernel/syscall.s` | the system calls |
 | `kernel/sched.s` | round-robin scheduling, halting |

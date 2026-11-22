@@ -1091,3 +1091,27 @@ point to.
   server is not ordered against the kernel's log.
 - Still open: a server that ends before it registers leaves init in
   `LOOKUP_WAIT`, and the kernel reports a deadlock if nothing else runs.
+
+### 2026-11-22 · a boot report
+
+- **The kernel says what it found, as BSD and Linux do.** Before it
+  starts init, hart 0 prints the version, memory (pages, trytes, free),
+  the harts present, each device with its page (the interrupt
+  controller's source count and the disk's size read from the devices),
+  and the process table (`kernel/boot.s`). It replaces the one line
+  `trylobite: booting`. Every line starts `trylobite: `, so a reader can
+  still strip the kernel's lines with one pattern.
+- **Init is no longer quiet when all is well.** It says each server once
+  it has registered, with its process number, and `starting sh` before
+  each start of the shell: after the spawn the shell may already have
+  printed its prompt on another hart, so the shell's line comes first.
+  Restarts say the new process numbers the same way.
+- **No quiet switch: tests take the boot as it is.** The machine has no
+  boot command line, and a build constant would mean the tests no longer
+  boot the way a person sees it. Tests that compare a session use
+  `after_boot` (`tests/kernel.py`), which drops everything up to
+  `trylobite: starting init` and, in the shell build, init's lines up to
+  `init: starting sh`; `tests/test_boot.py` checks the report itself.
+- **The version is written in `kernel/data.s`**, as `0.1.0`, the
+  package's version in `pyproject.toml`; a test keeps the two equal.
+

@@ -350,7 +350,7 @@ def test_readdir_gives_each_entry_in_use_and_then_0():
     fs_.remove("d/gone")  # an unused entry in the middle
     fs_.save(made[0])
     d, one, three = (fs_.lookup(p) for p in ("d", "d/one", "d/three"))
-    out = run(program, disk=made).console.split("booting\n")[1].split("trylobite")[0]
+    out = run(program, disk=made).after_boot.split("trylobite")[0]
     assert out.split() == [
         "0",
         ".",
