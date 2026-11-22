@@ -143,11 +143,11 @@ none:   .string "none"
 
 
 def test_a_second_file_server_finds_the_name_taken_and_leaves():
-    # The harness starts the file server, program 3, first; this starts
-    # another and reads how it ended.
+    # The harness starts the disk server and the file server, program 4,
+    # first; this starts another file server and reads how it ended.
     program = report(
-        "li a0, SYS_SPAWN\n        li a1, 3\n        sys\n        mv s1, a0",
+        "li a0, SYS_SPAWN\n        li a1, 4\n        sys\n        mv s1, a0",
         "li a0, SYS_WAIT\n        mv a1, s1\n        sys\n        mv s2, a1",
         "mv a0, s2",
     )
-    assert said(run_files(program)) == [2, L["WAIT_EXITED"], L["E_EXIST"]]
+    assert said(run_files(program)) == [3, L["WAIT_EXITED"], L["E_EXIST"]]

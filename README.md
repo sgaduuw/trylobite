@@ -137,10 +137,10 @@ it, or else the one on the PATH is used.
 | `kernel/harts.s` | starting the other harts, waking an idle one |
 | `kernel/ipc.s` | messages for servers: `call`, `receive`, `reply`, `copyin`, `copyout` |
 | `include/kernel.s` | firmware and kernel together, without programs: included by a build such as `demo.s`, not run on its own |
-| `user/` | programs built into the kernel image: `init` (program 0 of the demo), `ping` (1) and `pong` (2); `sh` (program 0 of the shell build), `pingpong` (3) and `fsd`, the file server (4) |
+| `user/` | programs built into the kernel image: `init` (program 0 of the demo), `ping` (1) and `pong` (2); `sh` (program 0 of the shell build), `pingpong` (3), `fsd`, the file server (4), and `diskd`, the disk server (5) |
 | `bin/` | programs for the disk, each assembled on its own: `hello`, `fail` and `spin` |
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
-| `shell.s` | the same machine, starting the shell, with sh, ping, pong, pingpong and the file server |
+| `shell.s` | the same machine, starting the shell, with sh, ping, pong, pingpong, the file server and the disk server |
 | `docs/filesystem.md` | the on-disk format of the filesystem |
 | `tools/fs.py` | builds and reads filesystem images on the host |
 | `tests/` | the tests, and a harness that builds the kernel with test programs |
@@ -159,14 +159,15 @@ The first two regions are shared by every address space. A new process
 costs four pages: a root, a mid and a leaf table, and its own page,
 into which `spawn` copies the program image loaded at boot, or
 `spawnw` a program file read from the disk. Block windows take up to
-nine more, as a process uses them.
+nine more, as a process asks for them; a driver also has its device's
+registers mapped past them, at `V_DEVICE`.
 
 | Physical page | Contents |
 |---------------|----------|
 | 0 | firmware |
 | 1, 2 | kernel code; kernel data |
 | 3, 4, 5 | the boot address space; the kernel's shared leaf table |
-| 6 .. 5 + `NPROG` | program images 0 to `NPROG` − 1 (the demo has 3, the shell build 5) |
+| 6 .. 5 + `NPROG` | program images 0 to `NPROG` − 1 (the demo has 3, the shell build 6) |
 | 6 + `NPROG` .. `RAM_PAGES` | free pages, handed out by the allocator |
 
 ## System calls
@@ -187,22 +188,25 @@ nine more, as a process uses them.
 | 8 | `hart()` | the number of the hart running the caller, −4 to +4 |
 | 9 | `getc()` | the next code point of console input, waiting for one; negative once no more will come |
 | 10 | `wait(pid)` | how child `pid` ended, once it has: `a0` 0 exited, 1 faulted or 2 killed, `a1` its exit code, trap cause, or 0 when killed; `a0` −2 if `pid` is not the caller's child |
-| 11 | `bread(block, window)` | reads the block into block window `window`, 0 to 8: 0; −14 the disk failed, −2 no such block or window (or no disk), −3 no memory for the window |
-| 12 | `bwrite(block, window)` | writes the block window to the block: as `bread` |
 | 13 | `kill(pid)` | ends child `pid` before it runs again: 0; −2 if `pid` is not the caller's child |
 | 14 | `foreground(pid)` | gives the console to child `pid`, so that Ctrl-C kills it, or to nobody with `NO_FOREGROUND` (−1): 0; −2 if `pid` is not the caller's child |
 | 15 | `spawnw(window, for)` | starts the program file whose first block is in block window `window` (docs/filesystem.md), as the caller's child when `for` is `FOR_SELF` (−1), or as the child of process `for`, whose call the caller holds: as `spawn`, with −2 when there is no window or no program in it, or `for` is not waiting for the caller |
 | 23 | `call(pid, w1, w2, w3, w4)` | sends four words to process `pid` and waits for its reply: the reply's four words in `a0` to `a3`; `a0` −2 if there is no such process or it ends first, −3 if `pid` is the caller |
-| 24 | `receive()` | waits for a call: `a0` the caller, `a1` to `a4` its words; or `a0` `FROM_KERNEL` (−1), `a1` `NOTE_ENDED`, `a2` a process that ended |
+| 24 | `receive()` | waits for a call: `a0` the caller, `a1` to `a4` its words; or `a0` `FROM_KERNEL` (−1) and `a1` `NOTE_ENDED` (0), `a2` a process that ended, or `a1` `NOTE_IRQ` (1), `a2` a device source the caller drives that interrupted |
 | 25 | `reply(pid, w1, w2, w3, w4)` | ends the call of process `pid`, which this process received: 0; −2 if `pid` is not waiting for its reply |
 | 26 | `copyin(pid, from, to, n)` | copies `n` trytes from `from` in process `pid`, whose call this process holds, to its own `to`: 0; −2 as `reply`, −12 if either range is not all mapped, when nothing is copied |
 | 27 | `copyout(pid, from, to, n)` | copies `n` trytes from its own `from` to `to` in process `pid`: as `copyin` |
 | 28 | `register(name, version)` | gives the caller the server name at `name` (a string of 1 to 8 code points) with protocol version `version`: 0; −15 another process has it, −16 all 9 names are taken, −10 `version` below 1 or an empty name, −11 a name too long, −12 not in the caller's memory. Registering a name it has again changes the version |
 | 29 | `lookup(name, how)` | `a0` the process that registered `name`, `a1` its version; −5 nobody has it (`how` `LOOKUP_NOW`, 0), or with `LOOKUP_WAIT` (1) waits until somebody registers it; −10, −11 and −12 as `register` |
+| 30 | `window(k)` | makes block window `k`, 0 to 8, a zeroed page at `V_BLOCK + PAGE × k`, unless the caller has it already: 0; −10 no such window, −3 no memory |
+| 31 | `drive(source)` | makes the caller the driver of device source `source` (only `SRC_DISK`, 2), its registers mapped at `V_DEVICE + PAGE × (source − 1)` until it ends: 0; −19 it has a driver, −10 not a source the kernel hands out, −21 the caller runs a program file |
+| 32 | `arm(source)` | lets the source the caller drives interrupt once: 0; −21 it does not drive it |
+| 33 | `phys(address)` | the physical address of the caller's `address`, for a device to use: −12 nothing there, −21 the caller drives no device |
 
-Numbers 16 to 22 are free: files are not system calls but calls to the
-file server (below and docs/filesystem.md), which fail with their own
-negative numbers, −4 to −14: no filesystem, no such file, not a
+Numbers 11, 12 and 16 to 22 are free: blocks and files are not system
+calls but calls to the disk server and the file server (below and
+docs/filesystem.md), which fail with their own negative numbers, −2 and
+−4 to −14: no filesystem, no such file, not a
 directory, a bad descriptor and so on, each named in `include/layout.s`
 (`E_NOENT`, `E_BADF`, ...).
 
@@ -231,14 +235,19 @@ foreground process runs (all of it). Ctrl-C throws away what was typed
 before it, as a terminal does; with no foreground process it is an
 ordinary code point.
 
-A block is one page, and a process's own page holds its code, so the disk
-is reached through **block windows**: up to nine pages, window `k` at
-`V_BLOCK + PAGE × k` just above the process's own, each made on the
-first `bread` or `bwrite` through it and freed when the process ends.
-`bread` fills one from a block and `bwrite` copies one to a block,
-by DMA, sleeping until the disk interrupts; one command runs at a time and
-the rest wait their turn. Run with `detrytus run --disk FILE --disk-blocks
-N`; the file keeps what was written for the next run.
+A block is one page, and a process's own page holds its code, so blocks
+travel through **block windows**: up to nine pages, window `k` at
+`V_BLOCK + PAGE × k` just above the process's own, each made by
+`window` and freed when the process ends. The disk belongs to a
+process, the **disk server** (`user/diskd.s`), which registers as
+`disk`, protocol `DISK_PROTOCOL`: a call to it with `DK_READ` or
+`DK_WRITE`, a block and a buffer (a window's address) fills the buffer
+from the block or writes it to the block. The server has the disk move
+the block into or out of a window of its own, by DMA, and copies it to
+or from the caller with `copyout` or `copyin`; it takes other calls
+while the disk works, and starts them in turn. Run with `detrytus run
+--disk FILE --disk-blocks N`; the file keeps what was written for the
+next run.
 
 The disk can hold a filesystem, shaped like a Unix one: inodes, nested
 directories with `.` and `..`, and files reached by path through file
@@ -275,6 +284,17 @@ that has called `receive` is told of every process that ends, before
 any later call, so it can forget what it kept for one; a call to a
 process that ends fails. A server asleep in `receive` with nobody left
 to call it does not keep the machine from powering off.
+
+**Drivers.** The kernel keeps no device but the console. A process
+from the kernel image may `drive` a device source: the device's
+registers are mapped into it, and the kernel only passes its interrupts
+on. The driver `arm`s the source when it expects an interrupt, such as
+after starting a command; the interrupt masks it again and reaches the
+driver as a `NOTE_IRQ` notice from `receive`. While a source is armed
+the kernel waits for it, rather than call a client stuck whose server
+waits on the device. A device like the disk moves memory by physical
+address, which `phys` gives; it could write any page, which is why a
+program file read from the disk may not drive one.
 
 **Names.** A server makes itself known with `register(name, version)`
 once it is ready for calls, and a client finds it with `lookup(name)`,

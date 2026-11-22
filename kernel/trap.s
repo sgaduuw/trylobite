@@ -98,8 +98,8 @@ resume:
         csrw  stimecmp, t0
         lw    t0, PCB_PTBR(s0)
         csrw  ptbr, t0
-        lw    t0, PCB_RETRY(s0)        # its call was abandoned for a block
-        bnez  t0, retry                # that is now in the cache (cache.s)
+        lw    t0, PCB_RETRY(s0)        # its call runs again: a server woken
+        bnez  t0, retry                # in receive or lookup (ipc.s, names.s)
         lw    t0, PCB_PC(s0)
         csrw  stpc, t0
         li    t0, -1                   # PR = -1: tret returns to user mode

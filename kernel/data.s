@@ -17,9 +17,9 @@ leaving: .words NHART                  # 1: the platform asked the hart to go
 epochs: .words NPROC                   # tenants each slot has had (see resume)
 seen:   .words NHART * NPROC           # the epoch each hart last flushed, by slot
 
-disk_user: .word 0                     # the process whose command is in
-                                       # flight, or 0 for none
-disk_list: .word 0                     # that command's page: its list
+irq_armed: .word 0                     # sources armed by their drivers
+drivers: .words NSRC                   # each source's driver's record, 0 for
+                                       # none (devices.s)
 
 foreground: .word NO_FOREGROUND        # the process Ctrl-C kills (input.s)
 conin_head: .word 0                    # the buffer's oldest code point

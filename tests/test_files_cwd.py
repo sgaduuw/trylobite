@@ -165,7 +165,7 @@ buf:    .zero 50
     )
     on = disk(dirs=("bin", "a", "a/b"), bin__where=where)
     result = run(program, disk=on)
-    assert said(result) == [0, 2, 4, 4]
+    assert said(result) == [0, 3, 4, 4]
     assert result.console.count("/a/b") == 2
 
 
@@ -190,4 +190,4 @@ cd:     .string "d"
         call("FS_RMDIR", "d"),
         data=string("d", "d"),
     )
-    assert said(run(program, child, disk=disk(dirs=("d",)))) == [2, 0, 0]
+    assert said(run(program, child, disk=disk(dirs=("d",)))) == [3, 0, 0]

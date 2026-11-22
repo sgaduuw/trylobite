@@ -51,8 +51,7 @@
         .equ  CONIN_MAX, 81               # code points the kernel holds for getc
         .equ  V_USER, SUPER               # every process runs from here
         .equ  V_BLOCK, V_USER + PAGE      # its block windows, NWIN pages from here,
-                                          # each made when the disk is first used
-                                          # through it
+                                          # each made by SYS_WINDOW
         .equ  USER_GP, V_USER             # every process starts with gp here
         .equ  USER_SP, V_USER + 9843      # just above its page; the first push
                                           # lands at the page's top word
@@ -120,7 +119,11 @@
         .equ  SRC_DISK, 2                 # block device: a command has finished
 
 # The block device (detrytus platform.md, The block device): registers at
-# V_DISK + DISK_*. A block is one page.
+# DISK_* from the centre of its page, physical page P_DISK; its driver,
+# the disk server, reaches them at V_DEVICE + PAGE * (SRC_DISK - 1). A
+# block is one page.
+        .equ  P_DISK, -14                 # the block device's physical page
+        .equ  NSRC, 2                     # device sources, 1 to NSRC
         .equ  DISK_BLOCKS, -9             # how many blocks; 0 with no disk
         .equ  DISK_BLOCK, -6              # the first block to move
         .equ  DISK_COUNT, -3              # how many blocks
@@ -158,11 +161,7 @@
                                           # for one, or GETC_NONE when none will come
         .equ  SYS_WAIT,  10               # wait for child a1 to end: a0 = how it
                                           # ended, a1 = its exit code or trap cause
-        .equ  SYS_BREAD, 11               # read block a1 into block window a2, at
-                                          # V_BLOCK + PAGE * a2: 0 done, E_NOBLOCK
-                                          # (no such block or window), E_NOMEM, E_IO
-        .equ  SYS_BWRITE, 12              # write block window a2 to block a1: the
-                                          # same results
+        # 11 and 12 were bread and bwrite: the disk is the disk server's now
         .equ  SYS_KILL,  13               # end child a1: 0 done (it ends before
                                           # it runs again), E_NOCHILD
         .equ  SYS_FOREGROUND, 14          # give the console to child a1, or to
@@ -196,6 +195,8 @@
                                           # process a1: as copyin
         .equ  FROM_KERNEL, -1             # receive: no process sent this
         .equ  NOTE_ENDED, 0               # ... a process ended, its number in a2
+        .equ  NOTE_IRQ, 1                 # ... device source a2, which the
+                                          # receiver drives, interrupted
 
 # Server names (README, Names). A server registers a name and the
 # version of the protocol it speaks once it is ready to take calls; a
@@ -224,6 +225,36 @@
         .equ  SRV_VERSION,   9            # its version, 0 for an unused record,
         .equ  SRV_PID,      12            # and the server
         .assert SRV_NAME + SRV_NAME_MAX + 1 <= SRV_VERSION - 1, "a server name runs into SRV_VERSION's trytes"
+
+        .equ  SYS_WINDOW, 30              # make block window a1, a zeroed page at
+                                          # V_BLOCK + PAGE * a1, if the caller has
+                                          # none there: 0, E_INVAL (no such
+                                          # window), E_NOMEM
+
+# Drivers (README, Drivers). A driver is a process that owns a device:
+# the device's registers are mapped into it, and its interrupts come to
+# it as NOTE_IRQ notices from receive. Only a program from the kernel
+# image may drive one: a device that moves memory by itself can write
+# any page, kernel or not.
+        .equ  SYS_DRIVE, 31               # drive(source): the caller owns device
+                                          # source a1 from now on, its registers at
+                                          # V_DEVICE + PAGE * (a1 - 1), until it
+                                          # ends: 0; E_BUSY (another process drives
+                                          # it), E_INVAL (not a source the kernel
+                                          # hands out: only SRC_DISK), E_PERM (a
+                                          # program file)
+        .equ  SYS_ARM, 32                 # arm(source): let source a1 interrupt
+                                          # once; that interrupt masks it again and
+                                          # becomes a NOTE_IRQ notice. 0; E_PERM (the
+                                          # caller does not drive it). Arm only when
+                                          # an interrupt is due, such as after
+                                          # starting a command: while a source is
+                                          # armed the kernel waits for it rather
+                                          # than call the processes stuck
+        .equ  SYS_PHYS, 33                # phys(address): a0 = the physical address
+                                          # of the caller's address a1, for a device
+                                          # to use; E_FAULT (not in its page or a
+                                          # block window), E_PERM (it drives nothing)
 
 # Files (docs/filesystem.md) come from the file server, which registers
 # as "fs" with protocol FS_PROTOCOL; a program looks it up once, and
@@ -275,6 +306,17 @@
                                           # E_NAMETOOLONG, E_FAULT
         .equ  PATH_MAX, 243               # trytes a path may have, its 0 not counted
 
+# Blocks come from the disk server, which registers as "disk" with
+# protocol DISK_PROTOCOL. A disk call is a call to it with the DK_
+# operation in a2, the block in a3, and in a4 the centre of a page-sized
+# buffer in the caller's memory: a block window's address, V_BLOCK +
+# PAGE * k. The reply's first word is 0, or E_NOBLOCK (no such block, or
+# no disk), E_IO (the disk refused it), E_FAULT (the buffer is not all
+# in the caller's memory) or E_INVAL (no such operation).
+        .equ  DISK_PROTOCOL, 1
+        .equ  DK_READ,    0               # read(block, buffer)
+        .equ  DK_WRITE,   1               # write(block, buffer)
+
         .equ  E_NOCALL,  -1               # no system call with that number
         .equ  E_FULL,    -1               # send: the receiver's mailbox is full
         .equ  E_NOPROC,  -2               # send: no such process
@@ -286,7 +328,7 @@
         .equ  E_NOMEM,   -3               # spawn: not enough free pages
         .equ  GETC_NONE, -1               # getc: no more input; any negative means none
         .equ  E_NOCHILD, -2               # wait: not a child of the caller
-        .equ  E_NOBLOCK, -2               # bread, bwrite: no such block, or no disk
+        .equ  E_NOBLOCK, -2               # disk calls: no such block, or no disk
         .equ  E_NOFS,    -4               # files: no disk, no filesystem on it, or
                                           # no file server
         .equ  E_NOENT,   -5               # no such file or directory
@@ -301,15 +343,17 @@
         .equ  E_FAULT,  -12               # a path or buffer outside the caller;
                                           # copyin, copyout: outside either process
         .equ  E_NOEXEC, -13               # spawnf: not a program file
-        .equ  E_IO,     -14               # the disk refused (bread, bwrite, files)
+        .equ  E_IO,     -14               # the disk refused (disk calls, files)
         .equ  E_EXIST,  -15               # mkdir, register: the name is taken
         .equ  E_NOSPC,  -16               # no free block or inode, or a full directory
         .equ  E_NOTEMPTY, -17             # rmdir: it holds more than . and ..
         .equ  E_FBIG,   -18               # write: past a file's last block
         .equ  E_BUSY,   -19               # unlink, rmdir: a process has it open,
-                                          # or it is one's current directory
+                                          # or it is one's current directory;
+                                          # drive: the source has a driver
         .equ  E_NOROOM, -20               # getcwd: the buffer is too small (Unix's
                                           # ERANGE; E_RANGE is puts')
+        .equ  E_PERM,   -21               # drive, arm, phys: not allowed
 
         .equ  O_RDONLY, 0                 # open: the access mode is the flags mod
         .equ  O_WRONLY, 1                 # 3. Add any of O_CREAT (make a file not
@@ -364,14 +408,20 @@
         .equ  PCB_PEER,   114             # whom it calls, while ST_CALL or ST_REPLY
         .equ  PCB_KILLED, 117             # 1 once killed: it ends the next time
                                           # the kernel would run it
-        .equ  PCB_DBLOCK, 120             # its disk command, while ST_DISK: the block,
-        .equ  PCB_DPAGE,  123             # the physical page it moves to or from,
-        .equ  PCB_DCMD,   126             # and BLOCK_READ or BLOCK_WRITE
+        .equ  PCB_FILE,   120             # 1 if it runs a program file: it may
+                                          # not drive a device
+        .equ  PCB_IRQS,   122             # NSRC trytes, 122 and 123 (in the word at
+                                          # 123): 1 at PCB_IRQS + s - 1 when source
+                                          # s, which it drives, has interrupted
+                                          # since receive last told it
         .equ  PCB_RETRY,  129             # 1: run its system call again when it
                                           # next runs (ipc.s wakes a server so)
         .equ  PCB_WINS,   132             # its block windows' pages, a word each,
         .equ  NWIN,         9             # 0 for none: window k is at V_BLOCK + PAGE * k
         .equ  PCB_BLOCKPG, PCB_WINS       # window 0
+        .equ  V_DEVICE, V_BLOCK + NWIN * PAGE   # a driver's device registers,
+                                          # past its windows: source s's at
+                                          # V_DEVICE + PAGE * (s - 1)
         .equ  PCB_SERVES, 159             # 1 once it has called receive: it is told
                                           # of every process that ends
         .equ  PCB_NOTES,  161             # NPROC trytes, 161 to 166 (the words at
@@ -380,6 +430,7 @@
         .equ  PCB_TURN,   168             # receive: the caller it took last
         .equ  PCB_SIZE,   171
         .assert PCB_NOTES + NPROC <= PCB_TURN - 1, "PCB_NOTES runs into PCB_TURN's trytes"
+        .assert PCB_IRQS + NSRC <= 125, "PCB_IRQS runs into PCB_RETRY's word"
         .equ  PAGES_PER_PROCESS, 4
 
         .equ  ST_EXITED, 0                # also: a free slot
@@ -391,8 +442,7 @@
         .equ  ST_ZOMBIE, -3               # ended; holds how (saved a0, a1) until
                                           # its parent waits for it
         .equ  ST_GETC,   -4               # blocked in SYS_GETC, until input comes
-        .equ  ST_DISK,   -5               # waiting for its disk command (PCB_D*):
-                                          # bread or bwrite
+        # -5 was ST_DISK, waiting for the kernel's disk driver
         .equ  ST_CALL,   -7               # its call waits for PCB_PEER to receive it
         .equ  ST_REPLY,  -8               # PCB_PEER has received its call: waits
                                           # for the reply

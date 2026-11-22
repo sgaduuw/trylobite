@@ -185,27 +185,31 @@ parent's entry for it gives its name.
 ## The server's blocks
 
 The server keeps blocks in its `NWIN` (9) block windows, as a cache:
-a block it needs and has not got is read with `bread` into the window
-used least recently, while the server, and so every call waiting for
-it, sleeps. A call touches at most four blocks at once (block 0, the
+a block it needs and has not got is read into the window used least
+recently, by a `DK_READ` call to the disk server (`user/diskd.s`),
+while the server, and so every call waiting for it, sleeps. A call touches at most four blocks at once (block 0, the
 inode table, and an indirect and a data block, or a directory's and a
-new directory's), so none it is using goes. Each window is a page the kernel makes the first
-time the server reads into it; with no free page for one, the call
-fails with `E_NOMEM`.
+new directory's), so none it is using goes. Each window is a page the kernel makes (`window`) the
+first time the server reads into it; with no free page for one, the
+call fails with `E_NOMEM`. The server finds the disk server by its name,
+`disk`, when it starts, waiting for it; with none, or one of another
+protocol, every call finds no filesystem.
 
 A call that changes the filesystem first gathers the blocks it needs
 and checks everything that can fail, then changes them in its windows,
-marking them dirty, and writes each dirty one back with `bwrite` before
+marking them dirty, and writes each dirty one back with `DK_WRITE` before
 it replies. So when a call returns its changes are on the disk, the
 machine may power off at any time between calls, and a call that fails
 has changed nothing. A dirty window is never the one reused.
 
 The server takes for granted that nothing else writes the disk while it
-runs: a `bwrite` by another process is not seen in its windows.
+runs: a block another process writes through the disk server is not
+seen in its windows.
 
 ## The shell
 
-`sh` (`user/sh.s`) starts the file server first, then has eight file
+`sh` (`user/sh.s`) starts the disk server and the file server first,
+then has eight file
 built-ins. `ls [DIR]` lists a directory,
 the current one when none is given, leaving out names that start with a dot: a
 file's size and name, a directory's name and a slash. `cat PATH` prints

@@ -109,6 +109,16 @@ pipe.
   changes the disk gathers and checks everything first, then changes
   its windows and marks them dirty; `fs_reply` writes them back before
   replying, so a window is never left dirty between calls.
+- **Devices are their drivers', not the kernel's**, except the console.
+  The disk server, `user/diskd.s` (labels `dk_`), drives the block
+  device: `SYS_DRIVE` maps its registers at `V_DEVICE`, `SYS_ARM` lets
+  it interrupt once, and the interrupt reaches the server as a
+  `NOTE_IRQ` notice (`kernel/devices.s`). Arm only when an interrupt is
+  due: an armed source keeps `pick` waiting instead of reporting a
+  deadlock. Blocks reach other processes as disk calls (`DK_READ`,
+  `DK_WRITE`, tests write `CALL_DISK` and pass `disk_server=True`),
+  copied between windows; only a program in the kernel image may drive
+  a device, since DMA can write any page.
 - **A server asleep in `receive` runs it again when woken**
   (`PCB_RETRY`, `kernel/ipc.s`), so `receive` must change nothing
   before it finds work. Arguments are read from the saved registers,

@@ -34,15 +34,15 @@ pick:
         bnez  t4, 1b
 
         # Nobody is ready. A process running on another hart can still
-        # send or spawn, and a device can still wake a reader: wait for
-        # work.
+        # send or spawn, and a device can still wake a reader or a
+        # driver: wait for work.
+        lw    t0, irq_armed
+        bnez  t0, idle
         mv    s1, t2
 6:      lw    t0, PCB_STATE(s1)
         li    t1, ST_RUNNING
         beq   t0, t1, idle
         li    t1, ST_GETC
-        beq   t0, t1, idle
-        li    t1, ST_DISK
         beq   t0, t1, idle
         addi  s1, s1, PCB_SIZE
         blt   s1, t3, 6b

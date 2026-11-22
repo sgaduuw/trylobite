@@ -762,3 +762,40 @@ a name with a protocol version, and clients look the name up.
   name reads as one in source (`.string "fs"`). A second process
   registering a taken name gets `E_EXIST`; a second file server leaves
   with it. `FS_PID` is gone.
+
+### 2026-11-22 · The disk driver is a process
+
+The kernel's disk code (`bread`, `bwrite`, a queue of processes in
+`ST_DISK`) moved into the disk server, `user/diskd.s`, which registers
+as `disk`. The kernel now offers drivers four generic calls instead:
+`window` (block windows used to appear on the first `bread`), `drive`
+(own a device source and have its register page mapped), `arm` (let it
+interrupt once, as a `NOTE_IRQ` notice from `receive`) and `phys` (a
+physical address, for DMA). The console stays in the kernel for now,
+since `getc` and Ctrl-C are built on it; `drive` refuses it.
+
+- **No detrytus change.** The block device takes physical page numbers
+  and the interrupt controller masks per source, which is all a
+  user-space driver needs. The price is trust: DMA can write any page,
+  so a driver can too. Only programs from the kernel image may drive a
+  device (`PCB_FILE`); a program file read from the disk may not. An
+  IOMMU-like check in detrytus would remove that trust, if it is ever
+  wanted.
+- **Copy, not zero-copy.** The disk moves blocks into the server's own
+  window, and the server copies them to or from the client with
+  `copyout`/`copyin`. Letting the disk write straight into a client's
+  window would save the copy, but a client killed mid-command would
+  have its page freed while the disk still writes it. `copy_mem` moves
+  nine words at a time when both sides are word-aligned, so a block
+  costs about 16,000 steps; a shell session reading a few files takes
+  roughly 40% more steps than with the kernel driver.
+- **Arm, don't enable.** A source is masked again by each interrupt, and
+  only armed while the driver expects one. That keeps the deadlock check
+  honest: while a source is armed, `pick` waits rather than calling a
+  client stuck whose server waits on the disk, and once it is not, a
+  driver asleep in `receive` is just a server with nobody to serve.
+- **One block per command.** The server could gather consecutive
+  blocks into one command (the device allows a list); the file server
+  asks for one at a time, so it would not help yet.
+- Process slots: the shell build now starts two servers, leaving four
+  slots for the shell and its programs.
