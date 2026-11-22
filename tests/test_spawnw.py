@@ -46,6 +46,7 @@ def start_from(block: int) -> str:
     return f"""
         li    a0, SYS_BREAD
         li    a1, {block}
+        li    a2, 0
         sys
         li    a0, SYS_SPAWNW
         sys

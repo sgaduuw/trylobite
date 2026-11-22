@@ -621,3 +621,37 @@ what this change builds.
 - **The shell lost `write` and `rm`** for now: they wrote the old format
   through the block window. They come back over `write` and `unlink`
   system calls in the next step.
+
+### 2026-11-22 · Messages for a file server: call, receive, reply
+
+The filesystem moves out of the kernel into a server process, so the
+kernel gains what a server needs, before the server itself:
+
+- **Call and reply, synchronous.** `call` sends four words and sleeps
+  until the reply's four words come back; `receive` says who called.
+  This is the QNX and L4 shape: no queues to size, a caller can only
+  have one call outstanding, and the server sees one call at a time.
+  The one-word `send`/`recv` mailbox stays for what already uses it.
+- **Copying, not bigger messages.** A path or a block of file data is
+  far bigger than four words, so the server copies to and from the
+  caller's memory with `copyin`/`copyout`, only while it holds that
+  caller's call. The call names addresses; the kernel checks each range
+  lies in the caller's page or a block window it has, and copies all or
+  nothing. A caller trusts a server it calls with its whole memory for
+  the length of the call, rather than granting one buffer: simpler, and
+  the only server yet is the filesystem.
+- **Notices of processes that end.** A process that has called
+  `receive` is told of every process that ends, from `FROM_KERNEL`,
+  before any later call, so a server drops a dead client's descriptors
+  before a new process with the same number can reach it. A process
+  that ends fails the calls made to it, so a client never waits for a
+  dead server.
+- **Waking a server reruns its receive** (`PCB_RETRY`, from the
+  filesystem's cache), so the call and the notice paths share the code
+  that finds work.
+- **Nine block windows.** A server holds block 0, the inode table and a
+  directory at once, and a few more as its cache; window `k` is a page
+  at `V_BLOCK + PAGE × k`, made when first used. `bread` and `bwrite`
+  take the window in `a2`.
+- **A server asleep in `receive` does not count as deadlock**: with
+  nothing else left, the machine powers off as when all have exited.

@@ -31,34 +31,46 @@ device_irqs:
 # as ST_DISK until that one finishes; disk_irq then starts the next, in
 # table order after the one that finished.
 
-# bread(block), bwrite(block): move one block between the disk and the
-# caller's block window, a page of its own at V_BLOCK made on first use.
-# a1 = the block, a2 = BLOCK_READ or BLOCK_WRITE.
+# bread(block, window), bwrite(block, window): move one block between the
+# disk and one of the caller's block windows, window k a page of its own
+# at V_BLOCK + PAGE * k made on first use. a1 = the block, a2 = the
+# window, a3 = BLOCK_READ or BLOCK_WRITE.
 sys_block:
         bltz  a1, 8f
         li    t0, V_DISK
         lw    t0, DISK_BLOCKS(t0)
         bge   a1, t0, 8f               # past the end, or no disk at all
-        lw    t0, PCB_BLOCKPG(s0)
+        bltz  a2, 8f
+        li    t0, NWIN
+        bge   a2, t0, 8f
+        li    t0, 3
+        mul   s1, a2, t0
+        add   s1, s1, s0               # s1: its PCB_WINS entry, less PCB_WINS
+        lw    t0, PCB_WINS(s1)
         bnez  t0, 1f
         lw    t0, free_count
         beqz  t0, 9f
-        sw    a2, PCB_A2(s0)           # alloc_page clobbers every t
+        mv    s2, a3                   # alloc_page clobbers every t
         call  alloc_page
-        sw    a0, PCB_BLOCKPG(s0)
-        li    t1, PAGE                 # leaf entry +1: the window
+        sw    a0, PCB_WINS(s1)
+        li    t1, PAGE                 # leaf entry k + 1: the window
         mul   t2, a0, t1
         li    t1, USER_FLAGS
         add   t2, t2, t1
         lw    a0, PCB_LEAFPG(s0)
         call  kva
+        lw    t0, PCB_A2(s0)
+        li    t1, 3
+        mul   t0, t0, t1
+        add   a0, a0, t0
         sw    t2, 3(a0)
         lw    a1, PCB_A1(s0)
-        lw    a2, PCB_A2(s0)
+        mv    a3, s2
 1:      sw    a1, PCB_DBLOCK(s0)
-        sw    a2, PCB_DCMD(s0)
-        lw    t0, PCB_BLOCKPG(s0)
+        sw    a3, PCB_DCMD(s0)
+        lw    t0, PCB_WINS(s1)
         sw    t0, PCB_DPAGE(s0)
+        mv    a2, a3
         li    t0, BLOCK_WRITE          # the cache's copy of a block written
         bne   a2, t0, 2f               # here is out of date: forget it
         mv    a0, a1

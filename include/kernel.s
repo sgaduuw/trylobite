@@ -28,6 +28,7 @@
         .include "../kernel/input.s"
         .include "../kernel/cache.s"
         .include "../kernel/fs.s"
+        .include "../kernel/ipc.s"
 
         .include "../kernel/data.s"
         .include "../kernel/pagetables.s"

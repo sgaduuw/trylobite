@@ -181,16 +181,16 @@ block cache takes up to 8 more pages, as it needs them.
 | 3 | `yield()` | 0 |
 | 4 | `exit(code)` | does not return |
 | 5 | `getpid()` | this process's number |
-| 6 | `puts(address)` | 0; −2 if the string is outside the process's page and block window |
+| 6 | `puts(address)` | 0; −2 if the string is outside the process's page and block windows |
 | 7 | `spawn(program)` | the new process's number; −1 no free slot, −2 no such program, −3 not enough memory |
 | 8 | `hart()` | the number of the hart running the caller, −4 to +4 |
 | 9 | `getc()` | the next code point of console input, waiting for one; negative once no more will come |
 | 10 | `wait(pid)` | how child `pid` ended, once it has: `a0` 0 exited, 1 faulted or 2 killed, `a1` its exit code, trap cause, or 0 when killed; `a0` −2 if `pid` is not the caller's child |
-| 11 | `bread(block)` | reads the block into the block window: 0; −14 the disk failed, −2 no such block (or no disk), −3 no memory for the window |
-| 12 | `bwrite(block)` | writes the block window to the block: as `bread` |
+| 11 | `bread(block, window)` | reads the block into block window `window`, 0 to 8: 0; −14 the disk failed, −2 no such block or window (or no disk), −3 no memory for the window |
+| 12 | `bwrite(block, window)` | writes the block window to the block: as `bread` |
 | 13 | `kill(pid)` | ends child `pid` before it runs again: 0; −2 if `pid` is not the caller's child |
 | 14 | `foreground(pid)` | gives the console to child `pid`, so that Ctrl-C kills it, or to nobody with `NO_FOREGROUND` (−1): 0; −2 if `pid` is not the caller's child |
-| 15 | `spawnw()` | starts the program file whose first block is in the block window (docs/filesystem.md): as `spawn`, with −2 when there is no window or no program in it |
+| 15 | `spawnw()` | starts the program file whose first block is in block window 0 (docs/filesystem.md): as `spawn`, with −2 when there is no window or no program in it |
 | 16 | `open(path, flags)` | the lowest free file descriptor, for reading (`O_RDONLY`, the only flag yet) |
 | 17 | `close(fd)` | 0 |
 | 18 | `read(fd, buffer, n)` | how many trytes it copied, at most `n` and never past the end of the file or of a block; 0 at the end |
@@ -198,6 +198,11 @@ block cache takes up to 8 more pages, as it needs them.
 | 20 | `readdir(fd, buffer)` | the inode of the directory's next entry, its name in the buffer; 0 at the end |
 | 21 | `stat(path, buffer)` | 0, with the inode, type, links and size in four words at the buffer |
 | 22 | `spawnf(path)` | starts the program file at the path: as `spawn` |
+| 23 | `call(pid, w1, w2, w3, w4)` | sends four words to process `pid` and waits for its reply: the reply's four words in `a0` to `a3`; `a0` −2 if there is no such process or it ends first, −3 if `pid` is the caller |
+| 24 | `receive()` | waits for a call: `a0` the caller, `a1` to `a4` its words; or `a0` `FROM_KERNEL` (−1), `a1` `NOTE_ENDED`, `a2` a process that ended |
+| 25 | `reply(pid, w1, w2, w3, w4)` | ends the call of process `pid`, which this process received: 0; −2 if `pid` is not waiting for its reply |
+| 26 | `copyin(pid, from, to, n)` | copies `n` trytes from `from` in process `pid`, whose call this process holds, to its own `to`: 0; −2 as `reply`, −12 if either range is not all mapped, when nothing is copied |
+| 27 | `copyout(pid, from, to, n)` | copies `n` trytes from its own `from` to `to` in process `pid`: as `copyin` |
 
 The file calls (16 to 22) fail with their own negative numbers, −4 to
 −14: no filesystem, no such file, not a directory, a bad descriptor and
@@ -229,9 +234,10 @@ before it, as a terminal does; with no foreground process it is an
 ordinary code point.
 
 A block is one page, and a process's own page holds its code, so the disk
-is reached through a **block window**: a second page, at `V_BLOCK` just
-above the process's own, made on its first `bread` or `bwrite` and freed
-when it ends. `bread` fills it from a block and `bwrite` copies it to one,
+is reached through **block windows**: up to nine pages, window `k` at
+`V_BLOCK + PAGE × k` just above the process's own, each made on the
+first `bread` or `bwrite` through it and freed when the process ends.
+`bread` fills one from a block and `bwrite` copies one to a block,
 by DMA, sleeping until the disk interrupts; one command runs at a time and
 the rest wait their turn. Run with `detrytus run --disk FILE --disk-blocks
 N`; the file keeps what was written for the next run.
@@ -255,6 +261,17 @@ tools/fs.py put disk.img README.md docs
 printf 'ls\nls bin\ncat docs/README.md\n' > session.txt
 detrytus run shell.s --ram-pages 40 --input session.txt --disk disk.img
 ```
+
+**Messages for servers.** A server is a process that serves others'
+calls, as the filesystem will: `call` sends it four words and sleeps
+until it replies with four of its own. The server takes calls one at a
+time with `receive`, which says who called; while it holds a call, it
+may copy to and from the caller's memory with `copyin` and `copyout`,
+which is how a path or a buffer named in the call travels. A process
+that has called `receive` is told of every process that ends, before
+any later call, so it can forget what it kept for one; a call to a
+process that ends fails. A server asleep in `receive` with nobody left
+to call it does not keep the machine from powering off.
 
 Process numbers are handed out round-robin, so a number is not reused
 until the table of 6 wraps around.
