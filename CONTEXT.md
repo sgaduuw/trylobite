@@ -731,3 +731,34 @@ flags as #27, and the shell's `write`, `rm`, `mkdir` and `rmdir`.
   server).
 - **An empty path is `E_NOENT`**, as in POSIX; it used to name the root.
   The shell's `ls` with no argument lists `.`.
+
+### 2026-11-22 · Servers are found by name, in the kernel
+
+The file server worked only because init started it first, as process
+1. Before a second server (a disk or console driver), servers register
+a name with a protocol version, and clients look the name up.
+
+- **Kernel calls, not a naming server.** `register(name, version)` and
+  `lookup(name, how)` are system calls over a table of `NSRV` (9)
+  names (`kernel/names.s`). A naming server would itself need a fixed
+  process number, the problem this removes; it would take one of the
+  table's 6 slots; and every lookup would be a call and a reply. QNX
+  keeps names in its process manager for much the same reasons; L4
+  puts them in a server whose number is handed out at boot. If names
+  grow policy (who may claim which), a server can take them over.
+- **A name goes with its server.** `bury` drops the names of a process
+  that ends, where the kernel already tells servers of it, so a name
+  that is found is a live process: no notice to act on, no stale entry.
+- **A version, no status.** A server registers once it is ready, so
+  being there means ready; a client compares the version with the one
+  it speaks (`FS_PROTOCOL`) and treats another as no server. A health
+  field would only be work to keep current.
+- **`LOOKUP_WAIT` sleeps until the name comes**, woken by every
+  `register` to run the call again (`PCB_RETRY`), as `receive` is. The
+  shell spawns the file server and waits for its name, so it no longer
+  depends on the order processes run in. A lookup nobody will answer
+  counts toward deadlock.
+- **Names are strings of up to 8 code points**, compared whole, so a
+  name reads as one in source (`.string "fs"`). A second process
+  registering a taken name gets `E_EXIST`; a second file server leaves
+  with it. `FS_PID` is gone.

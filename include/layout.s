@@ -197,17 +197,46 @@
         .equ  FROM_KERNEL, -1             # receive: no process sent this
         .equ  NOTE_ENDED, 0               # ... a process ended, its number in a2
 
-# Files (docs/filesystem.md) come from the file server, process FS_PID,
-# which init starts first. A program calls it through the routines of
-# user/files.s, which take their arguments in a1..a3 and return a0, as
-# system calls do; each is a call with the FS_ operation in a2 and the
+# Server names (README, Names). A server registers a name and the
+# version of the protocol it speaks once it is ready to take calls; a
+# client looks the name up to find its process number, and checks the
+# version before it calls. The kernel drops a server's names when it
+# ends. A name is a 0-terminated string of 1 to SRV_NAME_MAX code points.
+        .equ  SYS_REGISTER, 28            # register(name, version): 0; E_EXIST
+                                          # (another process has the name),
+                                          # E_NOSPC (NSRV names are taken),
+                                          # E_INVAL (version below 1, or an empty
+                                          # name), E_NAMETOOLONG, E_FAULT. Again
+                                          # with a name it has, a process changes
+                                          # its version
+        .equ  SYS_LOOKUP, 29              # lookup(name, how): a0 = the server's
+                                          # process number, a1 = its version; or
+                                          # E_NOENT (with LOOKUP_NOW, nobody has
+                                          # the name), E_INVAL, E_NAMETOOLONG,
+                                          # E_FAULT. With LOOKUP_WAIT it sleeps
+                                          # until a server registers the name
+        .equ  LOOKUP_NOW, 0
+        .equ  LOOKUP_WAIT, 1
+        .equ  SRV_NAME_MAX, 8             # code points in a name; one is left for 0
+        .equ  NSRV, 9                     # names the kernel keeps, a record each:
+        .equ  SRV,          15            # a record of SRV trytes,
+        .equ  SRV_NAME,     -1            # the name, zero-padded, SRV_NAME_MAX + 1
+        .equ  SRV_VERSION,   9            # its version, 0 for an unused record,
+        .equ  SRV_PID,      12            # and the server
+        .assert SRV_NAME + SRV_NAME_MAX + 1 <= SRV_VERSION - 1, "a server name runs into SRV_VERSION's trytes"
+
+# Files (docs/filesystem.md) come from the file server, which registers
+# as "fs" with protocol FS_PROTOCOL; a program looks it up once, and
+# treats a missing server, or another version, as no filesystem. A file
+# call is a call to it with the FS_ operation in a2 and the
 # arguments in a3..a5, and the reply's first word is the result. A path
 # is a 0-terminated string in the caller's memory, from the root with or
 # without a leading /. Each fails with E_NOFS (no disk, no filesystem on
 # it, or no file server), E_IO (the disk refused a block, or holds
 # nonsense), and those taking a path or buffer with E_FAULT (it is not all
 # in the caller's page or a block window it has).
-        .equ  FS_PID, 1
+        .equ  FS_PROTOCOL, 1              # the calls below, as they are now: a
+                                          # change a client would misread moves it on
         .equ  FS_OPEN,    0               # open(path, flags): the lowest free
                                           # descriptor, E_NOENT, E_NOTDIR,
                                           # E_NAMETOOLONG, E_MFILE, E_INVAL,
@@ -273,7 +302,7 @@
                                           # copyin, copyout: outside either process
         .equ  E_NOEXEC, -13               # spawnf: not a program file
         .equ  E_IO,     -14               # the disk refused (bread, bwrite, files)
-        .equ  E_EXIST,  -15               # mkdir: the name is taken
+        .equ  E_EXIST,  -15               # mkdir, register: the name is taken
         .equ  E_NOSPC,  -16               # no free block or inode, or a full directory
         .equ  E_NOTEMPTY, -17             # rmdir: it holds more than . and ..
         .equ  E_FBIG,   -18               # write: past a file's last block
@@ -368,6 +397,7 @@
         .equ  ST_REPLY,  -8               # PCB_PEER has received its call: waits
                                           # for the reply
         .equ  ST_RECEIVE, -9              # blocked in SYS_RECEIVE
+        .equ  ST_LOOKUP, -10              # blocked in SYS_LOOKUP with LOOKUP_WAIT
         .equ  NO_FOREGROUND, -1           # SYS_FOREGROUND: the console is nobody's
         .equ  NO_PARENT, -1               # PCB_PARENT of init and of orphans:
                                           # process numbers are never negative

@@ -14,8 +14,7 @@ L = fs.L
 def getcwd(n: int = 50) -> str:
     """getcwd into buf, then buf printed and a space."""
     return f"""
-        li    a0, SYS_CALL
-        li    a1, FS_PID
+        CALL_FS
         li    a2, FS_GETCWD
         la    a3, buf
         li    a4, {n}
@@ -69,8 +68,7 @@ def test_what_chdir_and_getcwd_refuse():
         call("FS_CHDIR", "d"),
         getcwd(-1),
         """
-        li    a0, SYS_CALL
-        li    a1, FS_PID
+        CALL_FS
         li    a2, FS_GETCWD
         li    a3, V_USER + 9840         # runs past the page
         li    a4, 10
@@ -134,8 +132,7 @@ def test_a_program_starts_in_its_parents_directory():
     # where prints its directory, moves to /, and exits with how long
     # the first was; its parent's own directory does not move.
     where = disk_program("""
-        li    a0, SYS_CALL
-        li    a1, FS_PID
+        CALL_FS
         li    a2, FS_GETCWD
         la    a3, buf
         li    a4, 50
@@ -144,8 +141,7 @@ def test_a_program_starts_in_its_parents_directory():
         li    a0, SYS_PUTS
         la    a1, buf
         sys
-        li    a0, SYS_CALL
-        li    a1, FS_PID
+        CALL_FS
         li    a2, FS_CHDIR
         la    a3, root
         sys
@@ -158,8 +154,7 @@ buf:    .zero 50
     program = report(
         call("FS_CHDIR", "deep"),
         """
-        li    a0, SYS_CALL
-        li    a1, FS_PID
+        CALL_FS
         li    a2, FS_SPAWN
         la    a3, where
         sys
@@ -176,8 +171,7 @@ buf:    .zero 50
 
 def test_a_process_that_ends_leaves_its_directory_free():
     child = """
-        li    a0, SYS_CALL
-        li    a1, FS_PID
+        CALL_FS
         li    a2, FS_CHDIR
         la    a3, cd
         sys

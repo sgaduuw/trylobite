@@ -30,6 +30,8 @@ procs:  .words NPROC * PCB_SIZE / 3     # the process table
         .assert procs - kgp <= 363, "the process table starts out of c.lagp's reach of gp: move kgp"
 
 conin:  .words CONIN_MAX               # console input, a ring (input.s)
+names:  .words NSRV * SRV / 3          # server names (names.s)
+srv_key: .zero SRV_NAME_MAX + 1        # the name a call gave, zero-padded
 
 
 numbuf: .zero 16

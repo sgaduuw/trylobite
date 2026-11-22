@@ -53,6 +53,10 @@ syscall_again:                         # resume runs a call again (ipc.s)
         beq   a0, t0, sys_copyin
         li    t0, SYS_COPYOUT
         beq   a0, t0, sys_copyout
+        li    t0, SYS_REGISTER
+        beq   a0, t0, sys_register
+        li    t0, SYS_LOOKUP
+        beq   a0, t0, sys_lookup
         li    a0, E_NOCALL
 
 sys_return:                            # a0: the result
