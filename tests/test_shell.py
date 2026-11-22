@@ -19,15 +19,16 @@ def session(shell, typed: str, disk=None):
 
 
 def test_a_session_runs_programs_and_reports_how_they_ended(shell):
+    # Process 1 is the file server, which the shell starts first.
     result = session(shell, "hello\nfail\nnope\nexit\n")
     transcript, _ = result.console.rsplit(" timer interrupts", 1)
     assert transcript.rsplit(" ", 1)[0] == (
         "trylobite: booting\n"
         "$ hello\n"
         "hello from a balanced-ternary machine\n"
-        "trylobite: process 1 exited with code 0\n"
+        "trylobite: process 2 exited with code 0\n"
         "$ fail\n"
-        "trylobite: process 2 exited with code 3\n"
+        "trylobite: process 3 exited with code 3\n"
         "sh: exit 3\n"
         "$ nope\n"
         "sh: no such program: nope\n"

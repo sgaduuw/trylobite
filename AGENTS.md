@@ -95,14 +95,16 @@ pipe.
   `include/layout.s` and loading where it runs, at `V_USER`
   (docs/filesystem.md, Program files); `include/layout.s` must
   therefore assemble without `NPROG` or `RAM_PAGES`.
-- **A file call may run more than once.** The filesystem's calls
-  (`kernel/fs.s`) read blocks through `bget`, which on a miss starts
-  the read and abandons the call; the caller runs it again from the
-  start once the block is in (`kernel/cache.s`). So a file call changes
-  nothing, in memory or in its record, before its last `bget`, and fails
-  by jumping to `sys_return` with the reason from wherever it is.
-  Arguments are read from the saved registers, `a3` included
-  (`PCB_A3`), each time it runs.
+- **Files are the file server's, not the kernel's.** `user/fsd.s` is
+  a program; a file call is a `SYS_CALL` to `FS_PID`, and init must
+  start the server first so it gets that number (the shell does; tests
+  pass `files=True` to `run`). The server shares its build's symbol
+  table, so its labels all start with `fs_`. Each call starts on a fresh
+  stack, so a failure anywhere just jumps to a reply tail.
+- **A server asleep in `receive` runs it again when woken**
+  (`PCB_RETRY`, `kernel/ipc.s`), so `receive` must change nothing
+  before it finds work. Arguments are read from the saved registers,
+  `a3` to `a5` included (`PCB_A3`..`PCB_A5`).
 - **Writing zero to a CSR needs a register holding 0.** A CSR
   instruction whose source is `r0` only reads (detrytus isa.md 7.12), so
   `csrw sie, zero` changes nothing: `li t0, 0` first.

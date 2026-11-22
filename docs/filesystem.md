@@ -4,19 +4,19 @@ A filesystem on detrytus' block device, shaped like a Unix one: files
 and directories are inodes, directories are files of names and inode
 numbers with `.` and `..`, and programs reach files by path through
 descriptors, with `open`, `read`, `lseek`, `readdir`, `stat` and
-`close`. The kernel reads it (`kernel/fs.s`) through a cache of blocks
-(`kernel/cache.s`); `tools/fs.py` builds and changes images on the
-host. Every number below is named in `include/layout.s`, which the
+`close`. A process, the file server (`user/fsd.s`), reads it and
+answers other processes' calls; `tools/fs.py` builds and changes images
+on the host. Every number below is named in `include/layout.s`, which the
 tool reads too.
 
-For now the kernel only reads: files are made, changed and removed
+For now the server only reads: files are made, changed and removed
 with the tool.
 
 ## Blocks
 
 A block is one page, 19,683 trytes or 6,561 words. Memory is centred
 (detrytus isa.md 5.2), so offsets are given from a block's centre, as
-the kernel's cache and a program's block window see them: trytes run
+a program's block window sees them: trytes run
 from −9,841 to 9,841 and words sit at −9,840, −9,837, ..., 9,840. A
 word's low tryte comes first.
 
@@ -83,7 +83,7 @@ A path is names separated by slashes. It starts at the root whether or
 not it starts with one, since nothing has a current directory yet;
 slashes before, between and after names do not count, and `.` and `..`
 are ordinary entries, so `/a/./b/../b` is `/a/b`. A path has at most
-`PATH_DEPTH` (6) names (see the cache, below).
+`PATH_MAX` (243) trytes.
 
 ## Files and programs
 
@@ -95,55 +95,67 @@ A file is trytes. Two kinds use this:
   matters. The magic word's first tryte is negative, which no text
   file's is.
 
-## System calls
+## The file server's calls
+
+The file server is the process `FS_PID` (1): init starts it before
+anything else, as the shell does. A file call is a `call` to it
+(README, Messages) with the operation in `a2` and its arguments in
+`a3`, `a4` and `a5`; the reply's first word, in `a0`, is the result:
+
+```asm
+        li    a0, SYS_CALL
+        li    a1, FS_PID
+        li    a2, FS_OPEN
+        la    a3, path
+        li    a4, O_RDONLY
+        sys                            # a0: a descriptor, or why not
+```
 
 A path is a 0-terminated string in the caller's memory, and a buffer a
-range of it: its page, or its block window 0 once it has one (otherwise
-`E_FAULT`). Each call fails with `E_NOFS` when there is no disk or no
-filesystem on it, `E_IO` when the disk refuses a block or names one
-past its end, and `E_NOMEM` when the cache has no room (below). The
+range of it: its page, or a block window it has (otherwise `E_FAULT`);
+the server copies them with `copyin` and `copyout`. Each call fails
+with `E_NOFS` when there is no disk or no filesystem on it (or
+`E_NOPROC`, from the kernel, when no file server runs), `E_IO` when the
+disk refuses a block or names one past its end, and `E_NOMEM` when the
+kernel has no page for one of the server's windows (below). The
 others are `E_NOENT` (no such name), `E_NOTDIR` (a name on the way is a
 file), `E_NAMETOOLONG`, `E_BADF` (no such open descriptor), `E_ISDIR`,
 `E_MFILE`, `E_INVAL` and `E_NOEXEC`.
 
-| Number | Call | Does |
-|--------|------|------|
-| 16 | `open(path, flags)` | gives the lowest free descriptor (of `NFD`, 8), at position 0 of the file or directory. `flags` is `O_RDONLY` (0), the only one yet |
-| 17 | `close(fd)` | frees the descriptor |
-| 18 | `read(fd, buffer, n)` | copies up to `n` trytes from the position, and moves it past them: how many, never past the end of the file or of the block the position is in, so a caller loops until it gets 0. A directory is `E_ISDIR` |
-| 19 | `lseek(fd, offset, whence)` | sets the position to `offset` from the start, where it is or the end (`SEEK_SET`, `SEEK_CUR`, `SEEK_END`): the new position. It may pass the end, but not the start |
-| 20 | `readdir(fd, buffer)` | the next entry in use of a directory: its name to the buffer, `NAME_MAX + 1` trytes, ended with 0, and its inode as the result; 0 at the end. The position counts 21 trytes per entry, used or not. A file is `E_NOTDIR` |
-| 21 | `stat(path, buffer)` | four words at the word-aligned buffer: `ST_INO`, `ST_TYPE`, `ST_LINKS` and `ST_SIZE` |
-| 22 | `spawnf(path)` | starts the program file at the path, as `spawnw` does from the window; anything but a program file is `E_NOEXEC` |
+| Operation | Call | Does |
+|-----------|------|------|
+| `FS_OPEN` (0) | `open(path, flags)` | gives the lowest free descriptor (of `NFD`, 8), at position 0 of the file or directory. `flags` is `O_RDONLY` (0), the only one yet |
+| `FS_CLOSE` (1) | `close(fd)` | frees the descriptor |
+| `FS_READ` (2) | `read(fd, buffer, n)` | copies up to `n` trytes from the position, and moves it past them: how many, never past the end of the file or of the block the position is in, so a caller loops until it gets 0. A directory is `E_ISDIR` |
+| `FS_LSEEK` (3) | `lseek(fd, offset, whence)` | sets the position to `offset` from the start, where it is or the end (`SEEK_SET`, `SEEK_CUR`, `SEEK_END`): the new position. It may pass the end, but not the start |
+| `FS_READDIR` (4) | `readdir(fd, buffer)` | the next entry in use of a directory: its name to the buffer, `NAME_MAX + 1` trytes, ended with 0, and its inode as the result; 0 at the end. The position counts 21 trytes per entry, used or not. A file is `E_NOTDIR` |
+| `FS_STAT` (5) | `stat(path, buffer)` | four words at the word-aligned buffer: `ST_INO`, `ST_TYPE`, `ST_LINKS` and `ST_SIZE` |
+| `FS_SPAWN` (6) | `spawnf(path)` | starts the program file at the path as the caller's child: the server reads its first block into a window and gives it to `spawnw` with the caller as the parent. Anything but a program file is `E_NOEXEC` |
 
-Descriptors belong to a process and go with it; a new process has none.
+Descriptors belong to a process and go with it: the server keeps them,
+and closes them when the kernel tells it the process has ended, before
+it takes any later call. A new process has none.
 They are numbered from 0 like Unix ones, but nothing opens 0, 1 and 2
 for the console yet.
 
-## The kernel's cache
+## The server's blocks
 
-The kernel reads blocks into a cache of up to `NBUF` (8) pages, taken
-from the free pages as it needs them and kept, least recently used
-first to go. A file call that needs a block not there starts reading
-it, sleeps, and runs again from the start once it is in, finding it and
-the blocks it found before; one already on its way is waited for. A
-call changes nothing before it has every block it needs, so a call that
-runs again does no harm, and one that fails halfway leaves nothing
-half done.
+The server keeps blocks in its `NWIN` (9) block windows, as a cache:
+a block it needs and has not got is read with `bread` into the window
+used least recently, while the server, and so every call waiting for
+it, sleeps. A call touches at most four blocks at once (block 0, the
+inode table, and an indirect and a data block, or a directory's), so
+none it is using goes. Each window is a page the kernel makes the first
+time the server reads into it; with no free page for one, the call
+fails with `E_NOMEM`.
 
-So a call needs room in the cache for every block it touches at once:
-block 0, the inode table, and one block per directory on its path, plus
-a file's indirect and data block. That is why a path has at most 6
-names. A call never evicts a block it has used itself; with too few
-free pages for the blocks it needs, it fails with `E_NOMEM` rather than
-evict and read the same blocks for ever.
-
-`bread` and `bwrite` reach blocks past the cache. A `bwrite` drops the
-cache's copy of its block, so the filesystem reads it again.
+The server takes for granted that nothing else writes the disk while it
+runs: a `bwrite` by another process is not seen in its windows.
 
 ## The shell
 
-`sh` (`user/sh.s`) has two file built-ins: `ls [DIR]` lists a directory,
+`sh` (`user/sh.s`) starts the file server first, then has two file
+built-ins: `ls [DIR]` lists a directory,
 `/` when none is given, leaving out names that start with a dot: a
 file's size and name, a directory's name and a slash. `cat PATH` prints
 a file. They say what went wrong as Unix tools do, `sh: PATH: no such
@@ -151,7 +163,7 @@ file or directory`, and carry on.
 
 A command that is neither built in nor one of the programs in the
 kernel image (only `pingpong`) is a program file, which `spawnf`
-starts: the path given, if it holds a slash, or else the file of that
+(`FS_SPAWN`) starts: the path given, if it holds a slash, or else the file of that
 name in `/bin`, as a Unix shell searches its `PATH`. Nothing there, or
 no filesystem, is `sh: no such program: NAME`; a text file or a
 directory is `sh: not a program: NAME`. The programs in `bin/` are
@@ -162,8 +174,8 @@ meant for `/bin`.
 Every process runs from `V_USER`, so a program is assembled to run
 there and needs no relocating: its image is what it holds from
 `V_USER − 1` (the low tryte of its first word, at `V_USER`) upward.
-`spawnf` (or `spawnw`, given the file's first block in the caller's
-window) checks the magic word, copies the image to `V_USER` in a fresh
+`spawnw`, given the file's first block in a block window, checks the
+magic word, copies the image to `V_USER` in a fresh
 page, clears the rest of the page, and starts the new process at
 `V_USER` with `gp` at `USER_GP`, as `spawn` starts a built-in program.
 The image includes the program's stack space: the stack starts at the

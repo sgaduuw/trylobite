@@ -117,7 +117,7 @@ def test_ctrl_c_stops_a_runaway_program_and_the_shell_carries_on(shell):
     lines = result.console.splitlines()
     i = lines.index("$ spin")
     assert lines[i + 1 : i + 5] == [
-        "trylobite: process 1 killed",
+        "trylobite: process 2 killed",
         "sh: killed",
         "$ hello",  # typed after the Ctrl-C: kept
         "hello from a balanced-ternary machine",

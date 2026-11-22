@@ -70,12 +70,7 @@ sys_block:
         sw    a3, PCB_DCMD(s0)
         lw    t0, PCB_WINS(s1)
         sw    t0, PCB_DPAGE(s0)
-        mv    a2, a3
-        li    t0, BLOCK_WRITE          # the cache's copy of a block written
-        bne   a2, t0, 2f               # here is out of date: forget it
-        mv    a0, a1
-        call  buf_forget
-2:      j     disk_queue
+        j     disk_queue
 8:      li    a0, E_NOBLOCK
         j     sys_return
 9:      li    a0, E_NOMEM
@@ -112,9 +107,7 @@ disk_start:
         ret
 
 # disk_irq: the command in flight has finished. Tell its process how it
-# went, and start the next waiting one. A block read for the cache is
-# kept there (buf_filled), and every process waiting for some block
-# being read tries again. Clobbers a0, s1 and t0..t5.
+# went, and start the next waiting one. Clobbers a0, s1 and t0..t5.
 disk_irq:
         addi  sp, sp, -3
         sw    ra, 0(sp)
@@ -128,15 +121,10 @@ disk_irq:
         li    t0, BLOCK_FAILED
         bne   t1, t0, 1f
         li    a0, E_IO
-1:      lw    t0, PCB_RETRY(s1)
-        beqz  t0, 0f
-        call  buf_filled               # a0: how it went
-        j     1f
-0:      sw    a0, PCB_A0(s1)
-1:      li    t0, ST_READY
+1:      sw    a0, PCB_A0(s1)
+        li    t0, ST_READY
         sw    t0, PCB_STATE(s1)
         call  wake_one
-        call  buf_wake
         la    t3, procs + NPROC * PCB_SIZE
         li    t4, NPROC
 2:      addi  s1, s1, PCB_SIZE         # the next waiting process, s1's turn last

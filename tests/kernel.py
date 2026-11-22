@@ -125,13 +125,34 @@ def exit_with(register: str) -> str:
     return f"mv a1, {register}\n        {EXIT}"
 
 
+# init's first lines when the build has the file server: it starts it,
+# as program 3, so that it is process 1, FS_PID.
+START_FS = """
+        li    a0, SYS_SPAWN
+        li    a1, 3
+        sys
+"""
+
+
 def build(
-    init: str, prog1: str = DONE, prog2: str = DONE, ram_pages: int = RAM_PAGES
+    init: str,
+    prog1: str = DONE,
+    prog2: str = DONE,
+    ram_pages: int = RAM_PAGES,
+    files: bool = False,
 ) -> Image:
-    """The kernel with init as program 0 and prog1, prog2 to spawn."""
+    """The kernel with init as program 0 and prog1, prog2 to spawn; with
+    files, also the file server (user/fsd.s), which init starts first."""
+    server = ""
+    if files:
+        init = START_FS + init
+        server = """
+        .section prog3, P_PROG3 * PAGE, V_USER
+        .include "user/fsd.s"
+"""
     source = f"""
         .equ  RAM_PAGES, {ram_pages}
-        .equ  NPROG, 3
+        .equ  NPROG, {4 if files else 3}
         .include "include/kernel.s"
         .section prog0, P_PROG0 * PAGE, V_USER
 {init}
@@ -139,7 +160,7 @@ def build(
 {prog1}
         .section prog2, P_PROG2 * PAGE, V_USER
 {prog2}
-"""
+{server}"""
     # On stdin, .include paths start from the working directory: the root.
     return _assemble(["-"], stdin=source)
 
@@ -343,6 +364,7 @@ def run(
     unplug: list[tuple[int, int]] = (),
     input: str | None = None,
     disk: tuple[Path, int] | None = None,
+    files: bool = False,
 ) -> Run:
-    image = build(init, prog1, prog2, ram_pages)
+    image = build(init, prog1, prog2, ram_pages, files)
     return run_image(image, ram_pages, max_steps, harts, plug, unplug, input, disk)

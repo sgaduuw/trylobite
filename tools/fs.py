@@ -520,8 +520,8 @@ class Filesystem:
         if not names:
             raise FsError("the root has no name")
         check_name(names[-1])
-        if len(names) > L["PATH_DEPTH"]:
-            raise FsError(f"a path has at most {L['PATH_DEPTH']} names: {path}")
+        if len("/" + "/".join(names)) > L["PATH_MAX"]:
+            raise FsError(f"a path has at most {L['PATH_MAX']} characters: {path}")
         parent = self.lookup("/".join(names[:-1]))
         if parent is None or self.inode(parent).type != L["T_DIR"]:
             raise FsError(f"no such directory: /{'/'.join(names[:-1])}")

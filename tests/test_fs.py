@@ -153,7 +153,7 @@ def test_paths_must_lead_somewhere():
     with pytest.raises(FsError, match="already there"):
         made.mkdir("f")
     with pytest.raises(FsError, match="a path has at most"):
-        made.mkdir("/".join("abcdefg"))
+        made.mkdir("/".join(["d" * 17] * 14))  # 251 characters
     assert made.lookup("f/x") is None
     assert made.lookup("/./f") == made.lookup("f")
 
