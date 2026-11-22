@@ -31,6 +31,9 @@ jobs:
       - name: Use files from the shell
         run: |
           printf 'hello, disk\n' > notes
-          tools/fs.py new disk.img 8 notes
-          printf 'ls\ncat notes\nwrite motd from the shell\nexit\n' | detrytus run shell.s --ram-pages 40 --input - --disk disk.img
-          tools/fs.py cat disk.img motd
+          tools/fs.py new disk.img 12 notes bin/*.s
+          tools/fs.py mkdir disk.img docs
+          tools/fs.py put disk.img notes docs/again
+          printf 'ls\nls bin\ncat notes\ncat docs/again\nhello\nexit\n' | detrytus run shell.s --ram-pages 40 --input - --disk disk.img | tee out.txt
+          grep -q 'hello from a balanced-ternary machine' out.txt
+          tools/fs.py ls disk.img docs

@@ -130,7 +130,7 @@
         .equ  BLOCK_WRITE, -1
         .equ  BLOCK_FAILED, -1
 
-# --- system calls: number in a0, arguments in a1 and a2, result in a0 -------
+# --- system calls: number in a0, arguments in a1, a2 and a3, result in a0 ---
 #
 # A call whose result is a status, or a value that is never negative (a
 # process number, a code point), reports failure with a negative number.
@@ -170,6 +170,33 @@
                                           # EXEC_MAGIC): its process number,
                                           # E_NOSLOT, E_NOPROG, E_NOMEM
 
+# Files (docs/filesystem.md). A path is a 0-terminated string in the
+# caller's page; it starts at the root, with or without a leading /.
+# Each also fails with E_NOFS (no disk, or no filesystem on it), E_IO
+# (the disk refused a block, or holds nonsense) or E_NOMEM (no page for
+# the kernel's block cache), and those taking a path or buffer with
+# E_FAULT (it is not all in the caller's page or block window).
+        .equ  SYS_OPEN,  16               # open path a1 with flags a2 (O_RDONLY):
+                                          # the lowest free descriptor, E_NOENT,
+                                          # E_NOTDIR, E_NAMETOOLONG, E_MFILE, E_INVAL
+        .equ  SYS_CLOSE, 17               # close descriptor a1: 0, E_BADF
+        .equ  SYS_READ,  18               # read up to a3 trytes from descriptor a1
+                                          # to a2: how many (0 at the end of the
+                                          # file; never past the end of a block),
+                                          # E_BADF, E_ISDIR, E_INVAL
+        .equ  SYS_LSEEK, 19               # move descriptor a1 to a2 from where
+                                          # a3 says (SEEK_SET, SEEK_CUR, SEEK_END):
+                                          # the new position, E_BADF, E_INVAL
+        .equ  SYS_READDIR, 20             # the next entry of directory descriptor
+                                          # a1: its name to a2 (NAME_MAX + 1 trytes),
+                                          # a0 = its inode, or 0 at the end;
+                                          # E_BADF, E_NOTDIR
+        .equ  SYS_STAT,  21               # what path a1 names, to the STAT trytes
+                                          # at a2 (ST_ fields): 0, as open fails
+        .equ  SYS_SPAWNF, 22              # start the program file at path a1: as
+                                          # spawnw, E_NOEXEC for no program, and
+                                          # as open fails
+
         .equ  E_NOCALL,  -1               # no system call with that number
         .equ  E_FULL,    -1               # send: the receiver's mailbox is full
         .equ  E_NOPROC,  -2               # send: no such process
@@ -180,8 +207,31 @@
         .equ  E_NOMEM,   -3               # spawn: not enough free pages
         .equ  GETC_NONE, -1               # getc: no more input; any negative means none
         .equ  E_NOCHILD, -2               # wait: not a child of the caller
-        .equ  E_IO,      -1               # bread, bwrite: the disk refused
         .equ  E_NOBLOCK, -2               # bread, bwrite: no such block, or no disk
+        .equ  E_NOFS,    -4               # files: no disk, or no filesystem on it
+        .equ  E_NOENT,   -5               # no such file or directory
+        .equ  E_NOTDIR,  -6               # a name on the path is not a directory;
+                                          # readdir: not a directory
+        .equ  E_ISDIR,   -7               # read: a directory
+        .equ  E_BADF,    -8               # no such open descriptor
+        .equ  E_MFILE,   -9               # open: every descriptor is in use
+        .equ  E_INVAL,  -10               # a flag, count or position out of range
+        .equ  E_NAMETOOLONG, -11          # a name past NAME_MAX, or a path of
+                                          # more than PATH_DEPTH names
+        .equ  E_FAULT,  -12               # a path or buffer outside the caller
+        .equ  E_NOEXEC, -13               # spawnf: not a program file
+        .equ  E_IO,     -14               # the disk refused (bread, bwrite, files)
+
+        .equ  O_RDONLY, 0                 # open: for reading, the only way yet
+        .equ  NFD, 8                      # descriptors per process, 0 to 7
+        .equ  SEEK_SET, 0                 # lseek: from the start,
+        .equ  SEEK_CUR, 1                 # from where it is,
+        .equ  SEEK_END, 2                 # from the end
+        .equ  ST_INO,   0                 # stat: the inode number, its I_TYPE,
+        .equ  ST_TYPE,  3                 # links and size, a word each from
+        .equ  ST_LINKS, 6                 # the (word-aligned) address given
+        .equ  ST_SIZE,  9
+        .equ  STAT,    12                 # trytes stat fills, from ST_INO - 1
 
 # How a child ended, as wait returns it in a0. An exit code can be any
 # word, so it comes back in a1, apart from the status; the sign of a0
@@ -199,6 +249,7 @@
         .equ  PCB_A0,     42              # saved a0: system-call number and result
         .equ  PCB_A1,     45
         .equ  PCB_A2,     48
+        .equ  PCB_A3,     51
         .equ  PCB_PC,     81
         .equ  PCB_PTBR,   84
         .equ  PCB_STATE,  87              # one of the ST_ values
@@ -213,7 +264,18 @@
         .equ  PCB_BLOCKPG, 114            # its block window's page, or 0 for none
         .equ  PCB_KILLED, 117             # 1 once killed: it ends the next time
                                           # the kernel would run it
-        .equ  PCB_SIZE,   120
+        .equ  PCB_DBLOCK, 120             # its disk command, while ST_DISK: the block,
+        .equ  PCB_DPAGE,  123             # the physical page it moves to or from,
+        .equ  PCB_DCMD,   126             # and BLOCK_READ or BLOCK_WRITE
+        .equ  PCB_RETRY,  129             # 1: run its system call again when it
+                                          # next runs (see kernel/cache.s)
+        .equ  PCB_BSTART, 132             # buf_clock when its call last started
+        .equ  PCB_FDS,    135             # NFD descriptors of FD trytes each:
+        .equ  FD,           9             # three words, from PCB_FDS + FD * fd:
+        .equ  FD_INO,       0             # the inode, NO_INO when closed
+        .equ  FD_POS,       3             # the position, in trytes
+        .equ  FD_FLAGS,     6             # what open was given
+        .equ  PCB_SIZE,   207
         .equ  PAGES_PER_PROCESS, 4
 
         .equ  ST_EXITED, 0                # also: a free slot
@@ -225,40 +287,73 @@
         .equ  ST_ZOMBIE, -3               # ended; holds how (saved a0, a1) until
                                           # its parent waits for it
         .equ  ST_GETC,   -4               # blocked in SYS_GETC, until input comes
-        .equ  ST_DISK,   -5               # blocked in SYS_BREAD or SYS_BWRITE, its
-                                          # command in its saved a2 and block in a1
+        .equ  ST_DISK,   -5               # waiting for its disk command (PCB_D*):
+                                          # bread, bwrite, or a block the cache lacks
+        .equ  ST_BUF,    -6               # waiting for a block someone else's
+                                          # command is reading into the cache
         .equ  NO_FOREGROUND, -1           # SYS_FOREGROUND: the console is nobody's
         .equ  NO_PARENT, -1               # PCB_PARENT of init and of orphans:
                                           # process numbers are never negative
 
+# --- the kernel's block cache (kernel/cache.s) ---------------------------------
+# NBUF slots of BUF trytes, each a page holding one block; a slot's page
+# is taken from the free pages the first time the slot is needed.
+        .equ  NBUF, 8
+        .equ  BUF,        12              # trytes per slot: four words,
+        .equ  BUF_BLOCK,   0              # the block it holds,
+        .equ  BUF_PAGE,    3              # its page, 0 until it has one,
+        .equ  BUF_STATE,   6              # BUF_EMPTY, BUF_VALID or BUF_FILLING,
+        .equ  BUF_USED,    9              # and when it was last used (buf_clock)
+        .equ  BUF_EMPTY,   0
+        .equ  BUF_VALID,   1              # holds the block
+        .equ  BUF_FILLING, 2              # a command is reading the block into it
+
 # --- the filesystem (docs/filesystem.md) ----------------------------------------
-# Block 0 holds a header, a flat directory and the FAT; every other block
-# holds file data. Offsets are in trytes from a block's centre, as a
-# program addresses them through its block window at V_BLOCK. Memory is
-# centred (detrytus isa.md 5.2): a block's words sit at -9840, -9837, ...,
-# 9840, and its trytes run from -9841 to 9841.
+# Block 0 holds a header and the map of free blocks, block 1 the inodes;
+# every other block holds a file's or a directory's data. Offsets are in
+# trytes from a block's centre, as the kernel's cache and a program's
+# block window address them. Memory is centred (detrytus isa.md 5.2): a
+# block's words sit at -9840, -9837, ..., 9840, and its trytes run from
+# -9841 to 9841.
 
         .equ  BLOCK_W0, -9840             # a block's first word
         .equ  BLOCK_T0, -9841             # ... and its first tryte, where
-                                          # a data block's text starts
+                                          # a file's data starts
         .equ  FS_HEAD_MAGIC, BLOCK_W0     # word 0: FS_MAGIC
         .equ  FS_HEAD_VERSION, BLOCK_W0 + 3   # word 1: FS_VERSION
         .equ  FS_HEAD_BLOCKS, BLOCK_W0 + 6    # word 2: blocks in the filesystem
         .equ  FS_MAGIC, 20261121          # any word but 0: a blank disk is not one
-        .equ  FS_VERSION, 1
-        .equ  FS_DIR, BLOCK_W0 + 27       # word 9: the directory, FS_FILES entries
-        .equ  FS_FILES, 64
-        .equ  FS_DIRENT, 24               # trytes per entry, which has three
-        .equ  DE_NAME, -1                 # fields from its first word: the name,
-                                          # 18 trytes, zero-padded, unused when 0
-        .equ  DE_SIZE, 18                 # the size, in trytes
-        .equ  DE_FIRST, 21                # its first block, FAT_END when empty
-        .equ  FS_NAME_MAX, 17             # code points in a name; one is left for 0
-        .equ  FS_FAT, BLOCK_W0 + 2187     # word 729: the FAT, one word per block
-        .equ  FS_MAX_BLOCKS, 5832         # as many as fit after it
-        .equ  FAT_FREE, 0                 # a block in no file; block 0 never is
-        .equ  FAT_END, -1                 # the last block of its file (and of
-                                          # block 0): there is no next one
+        .equ  FS_VERSION, 2
+        .equ  FS_MAP, BLOCK_T0 + 27       # after 9 words: one tryte per block,
+        .equ  MAP_FREE, 0                 # free or used, to the end of block 0
+        .equ  MAP_USED, 1
+        .equ  FS_MAX_BLOCKS, 19656        # as many as the map has trytes
+
+        .equ  FS_INODE_BLOCK, 1           # the inode table, a block of its own
+        .equ  FS_INODES, 729              # inodes 0 to 728; 0 is never used
+        .equ  INODE, 27                   # trytes each, from BLOCK_W0 + INODE * i;
+        .equ  I_TYPE, 0                   # its words, from its first: what it is
+        .equ  I_LINKS, 3                  # directory entries naming it
+        .equ  I_SIZE, 6                   # its size, in trytes
+        .equ  I_DIRECT, 9                 # NDIRECT data blocks, one word each,
+        .equ  NDIRECT, 5                  # the first ones of the file
+        .equ  I_INDIRECT, 24              # a block of the next ones' numbers
+        .equ  NO_BLOCK, 0                 # a data block that is not there: it
+                                          # reads as zeros (block 0 never is one)
+        .equ  T_FREE, 0                   # I_TYPE: an unused inode
+        .equ  T_FILE, 1                   # a regular file
+        .equ  T_DIR, 2                    # a directory
+        .equ  ROOT_INO, 1                 # the root directory, /
+
+        .equ  DIRENT, 21                  # trytes per directory entry; a
+        .equ  DIRENTS, 937                # block holds DIRENTS, from BLOCK_W0
+        .equ  D_NAME, -1                  # the name, 18 trytes, zero-padded
+        .equ  D_INO, 18                   # its inode, NO_INO when unused
+        .equ  NO_INO, 0
+        .equ  NAME_MAX, 17                # code points in a name; one is left for 0
+        .equ  PATH_DEPTH, 6               # names a path may have: an open
+                                          # needs every directory on its way
+                                          # in the kernel's cache at once
 
 # A program file: EXEC_MAGIC, then the program's image, as assembled to
 # run from V_USER (its first word there, so its first tryte at V_USER - 1).

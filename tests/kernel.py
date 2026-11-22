@@ -270,8 +270,8 @@ _BIN: dict[str, list[int]] = {}
 
 
 def bin_disk(blocks: int = 8, **texts: str) -> tuple[Path, int]:
-    """A new disk holding a filesystem with every program in bin/, as the
-    shell expects, and these text files: (path, blocks)."""
+    """A new disk holding a filesystem with every program of bin/ in /bin,
+    as the shell expects, and these text files in /: (path, blocks)."""
     from tools.fs import Filesystem, program_file
 
     if not _BIN:
@@ -279,8 +279,9 @@ def bin_disk(blocks: int = 8, **texts: str) -> tuple[Path, int]:
             image = assemble_file(source)
             _BIN[source.stem] = program_file(image.path.read_bytes())
     made = Filesystem.new(blocks)
+    made.mkdir("bin")
     for name, trytes in _BIN.items():
-        made.write_trytes(name, trytes)
+        made.write_trytes(f"bin/{name}", trytes)
     for name, text in texts.items():
         made.write(name, text)
     path = new_disk()

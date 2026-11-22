@@ -29,15 +29,15 @@ def program(body: str) -> bytes:
 def disk_with(**files: list[int] | str):
     """A disk holding these files; returns it and each file's first block."""
     path = new_disk()
-    made = Filesystem.new(4)
+    made = Filesystem.new(5)
     for name, contents in files.items():
         if isinstance(contents, str):
             made.write(name, contents)
         else:
             made.write_trytes(name, contents)
     made.save(path)
-    first = {e.name: e.first for e in made.entries()}
-    return (path, 4), first
+    first = {name: node.direct[0] for name, node in made.listdir()}
+    return (path, 5), first
 
 
 def start_from(block: int) -> str:
@@ -120,14 +120,14 @@ def test_a_program_file_is_the_magic_word_and_the_image(tmp_path):
     dti = tmp_path / "greet.dti"
     dti.write_bytes(GREET)
     image = tmp_path / "disk.img"
-    assert fs.main(["new", str(image), "4", str(dti)]) == 0
+    assert fs.main(["new", str(image), "6", str(dti)]) == 0
     made = Filesystem.load(image)
-    trytes = made.read_trytes("greet")  # named after the file, less .dti
+    trytes = made.read_trytes("bin/greet")  # named after the file, less .dti
     assert fs.join_word(trytes[:3]) == fs.L["EXEC_MAGIC"]
     assert trytes[0] < 0  # which no text file's first tryte is
     assert "hello from the disk" in "".join(chr(t) for t in trytes if t > 0)
     with pytest.raises(FsError, match="a program, not text"):
-        made.read("greet")
+        made.read("bin/greet")
 
 
 def test_a_program_must_run_from_v_user_and_fit_its_page():

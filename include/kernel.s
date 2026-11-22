@@ -26,6 +26,8 @@
         .include "../kernel/harts.s"
         .include "../kernel/devices.s"
         .include "../kernel/input.s"
+        .include "../kernel/cache.s"
+        .include "../kernel/fs.s"
 
         .include "../kernel/data.s"
         .include "../kernel/pagetables.s"
