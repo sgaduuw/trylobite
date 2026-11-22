@@ -105,7 +105,9 @@ pipe.
   `demo.s` it is `user/demo-init.s`; in `shell.s` it is `user/init.s`,
   which starts the servers (console, pipe, disk, file, in that order,
   from its table `init_rows`), waiting for each to register, then the
-  shell, as process 5, and exits when the shell does. The shell finds
+  shell, as process 5; it exits when the shell does, and starts again
+  a server that ends (with what needs it) or a shell that faults, at
+  most `INIT_RETRIES` (3) times each. The shell finds
   the servers with `lookup(LOOKUP_NOW)`; the programs it runs start at
   process 6. Tests build their own init with `run(init, ...)`, which
   starts the servers they ask for first (`tests/kernel.py`, `SERVERS`).

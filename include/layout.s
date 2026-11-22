@@ -520,7 +520,8 @@
                                           # past its windows: source s's at
                                           # V_DEVICE + PAGE * (s - 1)
         .equ  PCB_SERVES, 159             # 1 once it has called receive: it is told
-                                          # of every process that ends
+                                          # of every process that ends (of its
+                                          # children's, it is told from the start)
         .equ  PCB_NOTES,  161             # NPROC trytes, 161 to 187 (in the words
                                           # at 162 to 186): 1 for each process
                                           # that has ended since receive last told it

@@ -98,7 +98,10 @@ time with `receive`, which says who called; while it holds a call, it
 may copy to and from the caller's memory with `copyin` and `copyout`,
 which is how a path or a buffer named in the call travels. A process
 that has called `receive` is told of every process that ends, before
-any later call, so it can forget what it kept for one; a call to a
+any later call, so it can forget what it kept for one; a parent is told
+of its own children ending even before it first calls `receive`, which
+is how init learns of a server that ends while init waits for another
+to register. A call to a
 process that ends fails. A server asleep in `receive` with nobody left
 to call it does not keep the machine from powering off.
 
@@ -222,12 +225,26 @@ no write end is left; a write waits until all of it is in (a pipe holds
 Program 0 of the `shell.s` build is `user/init.s`. It starts the
 console, pipe, disk and file servers in that order, waiting for each to
 register its name before the next, then the shell (`user/sh.s`), and
-waits for it; when the shell exits, init exits with its code, and the
-machine powers off once only servers asleep in `receive` are left. A
-server that cannot start, or registers another protocol version than
+then waits in `receive` for its children to end:
+
+- When the shell exits, init exits with its code, and the machine
+  powers off once only servers asleep in `receive` are left. A shell
+  that faults or is killed is started again.
+- When a server ends, init ends what needs it (the file server needs the
+  disk server, and the shell needs them all, since it holds their
+  process numbers and handles), then starts them again, the server
+  first: `init: disk ended, starting it again`.
+- Each server and the shell is started again at most 3 times
+  (`INIT_RETRIES`). Then init gives up on it (`init: disk ended too
+  often, giving up on it`): a server stays down with what needs it, and
+  the shell runs without them; giving up on the shell, init exits with
+  code 1.
+
+A server that cannot start, or registers another protocol version than
 init expects, is said on the kernel's log (`init: no server named
-disk`) and so is every server that needs it (the file server needs the
-disk server); otherwise init prints nothing.
+disk`) and so is every server that needs it; otherwise init prints
+nothing. A server that ends before it registers leaves init waiting for
+its name; if nothing else can run, the kernel reports a deadlock.
 
 The shell finds the console, pipe and file servers by name, does
 without any that is missing, opens the console as descriptor 0 and
