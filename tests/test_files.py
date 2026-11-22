@@ -368,12 +368,13 @@ def test_without_a_filesystem_there_are_no_files():
 
 
 def test_descriptors_go_with_their_process():
-    # Each child opens every descriptor and exits with them open. The
-    # fourth gets process number 3 again, and finds them all free: the
-    # server closed the first one's when the kernel said it had ended.
+    # Each child opens every descriptor and exits with them open. Slots
+    # are handed out round the table, so the last, after NPROC - 3 others,
+    # gets process number 3 again, and finds them all free: the server
+    # closed the first one's when the kernel said it had ended.
     child = report(*[open_("f")] * L["NFD"], data=string("f", "f"))
     init = f"""
-        li    s2, 4
+        li    s2, NPROC - 2
 1:      li    a0, SYS_SPAWN
         li    a1, 1
         sys
@@ -386,7 +387,7 @@ def test_descriptors_go_with_their_process():
 """
     result = run(init, child, disk=disk(f="x"))
     assert result.code_of(0) == 3
-    assert said(result) == list(range(L["NFD"])) * 4
+    assert said(result) == list(range(L["NFD"])) * (L["NPROC"] - 2)
 
 
 def test_a_server_without_pages_for_its_windows_says_so():
@@ -528,6 +529,7 @@ def test_a_killed_reader_leaves_the_server_usable():
         mv    s1, a0
         li    a0, SYS_KILL
         mv    a1, s1
+        li    a2, FOR_SELF
         sys
         {wait_for("s1")}
 {reader("f", "p")}

@@ -100,7 +100,7 @@ def test_a_lookup_waits_for_the_name_and_the_name_goes_with_its_server():
         lookup("srv", "LOOKUP_WAIT"),
         lookup("srv") + "\n" + VERSION,
         register("srv", 1),  # somebody else's
-        "li a0, SYS_KILL\n        mv a1, s1\n        sys",
+        "li a0, SYS_KILL\n        mv a1, s1\n        li a2, FOR_SELF\n        sys",
         "li a0, SYS_WAIT\n        mv a1, s1\n        sys",
         lookup("srv"),  # gone with it
         register("srv", 1),  # and free again
@@ -136,7 +136,7 @@ none:   .string "none"
     init = report(
         "li a0, SYS_SPAWN\n        li a1, 1\n        sys\n        mv s1, a0",
         "li a0, SYS_YIELD\n        sys",
-        "li a0, SYS_KILL\n        mv a1, s1\n        sys",
+        "li a0, SYS_KILL\n        mv a1, s1\n        li a2, FOR_SELF\n        sys",
         "li a0, SYS_WAIT\n        mv a1, s1\n        sys",
     )
     assert said(run(init, child)) == [1, 0, 0, L["WAIT_KILLED"]]

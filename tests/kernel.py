@@ -121,14 +121,20 @@ def wait_for(register: str) -> str:
     return f"li a0, SYS_WAIT\n        mv a1, {register}\n        sys"
 
 
+# getc from the console server, in a build with console: a0 = the next
+# code point, or GETC_NONE.
+GETC = "CALL_CONSOLE\n        li    a2, CN_GETC\n        sys"
+
+
 def exit_with(register: str) -> str:
     return f"mv a1, {register}\n        {EXIT}"
 
 
-# The servers a build can add, from program 3 on: the disk server, and
-# the file server, which needs it. init's first lines start them, so the
-# disk server is process 1 and the file server process 2.
-SERVERS = {"disk": "user/diskd.s", "fs": "user/fsd.s"}
+# The servers a build can add, from program 3 on: the disk server, the
+# file server, which needs it, and the console server. init's first lines
+# start them in that order, so with files the disk server is process 1
+# and the file server process 2.
+SERVERS = {"disk": "user/diskd.s", "fs": "user/fsd.s", "console": "user/consd.s"}
 
 
 def start(program: int) -> str:
@@ -139,7 +145,7 @@ def start(program: int) -> str:
 """
 
 
-# A line of its own, CALL_FS or CALL_DISK, starts a call to that server
+# A line of its own, CALL_FS, CALL_DISK or CALL_CONSOLE, starts a call to that server
 # in a test program: build expands it to a lookup of the server's name,
 # waiting for it to register, then a0 = SYS_CALL and a1 = the server, so
 # that a2 onwards follow as for any call. Each program gets its own copy
@@ -151,8 +157,8 @@ CALLS = {
 
 
 def find_servers(program: str, n: int) -> str:
-    """program with each CALL_FS and CALL_DISK expanded, and the name
-    strings, labelled find_fs_n and find_disk_n, added at its end."""
+    """program with each CALL_ line expanded, and the name strings,
+    labelled find_fs_n, find_disk_n and find_console_n, added at its end."""
     pad = " " * 8
     for name, pattern in CALLS.items():
         if not pattern.search(program):
@@ -177,14 +183,20 @@ def build(
     ram_pages: int = RAM_PAGES,
     files: bool = False,
     disk_server: bool = False,
+    console: bool = False,
 ) -> Image:
     """The kernel with init as program 0 and prog1, prog2 to spawn; with
-    disk_server, also the disk server (user/diskd.s), and with files the
-    file server (user/fsd.s) after it, which init starts first."""
+    disk_server, also the disk server (user/diskd.s), with files the
+    file server (user/fsd.s) after it, and with console the console server
+    (user/consd.s), which init starts first."""
     init, prog1, prog2 = (
         find_servers(p, n) for n, p in enumerate((init, prog1, prog2))
     )
-    servers = [*(["disk"] if files or disk_server else []), *(["fs"] if files else [])]
+    servers = [
+        *(["disk"] if files or disk_server else []),
+        *(["fs"] if files else []),
+        *(["console"] if console else []),
+    ]
     server = ""
     for k, name in enumerate(servers, 3):
         server += f"""
@@ -289,14 +301,16 @@ def debug_session(
     image: Image,
     script: str,
     harts: int | None = None,
-    ram_pages: int = RAM_PAGES,
+    ram_pages: int | None = None,
     disk: tuple[Path, int] | None = None,
 ) -> str:
     """Run an image in the debugger under script's commands, and return
     what it printed: its replies and the program's output, in order.
     Unlike run, the console stays open until the script says eof, so
-    `input` can type more while the program waits."""
+    `input` can type more while the program waits. The machine has the
+    RAM the build is for unless ram_pages says otherwise."""
     harts = HARTS if harts is None else harts
+    ram_pages = image.symbols["RAM_PAGES"] if ram_pages is None else ram_pages
     path = _WORK / f"session{next(_names)}.txt"
     path.write_text(script)
     done = detrytus(
@@ -354,7 +368,7 @@ def bin_disk(blocks: int = 8, **texts: str) -> tuple[Path, int]:
 
 def run_image(
     image: Image,
-    ram_pages: int = RAM_PAGES,
+    ram_pages: int | None = None,
     max_steps: int = 2_000_000,
     harts: int | None = None,
     plug: list[tuple[int, int]] = (),
@@ -363,8 +377,10 @@ def run_image(
     disk: tuple[Path, int] | None = None,
 ) -> Run:
     """Run an image; input, if given, is what the console has to read, and
-    disk, if given, is (file, blocks) for its block device."""
+    disk, if given, is (file, blocks) for its block device. The machine
+    has the RAM the build is for unless ram_pages says otherwise."""
     harts = HARTS if harts is None else harts
+    ram_pages = image.symbols["RAM_PAGES"] if ram_pages is None else ram_pages
     hotplug = hotplug_options(plug, unplug)
     inputs = input_options(input)
     disks = disk_options(disk)
@@ -408,6 +424,7 @@ def run(
     disk: tuple[Path, int] | None = None,
     files: bool = False,
     disk_server: bool = False,
+    console: bool = False,
 ) -> Run:
-    image = build(init, prog1, prog2, ram_pages, files, disk_server)
+    image = build(init, prog1, prog2, ram_pages, files, disk_server, console)
     return run_image(image, ram_pages, max_steps, harts, plug, unplug, input, disk)

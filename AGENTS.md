@@ -70,7 +70,7 @@ pipe.
   pages go back at once, but its slot stays `ST_ZOMBIE`, with how it
   ended in its saved `a0` and `a1`, until `wait` reaps it or the parent
   ends. A program that spawns in a loop must wait for its children, or
-  run out of the table's 6 slots.
+  run out of the table's 9 slots.
 - **Hart 0 handles hot-plug.** It is the hart controller's event hart and
   can never be removed. A hart asked to go only stops itself in `pick`,
   where it holds no process: anything it ran is back in the table.
@@ -109,9 +109,8 @@ pipe.
   changes the disk gathers and checks everything first, then changes
   its windows and marks them dirty; `fs_reply` writes them back before
   replying, so a window is never left dirty between calls.
-- **Devices are their drivers', not the kernel's**, except the console.
-  The disk server, `user/diskd.s` (labels `dk_`), drives the block
-  device: `SYS_DRIVE` maps its registers at `V_DEVICE`, `SYS_ARM` lets
+- **Devices are their drivers', not the kernel's.** The disk server,
+  `user/diskd.s` (labels `dk_`), drives the block device: `SYS_DRIVE` maps its registers at `V_DEVICE`, `SYS_ARM` lets
   it interrupt once, and the interrupt reaches the server as a
   `NOTE_IRQ` notice (`kernel/devices.s`). Arm only when an interrupt is
   due: an armed source keeps `pick` waiting instead of reporting a
@@ -119,6 +118,13 @@ pipe.
   `DK_WRITE`, tests write `CALL_DISK` and pass `disk_server=True`),
   copied between windows; only a program in the kernel image may drive
   a device, since DMA can write any page.
+- **The console is the console server's**, `user/consd.s` (labels
+  `cn_`): programs read and print through it (`CN_GETC`, `CN_WRITE`;
+  tests write `CALL_CONSOLE` or `GETC` and pass `console=True`), and it
+  keeps the foreground that Ctrl-C ends, killing on behalf of the
+  process that named it (`kill(pid, for)`, drivers only). The kernel's
+  own messages, `SYS_PUTC` and `SYS_PUTS`, still go straight to the
+  console's output, as its log; tests print with them.
 - **A server asleep in `receive` runs it again when woken**
   (`PCB_RETRY`, `kernel/ipc.s`), so `receive` must change nothing
   before it finds work. Arguments are read from the saved registers,

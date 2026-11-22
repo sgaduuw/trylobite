@@ -46,9 +46,9 @@
                                           # point, or one of these when there is none:
         .equ  CONSOLE_EMPTY, -1           # nothing yet: more may come
         .equ  CONSOLE_CLOSED, -2          # nothing more will come
+        .equ  P_CONSOLE, -1               # the console's physical page
         .equ  CTRL_C, 3                   # typed while the console has a
                                           # foreground process: kills it
-        .equ  CONIN_MAX, 81               # code points the kernel holds for getc
         .equ  V_USER, SUPER               # every process runs from here
         .equ  V_BLOCK, V_USER + PAGE      # its block windows, NWIN pages from here,
                                           # each made by SYS_WINDOW
@@ -157,16 +157,18 @@
                                           # E_NOSLOT, E_NOPROG, E_NOMEM
         .equ  SYS_HART,   8               # a0 = the hart running the caller,
                                           # -4 to +4
-        .equ  SYS_GETC,   9               # a0 = the next code point typed, waiting
-                                          # for one, or GETC_NONE when none will come
+        # 9 was getc: console input is the console server's now
         .equ  SYS_WAIT,  10               # wait for child a1 to end: a0 = how it
                                           # ended, a1 = its exit code or trap cause
         # 11 and 12 were bread and bwrite: the disk is the disk server's now
-        .equ  SYS_KILL,  13               # end child a1: 0 done (it ends before
-                                          # it runs again), E_NOCHILD
-        .equ  SYS_FOREGROUND, 14          # give the console to child a1, or to
-                                          # nobody with NO_FOREGROUND: Ctrl-C
-                                          # then kills it. 0 done, E_NOCHILD
+        .equ  SYS_KILL,  13               # kill(pid, for): end process a1, a child
+                                          # of the caller (a2 = FOR_SELF) or, for a
+                                          # driver, of process a2: 0 done (it ends
+                                          # before it runs again), KILL_ENDED (it
+                                          # had ended already), E_NOCHILD, E_PERM
+                                          # (a2 not FOR_SELF from a non-driver)
+        .equ  KILL_ENDED, 1               # kill: nothing to end, only to wait for
+        # 14 was foreground: the console server keeps the foreground now
         .equ  SYS_SPAWNW, 15              # start the program file whose first
                                           # block is in block window a1 (see
                                           # EXEC_MAGIC), as a child of the caller
@@ -174,7 +176,7 @@
                                           # call the caller holds: its process
                                           # number, E_NOSLOT, E_NOPROG, E_NOMEM,
                                           # E_NOPROC
-        .equ  FOR_SELF, -1                # spawnw: the caller is the parent
+        .equ  FOR_SELF, -1                # spawnw, kill: the caller is the parent
         # 16 to 22 were the kernel's file calls: files are the file server's now
 
 # Messages for servers (README, Messages). A message is four words, a2 to
@@ -240,9 +242,8 @@
                                           # source a1 from now on, its registers at
                                           # V_DEVICE + PAGE * (a1 - 1), until it
                                           # ends: 0; E_BUSY (another process drives
-                                          # it), E_INVAL (not a source the kernel
-                                          # hands out: only SRC_DISK), E_PERM (a
-                                          # program file)
+                                          # it), E_INVAL (no such source),
+                                          # E_PERM (a program file)
         .equ  SYS_ARM, 32                 # arm(source): let source a1 interrupt
                                           # once; that interrupt masks it again and
                                           # becomes a NOTE_IRQ notice. 0; E_PERM (the
@@ -317,6 +318,25 @@
         .equ  DK_READ,    0               # read(block, buffer)
         .equ  DK_WRITE,   1               # write(block, buffer)
 
+# The console comes from the console server, which registers as
+# "console" with protocol CONSOLE_PROTOCOL and drives SRC_CONSOLE. A
+# console call is a call to it with the CN_ operation in a2 and the
+# arguments in a3 and a4; the reply's first word is the result. The
+# kernel still prints its own messages, and SYS_PUTC and SYS_PUTS, to the
+# console directly: they are its log.
+        .equ  CONSOLE_PROTOCOL, 1
+        .equ  CN_GETC,    0               # getc(): the next code point typed,
+                                          # waiting for one, or GETC_NONE when
+                                          # none will come
+        .equ  CN_WRITE,   1               # write(buffer, n): print n trytes from
+                                          # the caller's memory, whole: n, E_INVAL,
+                                          # E_FAULT
+        .equ  CN_FOREGROUND, 2            # foreground(pid): give the console to
+                                          # child pid of the caller, so that Ctrl-C
+                                          # kills it, or to nobody with
+                                          # NO_FOREGROUND: 0, E_INVAL. The server
+                                          # takes it back when the process ends
+
         .equ  E_NOCALL,  -1               # no system call with that number
         .equ  E_FULL,    -1               # send: the receiver's mailbox is full
         .equ  E_NOPROC,  -2               # send: no such process
@@ -326,7 +346,8 @@
         .equ  E_NOPROG,  -2               # spawn: no such program; spawnw: no
                                           # window, or no program in it
         .equ  E_NOMEM,   -3               # spawn: not enough free pages
-        .equ  GETC_NONE, -1               # getc: no more input; any negative means none
+        .equ  GETC_NONE, -1               # console getc: no more input; any negative
+                                          # means none
         .equ  E_NOCHILD, -2               # wait: not a child of the caller
         .equ  E_NOBLOCK, -2               # disk calls: no such block, or no disk
         .equ  E_NOFS,    -4               # files: no disk, no filesystem on it, or
@@ -386,7 +407,7 @@
 # One record per process, in words. Register r is saved at 3 * (r + 13), so
 # sp (r-13) is at 0 and t6 (r13) at 78; r0 has a slot that is never used.
 
-        .equ  NPROC, 6
+        .equ  NPROC, 9
         .equ  PCB_GP,      9              # saved gp
         .equ  PCB_A0,     42              # saved a0: system-call number and result
         .equ  PCB_A1,     45
@@ -424,11 +445,11 @@
                                           # V_DEVICE + PAGE * (s - 1)
         .equ  PCB_SERVES, 159             # 1 once it has called receive: it is told
                                           # of every process that ends
-        .equ  PCB_NOTES,  161             # NPROC trytes, 161 to 166 (the words at
-                                          # 162 and 165): 1 for each process that
-                                          # has ended since receive last told it
-        .equ  PCB_TURN,   168             # receive: the caller it took last
-        .equ  PCB_SIZE,   171
+        .equ  PCB_NOTES,  161             # NPROC trytes, 161 to 169 (in the words
+                                          # at 162, 165 and 168): 1 for each process
+                                          # that has ended since receive last told it
+        .equ  PCB_TURN,   171             # receive: the caller it took last
+        .equ  PCB_SIZE,   174
         .assert PCB_NOTES + NPROC <= PCB_TURN - 1, "PCB_NOTES runs into PCB_TURN's trytes"
         .assert PCB_IRQS + NSRC <= 125, "PCB_IRQS runs into PCB_RETRY's word"
         .equ  PAGES_PER_PROCESS, 4
@@ -441,14 +462,14 @@
                                           # its saved a1
         .equ  ST_ZOMBIE, -3               # ended; holds how (saved a0, a1) until
                                           # its parent waits for it
-        .equ  ST_GETC,   -4               # blocked in SYS_GETC, until input comes
+        # -4 was ST_GETC, waiting for the kernel's console input
         # -5 was ST_DISK, waiting for the kernel's disk driver
         .equ  ST_CALL,   -7               # its call waits for PCB_PEER to receive it
         .equ  ST_REPLY,  -8               # PCB_PEER has received its call: waits
                                           # for the reply
         .equ  ST_RECEIVE, -9              # blocked in SYS_RECEIVE
         .equ  ST_LOOKUP, -10              # blocked in SYS_LOOKUP with LOOKUP_WAIT
-        .equ  NO_FOREGROUND, -1           # SYS_FOREGROUND: the console is nobody's
+        .equ  NO_FOREGROUND, -1           # CN_FOREGROUND: the console is nobody's
         .equ  NO_PARENT, -1               # PCB_PARENT of init and of orphans:
                                           # process numbers are never negative
 

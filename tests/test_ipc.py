@@ -332,6 +332,7 @@ def test_a_killed_caller_cannot_be_replied_to():
         sys
         li    a0, SYS_KILL
         mv    a1, s2
+        li    a2, FOR_SELF
         sys
         {wait_for("s2")}
         mv    s3, a0                   # WAIT_KILLED

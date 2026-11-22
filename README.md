@@ -51,7 +51,7 @@ waiting for, and at the prompt drops the line typed so far:
 ```bash
 tools/fs.py new disk.img 20 bin/*.s
 printf 'hello\nfail\nexit\n' > session.txt
-detrytus run shell.s --ram-pages 40 --input session.txt --disk disk.img
+detrytus run shell.s --ram-pages 81 --input session.txt --disk disk.img
 ```
 
 ```text
@@ -129,15 +129,14 @@ it, or else the one on the PATH is used.
 | `kernel/sched.s` | round-robin scheduling, halting |
 | `kernel/mm.s` | the page allocator, spawning and releasing processes |
 | `kernel/wait.s` | `wait`, `kill`, and what happens to a process once it has ended |
-| `kernel/input.s` | console input: the kernel's buffer, `getc`, the foreground process and Ctrl-C |
-| `kernel/console.s` | kernel console output |
+| `kernel/console.s` | kernel console output: the kernel's log |
 | `kernel/data.s` | the process table, buffers, messages |
 | `kernel/pagetables.s` | the boot address space and the kernel's shared leaf table |
 | `kernel/lock.s` | the kernel lock |
 | `kernel/harts.s` | starting the other harts, waking an idle one |
 | `kernel/ipc.s` | messages for servers: `call`, `receive`, `reply`, `copyin`, `copyout` |
 | `include/kernel.s` | firmware and kernel together, without programs: included by a build such as `demo.s`, not run on its own |
-| `user/` | programs built into the kernel image: `init` (program 0 of the demo), `ping` (1) and `pong` (2); `sh` (program 0 of the shell build), `pingpong` (3), `fsd`, the file server (4), and `diskd`, the disk server (5) |
+| `user/` | programs built into the kernel image: `init` (program 0 of the demo), `ping` (1) and `pong` (2); `sh` (program 0 of the shell build), `pingpong` (3), `fsd`, the file server (4), `diskd`, the disk server (5), and `consd`, the console server (6) |
 | `bin/` | programs for the disk, each assembled on its own: `hello`, `fail` and `spin` |
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
 | `shell.s` | the same machine, starting the shell, with sh, ping, pong, pingpong, the file server and the disk server |
@@ -186,10 +185,8 @@ registers mapped past them, at `V_DEVICE`.
 | 6 | `puts(address)` | 0; −2 if the string is outside the process's page and block windows |
 | 7 | `spawn(program)` | the new process's number; −1 no free slot, −2 no such program, −3 not enough memory |
 | 8 | `hart()` | the number of the hart running the caller, −4 to +4 |
-| 9 | `getc()` | the next code point of console input, waiting for one; negative once no more will come |
 | 10 | `wait(pid)` | how child `pid` ended, once it has: `a0` 0 exited, 1 faulted or 2 killed, `a1` its exit code, trap cause, or 0 when killed; `a0` −2 if `pid` is not the caller's child |
-| 13 | `kill(pid)` | ends child `pid` before it runs again: 0; −2 if `pid` is not the caller's child |
-| 14 | `foreground(pid)` | gives the console to child `pid`, so that Ctrl-C kills it, or to nobody with `NO_FOREGROUND` (−1): 0; −2 if `pid` is not the caller's child |
+| 13 | `kill(pid, for)` | ends `pid` before it runs again, a child of the caller when `for` is `FOR_SELF` (−1), or, for a driver, a child of process `for`: 0; 1 (`KILL_ENDED`) if it had ended already; −2 if `pid` is not that process's child, −21 `for` from a process that drives nothing |
 | 15 | `spawnw(window, for)` | starts the program file whose first block is in block window `window` (docs/filesystem.md), as the caller's child when `for` is `FOR_SELF` (−1), or as the child of process `for`, whose call the caller holds: as `spawn`, with −2 when there is no window or no program in it, or `for` is not waiting for the caller |
 | 23 | `call(pid, w1, w2, w3, w4)` | sends four words to process `pid` and waits for its reply: the reply's four words in `a0` to `a3`; `a0` −2 if there is no such process or it ends first, −3 if `pid` is the caller |
 | 24 | `receive()` | waits for a call: `a0` the caller, `a1` to `a4` its words; or `a0` `FROM_KERNEL` (−1) and `a1` `NOTE_ENDED` (0), `a2` a process that ended, or `a1` `NOTE_IRQ` (1), `a2` a device source the caller drives that interrupted |
@@ -199,13 +196,13 @@ registers mapped past them, at `V_DEVICE`.
 | 28 | `register(name, version)` | gives the caller the server name at `name` (a string of 1 to 8 code points) with protocol version `version`: 0; −15 another process has it, −16 all 9 names are taken, −10 `version` below 1 or an empty name, −11 a name too long, −12 not in the caller's memory. Registering a name it has again changes the version |
 | 29 | `lookup(name, how)` | `a0` the process that registered `name`, `a1` its version; −5 nobody has it (`how` `LOOKUP_NOW`, 0), or with `LOOKUP_WAIT` (1) waits until somebody registers it; −10, −11 and −12 as `register` |
 | 30 | `window(k)` | makes block window `k`, 0 to 8, a zeroed page at `V_BLOCK + PAGE × k`, unless the caller has it already: 0; −10 no such window, −3 no memory |
-| 31 | `drive(source)` | makes the caller the driver of device source `source` (only `SRC_DISK`, 2), its registers mapped at `V_DEVICE + PAGE × (source − 1)` until it ends: 0; −19 it has a driver, −10 not a source the kernel hands out, −21 the caller runs a program file |
+| 31 | `drive(source)` | makes the caller the driver of device source `source` (`SRC_CONSOLE`, 1, or `SRC_DISK`, 2), its registers mapped at `V_DEVICE + PAGE × (source − 1)` until it ends: 0; −19 it has a driver, −10 no such source, −21 the caller runs a program file |
 | 32 | `arm(source)` | lets the source the caller drives interrupt once: 0; −21 it does not drive it |
 | 33 | `phys(address)` | the physical address of the caller's `address`, for a device to use: −12 nothing there, −21 the caller drives no device |
 
-Numbers 11, 12 and 16 to 22 are free: blocks and files are not system
-calls but calls to the disk server and the file server (below and
-docs/filesystem.md), which fail with their own negative numbers, −2 and
+Numbers 9, 11, 12, 14 and 16 to 22 are free: console input, blocks and
+files are not system calls but calls to the console server, the disk
+server and the file server (below and docs/filesystem.md), which fail with their own negative numbers, −2 and
 −4 to −14: no filesystem, no such file, not a
 directory, a bad descriptor and so on, each named in `include/layout.s`
 (`E_NOENT`, `E_BADF`, ...).
@@ -219,21 +216,30 @@ not failures, and so can an exit code: `wait` returns it in `a1`, apart
 from its status in `a0`. A process that ends keeps its slot until its
 parent waits for it, or until the parent ends too.
 
-`getc` sleeps until input comes: console input wakes the reader through
-detrytus's interrupt controller, routed to hart 0, and the reader takes no
-hart while it waits. `detrytus run --input FILE` closes the console behind
-the file, so `getc` returns `GETC_NONE` at its end; in `detrytus debug`
-the console stays open, `input TEXT` types more while a program waits, and
-`eof` closes it.
+The console belongs to a process, the **console server**
+(`user/consd.s`), which drives it and registers as `console`, protocol
+`CONSOLE_PROTOCOL`. A call to it with `CN_WRITE`, a buffer and a count
+prints that many trytes; with `CN_GETC` it answers with the next code
+point typed, holding the call until there is one, and `GETC_NONE` once
+the console has closed. The reader takes no hart while it waits: input
+reaches the server as an interrupt notice. `detrytus run --input FILE`
+closes the console behind the file; in `detrytus debug` the console
+stays open, `input TEXT` types more while a program waits, and `eof`
+closes it. The kernel still writes its own messages, and `putc` and
+`puts`, to the console's output directly: they are its log.
 
 Ctrl-C (code point 3) kills the console's **foreground process**, which
-`foreground` names; the shell gives it each program it runs, and the
-kernel takes the console back when that process ends. To see a Ctrl-C
-while nobody reads, the kernel reads console input into a buffer of its
-own, but only while a reader waits (as much as the readers need) or a
-foreground process runs (all of it). Ctrl-C throws away what was typed
-before it, as a terminal does; with no foreground process it is an
-ordinary code point.
+`CN_FOREGROUND` names; the shell gives it each program it runs and takes
+the console back after, and the server lets go of a foreground process
+that ends. The server ends it with `kill` on behalf of the process that
+named it, which the kernel allows a driver, so it can end only that
+process's children. To see a Ctrl-C while nobody reads, the server reads
+console input into a buffer of its own, but only while a reader waits
+(as much as the readers need) or a foreground process runs (all of it).
+Ctrl-C throws away what was typed before it, as a terminal does; with no
+foreground process it is an ordinary code point, and one that ended
+nothing (the process had ended already) waits in the buffer for the next
+foreground process.
 
 A block is one page, and a process's own page holds its code, so blocks
 travel through **block windows**: up to nine pages, window `k` at
@@ -271,7 +277,7 @@ tools/fs.py new disk.img 100 notes.txt bin/*.s
 tools/fs.py mkdir disk.img docs
 tools/fs.py put disk.img README.md docs
 printf 'ls\nls bin\ncat docs/README.md\nwrite docs/motd hello\n' > session.txt
-detrytus run shell.s --ram-pages 40 --input session.txt --disk disk.img
+detrytus run shell.s --ram-pages 81 --input session.txt --disk disk.img
 ```
 
 **Messages for servers.** A server is a process that serves others'
@@ -285,7 +291,7 @@ any later call, so it can forget what it kept for one; a call to a
 process that ends fails. A server asleep in `receive` with nobody left
 to call it does not keep the machine from powering off.
 
-**Drivers.** The kernel keeps no device but the console. A process
+**Drivers.** The kernel keeps no device. A process
 from the kernel image may `drive` a device source: the device's
 registers are mapped into it, and the kernel only passes its interrupts
 on. The driver `arm`s the source when it expects an interrupt, such as

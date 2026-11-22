@@ -60,15 +60,15 @@ def test_spawn_fails_when_memory_runs_out():
 
 
 def test_spawn_fails_when_the_table_is_full():
-    # Room in memory for eight processes, but only six slots.
-    calls = "\n        ".join(spawn(1) for _ in range(5))
+    # Pages 9..48: room in memory for ten processes, but only nine slots.
+    calls = "\n        ".join(spawn(1) for _ in range(8))
     init = f"""
         {calls}
         {spawn(1)}
         mv    a1, a0
         {EXIT}
     """
-    result = run(init, WAIT, max_steps=3_000_000)
+    result = run(init, WAIT, ram_pages=49, max_steps=3_000_000)
     assert result.code_of(0) == -1
 
 
@@ -134,8 +134,8 @@ msg_b:  .string "B\\n"
     result = run(init, first, second, max_steps=4_000_000)
     assert result.exit_code == 0
     assert result.console.count("A\n") == 1
-    # Slots 2 to 5, then slot 1 again (slot 0 is init's): five Bs.
-    assert result.console.count("B\n") == 5
+    # Slots 2 to 8, then slot 1 again (slot 0 is init's): eight Bs.
+    assert result.console.count("B\n") == 8
     assert [p for p, _ in result.exits()].count(1) == 2
 
 

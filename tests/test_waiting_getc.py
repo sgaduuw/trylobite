@@ -10,6 +10,7 @@ import re
 
 from tests.kernel import (
     EXIT,
+    GETC,
     ROOT,
     SPAWN_BOTH,
     assemble_file,
@@ -23,8 +24,7 @@ WAIT = "step 300000\n"
 # Print every character read until getc says there is none, then exit
 # with what it said.
 ECHO = f"""
-1:      li    a0, SYS_GETC
-        sys
+1:      {GETC}
         bltz  a0, 2f
         mv    a1, a0
         li    a0, SYS_PUTC
@@ -36,8 +36,7 @@ ECHO = f"""
 
 # Read one character and exit with it.
 ONE = f"""
-        li    a0, SYS_GETC
-        sys
+        {GETC}
         mv    a1, a0
         {EXIT}
 """
@@ -50,7 +49,8 @@ def program_output(session: str) -> str:
 
 def test_getc_waits_for_input_and_only_eof_ends_it():
     out = debug_session(
-        build(ECHO), f"{WAIT}input ab\\n\n{WAIT}input c\n{WAIT}eof\ncontinue\n"
+        build(ECHO, console=True),
+        f"{WAIT}input ab\\n\n{WAIT}input c\n{WAIT}eof\ncontinue\n",
     )
     # Each piece of input came after a wait, and the reader was still there
     # to echo it: it never saw GETC_NONE until eof.
@@ -66,26 +66,29 @@ def test_getc_waits_for_input_and_only_eof_ends_it():
 
 
 def test_eof_wakes_a_waiting_reader_with_none():
-    out = debug_session(build(ECHO), f"{WAIT}eof\ncontinue\n")
+    out = debug_session(build(ECHO, console=True), f"{WAIT}eof\ncontinue\n")
     waited = re.search(r"=> -?\d+ <", out).start()
     assert out.index("process 0 exited with code -1") > waited, out
 
 
 def test_input_goes_to_every_waiting_reader_once():
     init = SPAWN_BOTH
-    out = debug_session(build(init, ONE, ONE), f"{WAIT}input xy\ncontinue\n")
+    out = debug_session(
+        build(init, ONE, ONE, console=True), f"{WAIT}input xy\ncontinue\n"
+    )
     codes = sorted(
-        int(c) for c in re.findall(r"process [12] exited with code (-?\d+)", out)
+        int(c) for c in re.findall(r"process [23] exited with code (-?\d+)", out)
     )
     assert codes == [ord("x"), ord("y")], out
 
 
 def test_a_reader_left_waiting_after_the_others_is_woken_by_eof():
     out = debug_session(
-        build(SPAWN_BOTH, ONE, ONE), f"{WAIT}input z\n{WAIT}eof\ncontinue\n"
+        build(SPAWN_BOTH, ONE, ONE, console=True),
+        f"{WAIT}input z\n{WAIT}eof\ncontinue\n",
     )
     codes = sorted(
-        int(c) for c in re.findall(r"process [12] exited with code (-?\d+)", out)
+        int(c) for c in re.findall(r"process [23] exited with code (-?\d+)", out)
     )
     assert codes == [-1, ord("z")], out
 
@@ -103,7 +106,7 @@ def test_the_shell_waits_at_its_prompt_for_what_is_typed():
         "trylobite: booting\n"
         "$ hello\n"
         "hello from a balanced-ternary machine\n"
-        "trylobite: process 3 exited with code 0\n"
+        "trylobite: process 4 exited with code 0\n"
         "$ exit\n"
         "trylobite: process 0 exited with code 0\n"
     ), out
@@ -122,6 +125,8 @@ SPIN = f"""
 def test_input_wakes_a_reader_while_another_process_keeps_the_hart_busy():
     # On one hart the spinner is running when the input comes, so the
     # interrupt lands in user mode and the kernel serves it from there.
-    out = debug_session(build(SPAWN_BOTH, ONE, SPIN), f"{WAIT}input q\n{WAIT}", harts=1)
-    assert f"process 1 exited with code {ord('q')}" in out, out
-    assert "process 2 exited" not in out, out  # it was still spinning
+    out = debug_session(
+        build(SPAWN_BOTH, ONE, SPIN, console=True), f"{WAIT}input q\n{WAIT}", harts=1
+    )
+    assert f"process 2 exited with code {ord('q')}" in out, out
+    assert "process 3 exited" not in out, out  # it was still spinning

@@ -188,7 +188,7 @@ msg:    .string "A\\n"
     # Precondition: both tenants of slot 1 ran on hart -1.
     assert [c for p, c in result.exits() if p == 1] == [-1, -1]
     assert result.console.count("A\n") == 1
-    assert result.console.count("B\n") == 5
+    assert result.console.count("B\n") == 8
 
 
 def test_harts_waiting_for_the_kernel_lock_sleep():

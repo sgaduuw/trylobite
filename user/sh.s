@@ -2,8 +2,11 @@
 # first word names, waits for it, and says how it ended if not with code
 # 0. Some words are built in: exit, and ls, cat, write, rm, mkdir, rmdir,
 # cd and pwd, which use the filesystem on the disk (docs/filesystem.md)
-# through the file server. The shell starts it first, as init, after the
-# disk server it needs, and finds it by its name. A word that is neither
+# through the file server. The console is the console server's: the
+# shell reads and prints through it, and gives it each program it runs as
+# the foreground, for Ctrl-C. The kernel starts the shell as init; it
+# starts the console server, then the disk server and the file server
+# that needs it, and finds the servers by their names. A word that is neither
 # built in nor a program in the kernel image names a program file: a
 # path if it has a slash, else a file in /bin. It stops at the end of input. Programs take no arguments yet.
 
@@ -17,8 +20,21 @@
         .equ  BUF_MAX, 243             # trytes cat reads at a time
         .equ  SH_NOFS, -1              # sh_fs with no file server: no process
                                        # has the number, so a call is E_NOPROC
+        .equ  SH_NOCON, -1             # sh_con with no console server, alike
 
-sh:     li    a0, SYS_SPAWN            # the disk server, which the
+sh:     li    a0, SYS_SPAWN            # the console server
+        li    a1, SH_CONSD
+        sys
+        bltz  a0, 1f                   # none: sh_con stays SH_NOCON
+        li    a0, SYS_LOOKUP           # wait until it is ready
+        la    a1, sh_conname
+        li    a2, LOOKUP_WAIT
+        sys
+        bltz  a0, 1f
+        li    t0, CONSOLE_PROTOCOL     # calls it would misread: none at all
+        bne   a1, t0, 1f
+        sw    a0, sh_con
+1:      li    a0, SYS_SPAWN            # the disk server, which the
         li    a1, SH_DISKD             # file server waits for
         sys
         bltz  a0, prompt               # none: no file server either
@@ -35,14 +51,16 @@ sh:     li    a0, SYS_SPAWN            # the disk server, which the
         bne   a1, t0, prompt
         sw    a0, sh_fs
 prompt: la    a1, sh_prompt
-        li    a0, SYS_PUTS
-        sys
+        call  puts
         la    s0, sh_line              # s0: the line
         mv    s1, s0                   # s1: just past what was typed
 
-read:   li    a0, SYS_GETC
+read:   li    a0, SYS_CALL
+        lw    a1, sh_con
+        li    a2, CN_GETC
         sys
-        br3   a0, eof, got             # zero, NUL, is ignored
+        br3   a0, eof, got             # zero, NUL, is ignored; with no
+                                       # console server E_NOPROC ends it
         j     read
 got:    li    t0, '\n'
         beq   a0, t0, enter
@@ -57,31 +75,26 @@ got:    li    t0, '\n'
         st    a0, 0(s1)
         addi  s1, s1, 1
         mv    a1, a0                   # echo it, as a terminal would
-        li    a0, SYS_PUTC
-        sys
+        call  putc
         j     read
 erase:  beq   s1, s0, read             # nothing to erase
         addi  s1, s1, -1
         la    a1, sh_rubout
-        li    a0, SYS_PUTS
-        sys
+        call  puts
         j     read
 
 cancel: la    a1, sh_cancel
-        li    a0, SYS_PUTS
-        sys
+        call  puts
         j     prompt
 
-eof:    li    a0, SYS_PUTC             # end the last prompt's line
-        li    a1, '\n'
-        sys
+eof:    li    a1, '\n'                # end the last prompt's line
+        call  putc
         li    a0, SYS_EXIT
         li    a1, 0
         sys
 
-enter:  li    a0, SYS_PUTC
-        li    a1, '\n'
-        sys
+enter:  li    a1, '\n'
+        call  putc
         st    zero, 0(s1)
         mv    a0, s0
         call  word
@@ -149,21 +162,17 @@ from_disk:
         j     started                  # cannot start it, for another reason
 not_prog:
         la    a1, sh_notprog
-        li    a0, SYS_PUTS
-        sys
+        call  puts
         mv    a1, s0
         j     say
 
 unknown:
         la    a1, sh_unknown
-        li    a0, SYS_PUTS
-        sys
+        call  puts
         mv    a1, s0
-        li    a0, SYS_PUTS
-        sys
-        li    a0, SYS_PUTC
+        call  puts
         li    a1, '\n'
-        sys
+        call  putc
         j     prompt
 
 found:  li    a0, SYS_SPAWN
@@ -173,19 +182,21 @@ started:                               # a0: the child, or why it did not start
         bgez  a0, 1f
         mv    s3, a0                   # it could not start: say why
         la    a1, sh_nostart
-        li    a0, SYS_PUTS
-        sys
+        call  puts
         mv    a0, s3
         call  putn
         j     newline
 1:      mv    s3, a0                   # s3: the child
-        mv    a1, a0                   # Ctrl-C kills it while it runs; the
-        li    a0, SYS_FOREGROUND       # kernel takes the console back after
-        sys
+        mv    a3, a0                   # Ctrl-C kills it while it runs
+        call  fground
         mv    a1, s3
         li    a0, SYS_WAIT
         sys
         mv    s3, a1                   # s3: its exit code or trap cause
+        mv    s2, a0                   # s2: how it ended
+        li    a3, NO_FOREGROUND        # the console is the shell's again,
+        call  fground                  # before the next program's number
+        mv    a0, s2                   # can be this one's
         li    t0, WAIT_KILLED
         beq   a0, t0, killed
         br3   a0, prompt, faulted      # negative cannot happen: it is ours
@@ -193,19 +204,17 @@ started:                               # a0: the child, or why it did not start
         la    a1, sh_exited
         j     2f
 killed: la    a1, sh_killed
-        li    a0, SYS_PUTS
-        sys
+        call  puts
         j     newline
 faulted:
         la    a1, sh_faulted
-2:      li    a0, SYS_PUTS
-        sys
+2:
+        call  puts
         mv    a0, s3
         call  putn
 newline:
-        li    a0, SYS_PUTC
         li    a1, '\n'
-        sys
+        call  putc
         j     prompt
 
 # --- built-ins ----------------------------------------------------------------
@@ -260,21 +269,19 @@ do_ls:  mv    a0, s4
         beq   t1, t2, 3f
         lw    a0, sh_stat + ST_SIZE
         call  putn
-        li    a0, SYS_PUTC
         li    a1, ' '
-        sys
-3:      li    a0, SYS_PUTS
+        call  putc
+3:
         la    a1, sh_name
-        sys
+        call  puts
         lw    t1, sh_stat + ST_TYPE
         li    t2, T_DIR
         bne   t1, t2, 4f
-        li    a0, SYS_PUTC
         li    a1, '/'
-        sys
-4:      li    a0, SYS_PUTC
+        call  putc
+4:
         li    a1, '\n'
-        sys
+        call  putc
         j     2b
 6:      call  close_s6
         j     prompt
@@ -296,9 +303,8 @@ do_cat: call  name_arg
         la    t0, sh_buf
         add   t0, t0, a0
         st    zero, 0(t0)
-        li    a0, SYS_PUTS
         la    a1, sh_buf
-        sys
+        call  puts
         j     1b
 2:      call  close_s6
         j     prompt
@@ -365,9 +371,8 @@ do_pwd: li    a0, SYS_CALL
         sys
         la    s5, sh_dot
         bltz  a0, fail
-        li    a0, SYS_PUTS
         la    a1, sh_buf
-        sys
+        call  puts
         j     newline
 
 # rm PATH, mkdir PATH, rmdir PATH: one call each, on the path.
@@ -394,14 +399,11 @@ failc:  mv    s3, a0
         mv    a0, s3
 fail:   mv    s3, a0                   # s3: why
         la    a1, sh_sh
-        li    a0, SYS_PUTS
-        sys
+        call  puts
         mv    a1, s5
-        li    a0, SYS_PUTS
-        sys
+        call  puts
         la    a1, sh_colon
-        li    a0, SYS_PUTS
-        sys
+        call  puts
         la    s2, sh_errors            # s2: the table entry tried
 1:      lw    t0, 0(s2)
         beqz  t0, 2f                   # not in the table
@@ -409,8 +411,7 @@ fail:   mv    s3, a0                   # s3: why
         addi  s2, s2, 6
         j     1b
 2:      la    a1, sh_error
-        li    a0, SYS_PUTS
-        sys
+        call  puts
         mv    a0, s3
         call  putn
         j     newline
@@ -418,8 +419,8 @@ fail:   mv    s3, a0                   # s3: why
         j     say
 no_name:
         la    a1, sh_noname
-say:    li    a0, SYS_PUTS
-        sys
+say:
+        call  puts
         j     newline
 
 # --- helpers --------------------------------------------------------------------
@@ -499,12 +500,42 @@ streq:  lt    t0, 0(a0)
 2:      li    a0, 1
         ret
 
-# putn: print a0 in decimal. Clobbers a0, a1, t0..t3.
-putn:   mv    t3, a0
-        bgez  t3, 1f
-        li    a0, SYS_PUTC
-        li    a1, '-'
+# puts: print the 0-terminated string at a1. putc: print code point a1,
+# which fits in a tryte. Both through the console server. Clobber a0..a4
+# and t0.
+puts:   mv    a4, a1
+1:      lt    t0, 0(a4)
+        beqz  t0, 2f
+        addi  a4, a4, 1
+        j     1b
+2:      sub   a4, a4, a1               # a4: its length
+        mv    a3, a1
+        j     3f
+putc:   st    a1, sh_ch
+        la    a3, sh_ch
+        li    a4, 1
+3:      li    a0, SYS_CALL
+        lw    a1, sh_con
+        li    a2, CN_WRITE
         sys
+        ret
+
+# fground: give the console to process a3, or to nobody with
+# NO_FOREGROUND. Clobbers a0..a2.
+fground:
+        li    a0, SYS_CALL
+        lw    a1, sh_con
+        li    a2, CN_FOREGROUND
+        sys
+        ret
+
+# putn: print a0 in decimal. Clobbers a0..a4, t0..t3.
+putn:   addi  sp, sp, -3               # it calls puts and putc
+        sw    ra, 0(sp)
+        mv    t3, a0
+        bgez  t3, 1f
+        li    a1, '-'
+        call  putc
         neg   t3, t3
 1:      la    t2, sh_digits_end
         st    zero, 0(t2)
@@ -516,8 +547,9 @@ putn:   mv    t3, a0
         div   t3, t3, t1
         bnez  t3, 2b
         mv    a1, t2
-        li    a0, SYS_PUTS
-        sys
+        call  puts
+        lw    ra, 0(sp)
+        addi  sp, sp, 3
         ret
 
 # Each entry: the name, and where the built-in starts; 0 ends it.
@@ -556,7 +588,10 @@ sh_programs:
 
         .align 1
 sh_fs:       .word SH_NOFS             # the file server's process number
+sh_con:      .word SH_NOCON            # the console server's process number
 sh_fsname:   .string "fs"
+sh_conname:  .string "console"
+sh_ch:       .zero 1                   # what putc prints
 sh_pingpong: .string "pingpong"
 sh_exit:     .string "exit"
 sh_ls:       .string "ls"

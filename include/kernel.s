@@ -25,7 +25,6 @@
         .include "../kernel/lock.s"
         .include "../kernel/harts.s"
         .include "../kernel/devices.s"
-        .include "../kernel/input.s"
         .include "../kernel/ipc.s"
         .include "../kernel/names.s"
 
