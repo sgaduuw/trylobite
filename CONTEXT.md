@@ -1065,3 +1065,29 @@ point to.
   leaves the shell running without it, as before.
 - The demo's starter became `user/demo-init.s`, so `init` names one
   program.
+
+### 2026-11-22 · init starts again what ends
+
+- **What needs a server goes with it.** A server started again has a new
+  process number and none of the old one's state, so its clients hold a
+  dead number and dead handles. Rather than teach every client to look
+  the name up again and reopen what it had, init ends whatever needs the
+  server (the rows below it that name it, and the shell) and starts the
+  lot again in table order. Open files are lost either way.
+- **Three times each, then give up.** A server or shell that keeps
+  ending would otherwise loop forever. The count never resets; there is
+  no clock worth using for "too often" yet. A shell that exits (end of
+  input, `exit`) is not restarted: init exits too, so sessions still
+  power off.
+- **A parent hears of its children from the start.** `receive` only told
+  a process of endings once it had called `receive`, so a server that
+  ended while init was still starting the others went unnoticed. The
+  kernel now also notes a child's ending for its parent before that.
+  Other parents (the shell) collect notes they never read, which costs
+  nothing.
+- **init's lines are one `puts` each**, so another hart's kernel line
+  cannot land inside one. Its own tests use stand-in servers and a
+  stand-in shell that print nothing, since output through the console
+  server is not ordered against the kernel's log.
+- Still open: a server that ends before it registers leaves init in
+  `LOOKUP_WAIT`, and the kernel reports a deadlock if nothing else runs.

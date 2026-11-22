@@ -44,3 +44,111 @@ def test_a_server_init_does_not_need_can_be_missing():
     result = run_image(shell_build(INIT_PIPED=27), input="ls\n", disk=bin_disk())
     assert "init: no server named pipe\n$ ls\nbin/\n" in result.console
     assert "init: no server named fs" not in result.console
+
+
+def build_with(numbers: dict[str, int], *programs: str):
+    """shell.s with some of init's program numbers changed, and more
+    programs, numbered 9 on."""
+    source = (ROOT / "shell.s").read_text()
+    for name, number in numbers.items():
+        line = next(s for s in source.splitlines() if f".equ  {name}," in s)
+        source = source.replace(line, f"        .equ  {name}, {number}")
+    source = source.replace(".equ  NPROG, 9", f".equ  NPROG, {9 + len(programs)}")
+    for number, body in enumerate(programs, 9):
+        source += f"""
+        .section prog{number}, (P_PROG0 + {number}) * PAGE, V_USER
+        .gp   USER_GP
+{body}
+"""
+    return _assemble(["-"], stdin=source)
+
+
+def failing_server(name: str, protocol: str) -> str:
+    """A server that registers `name` and ends at the first call to it."""
+    return f"""
+        li    a0, SYS_REGISTER
+        la    a1, 3f
+        li    a2, {protocol}
+        sys
+1:      li    a0, SYS_RECEIVE
+        sys
+        bltz  a0, 1b                   # a notice: keep waiting
+        li    a0, SYS_EXIT
+        li    a1, 9
+        sys
+3:      .string "{name}"
+"""
+
+
+def calling_shell(name: str) -> str:
+    """A shell that calls server `name` once and then waits to be ended;
+    it exits, and init with it, once there is no such server."""
+    return f"""
+        li    a0, SYS_LOOKUP
+        la    a1, 3f
+        li    a2, LOOKUP_NOW
+        sys
+        bltz  a0, 2f
+        mv    a1, a0
+        li    a0, SYS_CALL
+        li    a2, 0
+        sys                            # the server ends rather than answer
+1:      li    a0, SYS_RECV
+        sys
+        j     1b
+2:      li    a0, SYS_EXIT
+        li    a1, 0
+        sys
+3:      .string "{name}"
+"""
+
+
+def test_a_server_that_ends_is_started_again_until_init_gives_up():
+    # The pipe server ends at each call: init starts it again, and the
+    # shell, which needs it, three times, then gives up on it; the shell
+    # then finds no pipe server and exits, and init with it.
+    image = build_with(
+        {"INIT_PIPED": 9, "INIT_SH": 10},
+        failing_server("pipe", "PIPE_PROTOCOL"),
+        calling_shell("pipe"),
+    )
+    result = run_image(image, max_steps=10_000_000)
+    assert result.exit_code == 0, result.console
+    init = [line for line in result.console.splitlines() if line.startswith("init:")]
+    assert init == ["init: pipe ended, starting it again"] * 3 + [
+        "init: pipe ended too often, giving up on it"
+    ]
+    assert result.console.count(" killed\n") == 4  # the shell, each time
+    assert result.code_of(0) == 0
+
+
+def test_what_needs_a_server_that_ends_is_started_again_with_it():
+    # The disk server ends at its first call: the file server (process 4),
+    # which needs it, and the shell (5) are ended and started again too.
+    image = build_with(
+        {"INIT_DISKD": 9, "INIT_SH": 10},
+        failing_server("disk", "DISK_PROTOCOL"),
+        calling_shell("disk"),
+    )
+    result = run_image(image, disk=bin_disk(), max_steps=10_000_000)
+    assert result.exit_code == 0, result.console
+    console = result.console
+    assert console.count("init: disk ended, starting it again\n") == 3
+    assert "trylobite: process 4 killed\n" in console  # the file server
+    assert "trylobite: process 5 killed\n" in console  # the shell
+    # Given up on the disk server, init leaves the file server down too.
+    init = [line for line in console.splitlines() if line.startswith("init:")]
+    assert init[-2:] == [
+        "init: disk ended too often, giving up on it",
+        "init: no server named fs",
+    ]
+
+
+def test_a_shell_that_faults_is_started_again_until_init_gives_up():
+    image = build_with({"INIT_SH": 9}, "lw    t0, 0(zero)  # nothing is there")
+    result = run_image(image, disk=bin_disk())
+    console = result.console
+    assert console.count(" faulted") == 4  # the first start and three more
+    assert console.count("init: sh ended, starting it again\n") == 3
+    assert "init: sh ended too often, giving up on it\n" in console
+    assert result.code_of(0) == 1  # INIT_LOST

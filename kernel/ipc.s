@@ -222,17 +222,29 @@ rouse:
 9:      ret
 
 # ipc_ended: process t4, in s0, has ended (bury). Tell every process
-# that receives, and fail the calls made to it. Clobbers s1, t0..t3.
+# that receives, and its parent, whether it has received yet or not (so
+# init hears of a server that ends before init first receives), and fail
+# the calls made to it. Clobbers s1, t0..t3.
 ipc_ended:
-        addi  sp, sp, -3
+        addi  sp, sp, -6
         sw    ra, 0(sp)
+        li    t0, 0                    # its parent's record, 0 for none
+        lw    t1, PCB_PARENT(s0)
+        bltz  t1, 0f
+        li    t0, PCB_SIZE
+        mul   t0, t1, t0
+        la    t1, procs
+        add   t0, t0, t1
+0:      sw    t0, 3(sp)
         la    s1, procs
 1:      beq   s1, s0, 4f
         lw    t0, PCB_STATE(s1)
         beqz  t0, 4f
         lw    t1, PCB_SERVES(s1)
-        beqz  t1, 2f
-        add   t1, s1, t4
+        bnez  t1, 5f
+        lw    t1, 3(sp)
+        bne   t1, s1, 2f               # neither receives nor is its parent
+5:      add   t1, s1, t4
         li    t2, 1
         st    t2, PCB_NOTES(t1)
         call  rouse
@@ -252,7 +264,7 @@ ipc_ended:
         la    t0, procs + NPROC * PCB_SIZE
         blt   s1, t0, 1b
         lw    ra, 0(sp)
-        addi  sp, sp, 3
+        addi  sp, sp, 6
         ret
 
 # uva: a0 = the kernel address of address a1 in the process whose record

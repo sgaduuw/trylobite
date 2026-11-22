@@ -283,6 +283,28 @@ def test_a_receiver_hears_of_each_process_that_ends():
     assert result.code_of(0) == 0
 
 
+def test_a_parent_hears_of_a_child_that_ended_before_it_received():
+    # The child ends while init has never called receive; init's first
+    # receive still tells it, as init (user/init.s) relies on for a server
+    # that ends while init waits for another's name.
+    init = f"""
+        {spawn(1, "s1")}
+        {wait_for("s1")}                 # it has ended; init never received
+        li    a0, SYS_RECEIVE
+        sys
+        li    t0, FROM_KERNEL
+        bne   a0, t0, 1f
+        li    t0, NOTE_ENDED
+        bne   a1, t0, 1f
+        sub   a1, a2, s1               # 0 when it named the child
+        {EXIT}
+1:      li    a1, 99
+        {EXIT}
+"""
+    result = run(init)
+    assert result.code_of(0) == 0
+
+
 def test_a_call_fails_when_its_server_ends():
     # This server takes a call and exits without replying.
     server = f"""
