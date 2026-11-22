@@ -1011,3 +1011,13 @@ count standard input. Now a program starts as a C program does, with
   goes through, negates it back, as do the redirection path and
   `write`'s text. A word of quotes alone becomes `SH_EMPTY` so that it is
   still a word, an empty argument, as `echo a "" b` gives in Unix.
+
+### 2026-11-22 · The README is the front page; the reference is docs/kernel.md
+
+The README had grown into the whole kernel manual, with the overview
+lost in it. It now says what trylobite is (with a pointer for readers
+who came looking for the Setun, and plainly that this is not Setun
+software), how to try it, and how the pieces fit; the memory map, the
+system calls and each server's description moved to `docs/kernel.md`,
+which the comments in `include/layout.s` and `docs/filesystem.md` now
+point to.

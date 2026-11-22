@@ -183,7 +183,7 @@
         .equ  FOR_SELF, -1                # spawnw, kill: the caller is the parent
         # 16 to 22 were the kernel's file calls: files are the file server's now
 
-# Descriptors (README, Descriptors). Each process has NDESC of them, 0 to
+# Descriptors (docs/kernel.md, Descriptors). Each process has NDESC of them, 0 to
 # NDESC - 1, in its record: each names a server and a handle that server
 # gave out, or nothing. Only a server puts one there, with give, into a
 # process whose call it holds; a process can copy and close its own, and
@@ -236,7 +236,7 @@
                                           # 0 at the end (directories)
         .equ  IO_FIRST,  -4               # the lowest IO_ operation
 
-# Messages for servers (README, Messages). A message is four words, a2 to
+# Messages for servers (docs/kernel.md, Messages for servers). A message is four words, a2 to
 # a5 as sent; a server answers each call with a reply of four words.
         .equ  SYS_CALL,  23               # send a2..a5 to process a1 and wait for
                                           # its reply: a0..a3 = the reply's words;
@@ -259,7 +259,7 @@
         .equ  NOTE_CLOSED, 2              # ... no descriptor names handle a2 of
                                           # the receiver's any more
 
-# Server names (README, Names). A server registers a name and the
+# Server names (docs/kernel.md, Names). A server registers a name and the
 # version of the protocol it speaks once it is ready to take calls; a
 # client looks the name up to find its process number, and checks the
 # version before it calls. The kernel drops a server's names when it
@@ -292,7 +292,7 @@
                                           # none there: 0, E_INVAL (no such
                                           # window), E_NOMEM
 
-# Drivers (README, Drivers). A driver is a process that owns a device:
+# Drivers (docs/kernel.md, Drivers). A driver is a process that owns a device:
 # the device's registers are mapped into it, and its interrupts come to
 # it as NOTE_IRQ notices from receive. Only a program from the kernel
 # image may drive one: a device that moves memory by itself can write
