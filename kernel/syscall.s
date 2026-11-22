@@ -34,10 +34,10 @@ syscall_again:                         # resume runs an abandoned call again
         li    t0, SYS_WAIT
         beq   a0, t0, sys_wait
         li    t0, SYS_BREAD
-        li    a2, BLOCK_READ
+        li    a3, BLOCK_READ
         beq   a0, t0, sys_block
         li    t0, SYS_BWRITE
-        li    a2, BLOCK_WRITE
+        li    a3, BLOCK_WRITE
         beq   a0, t0, sys_block
         li    t0, SYS_KILL
         beq   a0, t0, sys_kill
@@ -59,6 +59,16 @@ syscall_again:                         # resume runs an abandoned call again
         beq   a0, t0, sys_stat
         li    t0, SYS_SPAWNF
         beq   a0, t0, sys_spawnf
+        li    t0, SYS_CALL
+        beq   a0, t0, sys_call
+        li    t0, SYS_RECEIVE
+        beq   a0, t0, sys_receive
+        li    t0, SYS_REPLY
+        beq   a0, t0, sys_reply
+        li    t0, SYS_COPYIN
+        beq   a0, t0, sys_copyin
+        li    t0, SYS_COPYOUT
+        beq   a0, t0, sys_copyout
         li    a0, E_NOCALL
 
 sys_return:                            # a0: the result
@@ -79,32 +89,29 @@ sys_hart:
         mv    a0, tp
         j     sys_return
 
-# puts(address): print a 0-terminated string from the caller's page in one
-# go, so preemption cannot split it. Reading user memory needs SUA, and
-# the address must lie in the process's page: otherwise a process could
-# make the kernel print kernel memory, or fault inside the kernel.
-# puts(address): the string may be in the process's page or, once it has
-# one, its block window just above.
+# puts(address): print a 0-terminated string from the caller's memory in
+# one go, so preemption cannot split it: its page, or a block window it
+# has. The kernel reads it through the direct map (uva, ipc.s), so a
+# process cannot make it print kernel memory, or fault inside it; the
+# string stops at the end of what the process has mapped.
 sys_puts:
-        li    t3, V_USER - 9841        # the user page's first tryte
-        blt   a1, t3, 2f
-        li    t3, V_USER + 9841        # and its last
-        lw    t0, PCB_BLOCKPG(s0)
-        beqz  t0, 0f
-        li    t3, V_BLOCK + 9841       # or the window's last
-0:      bgt   a1, t3, 2f
-        li    t0, 0t+000
-        csrw  ststatus, t0             # SUA on (resume rewrites ststatus anyway)
+        mv    s1, a1                   # s1: where the string goes on
         li    t5, V_CONSOLE
-1:      bgt   a1, t3, 3f               # stop at the end of the page
-        lt    t0, 0(a1)
+        mv    a0, s0
+        call  uva
+        beqz  a0, 2f
+1:      lt    t0, 0(a0)
         beqz  t0, 3f
         sw    t0, 0(t5)
-        addi  a1, a1, 1
-        j     1b
-3:      li    t0, 0
-        csrw  ststatus, t0             # SUA off again
-        li    a0, 0
+        addi  s1, s1, 1
+        addi  a0, a0, 1
+        addi  a1, a1, -1
+        bnez  a1, 1b
+        mv    a1, s1                   # on into the next page, if mapped
+        mv    a0, s0
+        call  uva
+        bnez  a0, 1b
+3:      li    a0, 0
         j     sys_return
 2:      li    a0, E_RANGE
         j     sys_return

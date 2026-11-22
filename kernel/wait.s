@@ -89,6 +89,7 @@ kill_pid:
 bury:
         call  current_pid
         mv    t4, a0                   # t4: its number
+        call  ipc_ended                # servers learn of it (ipc.s)
         lw    t0, foreground
         bne   t0, t4, 0f
         li    t0, NO_FOREGROUND        # the console goes back to nobody

@@ -55,6 +55,10 @@ pick:
 4:      lw    t0, PCB_STATE(s1)
         li    t1, ST_RECV
         beq   t0, t1, 5f
+        li    t1, ST_CALL              # a server asleep in receive is not
+        beq   t0, t1, 5f               # stuck: it has nobody left to serve
+        li    t1, ST_REPLY
+        beq   t0, t1, 5f
         addi  s1, s1, PCB_SIZE
         blt   s1, t3, 4b
         la    a0, msg_done

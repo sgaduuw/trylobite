@@ -98,7 +98,7 @@ A file is trytes. Two kinds use this:
 ## System calls
 
 A path is a 0-terminated string in the caller's memory, and a buffer a
-range of it: its page, or its block window once it has one (otherwise
+range of it: its page, or its block window 0 once it has one (otherwise
 `E_FAULT`). Each call fails with `E_NOFS` when there is no disk or no
 filesystem on it, `E_IO` when the disk refuses a block or names one
 past its end, and `E_NOMEM` when the cache has no room (below). The

@@ -9,7 +9,7 @@ MESSAGE = "kept on a ternary disk\n"
 
 
 def call(number: str, block: int) -> str:
-    return f"li a0, {number}\n        li a1, {block}\n        sys"
+    return f"li a0, {number}\n        li a1, {block}\n        li a2, 0\n        sys"
 
 
 # Read block 3 (making the window), copy MESSAGE into it, write it back.

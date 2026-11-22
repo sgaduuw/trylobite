@@ -261,8 +261,13 @@ release:
         call  free_page
         lw    a0, PCB_USERPG(s0)
         call  free_page
-        lw    a0, PCB_BLOCKPG(s0)
-        beqz  a0, 1f
+        li    s1, NWIN                 # and its block windows
+        mv    s2, s0
+1:      lw    a0, PCB_WINS(s2)
+        beqz  a0, 2f
         call  free_page
-1:      j     bury
+2:      addi  s2, s2, 3
+        addi  s1, s1, -1
+        bnez  s1, 1b
+        j     bury
         .nocompress

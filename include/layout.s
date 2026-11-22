@@ -50,7 +50,9 @@
                                           # foreground process: kills it
         .equ  CONIN_MAX, 81               # code points the kernel holds for getc
         .equ  V_USER, SUPER               # every process runs from here
-        .equ  V_BLOCK, V_USER + PAGE      # its block window, once it uses the disk
+        .equ  V_BLOCK, V_USER + PAGE      # its block windows, NWIN pages from here,
+                                          # each made when the disk is first used
+                                          # through it
         .equ  USER_GP, V_USER             # every process starts with gp here
         .equ  USER_SP, V_USER + 9843      # just above its page; the first push
                                           # lands at the page's top word
@@ -156,9 +158,10 @@
                                           # for one, or GETC_NONE when none will come
         .equ  SYS_WAIT,  10               # wait for child a1 to end: a0 = how it
                                           # ended, a1 = its exit code or trap cause
-        .equ  SYS_BREAD, 11               # read block a1 into the block window, at
-                                          # V_BLOCK: 0 done, E_NOBLOCK, E_NOMEM, E_IO
-        .equ  SYS_BWRITE, 12              # write the block window to block a1: the
+        .equ  SYS_BREAD, 11               # read block a1 into block window a2, at
+                                          # V_BLOCK + PAGE * a2: 0 done, E_NOBLOCK
+                                          # (no such block or window), E_NOMEM, E_IO
+        .equ  SYS_BWRITE, 12              # write block window a2 to block a1: the
                                           # same results
         .equ  SYS_KILL,  13               # end child a1: 0 done (it ends before
                                           # it runs again), E_NOCHILD
@@ -166,7 +169,7 @@
                                           # nobody with NO_FOREGROUND: Ctrl-C
                                           # then kills it. 0 done, E_NOCHILD
         .equ  SYS_SPAWNW, 15              # start the program file whose first
-                                          # block is in the block window (see
+                                          # block is in block window 0 (see
                                           # EXEC_MAGIC): its process number,
                                           # E_NOSLOT, E_NOPROG, E_NOMEM
 
@@ -197,10 +200,30 @@
                                           # spawnw, E_NOEXEC for no program, and
                                           # as open fails
 
+# Messages for servers (README, Messages). A message is four words, a2 to
+# a5 as sent; a server answers each call with a reply of four words.
+        .equ  SYS_CALL,  23               # send a2..a5 to process a1 and wait for
+                                          # its reply: a0..a3 = the reply's words;
+                                          # E_NOPROC (none, or it ended first), E_SELF
+        .equ  SYS_RECEIVE, 24             # wait for a call: a0 = the caller,
+                                          # a1..a4 = its words; or a0 = FROM_KERNEL,
+                                          # a1 = NOTE_ENDED, a2 = a process that ended
+        .equ  SYS_REPLY, 25               # answer the call of process a1 with a2..a5:
+                                          # 0, E_NOPROC (it is not waiting for you)
+        .equ  SYS_COPYIN, 26              # copy a4 trytes from a2 in process a1,
+                                          # whose call you hold, to your a3: 0,
+                                          # E_NOPROC, E_FAULT (not all in its memory
+                                          # or yours)
+        .equ  SYS_COPYOUT, 27             # copy a4 trytes from your a2 to a3 in
+                                          # process a1: as copyin
+        .equ  FROM_KERNEL, -1             # receive: no process sent this
+        .equ  NOTE_ENDED, 0               # ... a process ended, its number in a2
+
         .equ  E_NOCALL,  -1               # no system call with that number
         .equ  E_FULL,    -1               # send: the receiver's mailbox is full
         .equ  E_NOPROC,  -2               # send: no such process
         .equ  E_RANGE,   -2               # puts: the address is outside the process
+        .equ  E_SELF,    -3               # call: a process cannot call itself
         .equ  E_NOSLOT,  -1               # spawn: the process table is full
         .equ  E_NOPROG,  -2               # spawn: no such program; spawnw: no
                                           # window, or no program in it
@@ -218,7 +241,8 @@
         .equ  E_INVAL,  -10               # a flag, count or position out of range
         .equ  E_NAMETOOLONG, -11          # a name past NAME_MAX, or a path of
                                           # more than PATH_DEPTH names
-        .equ  E_FAULT,  -12               # a path or buffer outside the caller
+        .equ  E_FAULT,  -12               # a path or buffer outside the caller;
+                                          # copyin, copyout: outside either process
         .equ  E_NOEXEC, -13               # spawnf: not a program file
         .equ  E_IO,     -14               # the disk refused (bread, bwrite, files)
 
@@ -250,6 +274,8 @@
         .equ  PCB_A1,     45
         .equ  PCB_A2,     48
         .equ  PCB_A3,     51
+        .equ  PCB_A4,     54
+        .equ  PCB_A5,     57
         .equ  PCB_PC,     81
         .equ  PCB_PTBR,   84
         .equ  PCB_STATE,  87              # one of the ST_ values
@@ -261,7 +287,7 @@
         .equ  PCB_USERPG, 105
         .equ  PCB_HART,   108             # the hart running it (see resume)
         .equ  PCB_PARENT, 111             # the process that spawned it, or NO_PARENT
-        .equ  PCB_BLOCKPG, 114            # its block window's page, or 0 for none
+        .equ  PCB_PEER,   114             # whom it calls, while ST_CALL or ST_REPLY
         .equ  PCB_KILLED, 117             # 1 once killed: it ends the next time
                                           # the kernel would run it
         .equ  PCB_DBLOCK, 120             # its disk command, while ST_DISK: the block,
@@ -275,7 +301,15 @@
         .equ  FD_INO,       0             # the inode, NO_INO when closed
         .equ  FD_POS,       3             # the position, in trytes
         .equ  FD_FLAGS,     6             # what open was given
-        .equ  PCB_SIZE,   207
+        .equ  PCB_WINS,   207             # its block windows' pages, a word each,
+        .equ  NWIN,         9             # 0 for none: window k is at V_BLOCK + PAGE * k
+        .equ  PCB_BLOCKPG, PCB_WINS       # window 0, the one spawnw reads
+        .equ  PCB_SERVES, 234             # 1 once it has called receive: it is told
+                                          # of every process that ends
+        .equ  PCB_NOTES,  237             # NPROC trytes: 1 for each process that has
+                                          # ended since receive last told it
+        .equ  PCB_TURN,   243             # receive: the caller it took last
+        .equ  PCB_SIZE,   246
         .equ  PAGES_PER_PROCESS, 4
 
         .equ  ST_EXITED, 0                # also: a free slot
@@ -291,6 +325,10 @@
                                           # bread, bwrite, or a block the cache lacks
         .equ  ST_BUF,    -6               # waiting for a block someone else's
                                           # command is reading into the cache
+        .equ  ST_CALL,   -7               # its call waits for PCB_PEER to receive it
+        .equ  ST_REPLY,  -8               # PCB_PEER has received its call: waits
+                                          # for the reply
+        .equ  ST_RECEIVE, -9              # blocked in SYS_RECEIVE
         .equ  NO_FOREGROUND, -1           # SYS_FOREGROUND: the console is nobody's
         .equ  NO_PARENT, -1               # PCB_PARENT of init and of orphans:
                                           # process numbers are never negative
