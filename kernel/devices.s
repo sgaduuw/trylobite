@@ -1,25 +1,18 @@
 # Device interrupts, on hart 0 under the kernel lock, and the drivers
 # that take them. Every source is routed to hart 0 (the controller's
-# reset value), and enabled only while something wants it: the console
-# while the kernel wants input (input.s), any other source while its
-# driver has armed it.
+# reset value), and enabled only while its driver has armed it.
 
         .compress
-# device_irqs: serve every device source that wants attention: the
-# console here, others by telling their driver. Clobbers a0, a1, s1, s2
-# and t0..t4.
+# device_irqs: tell the driver of every device source that wants
+# attention. Clobbers a0, a1, s1, s2 and t0..t4.
 device_irqs:
         addi  sp, sp, -3
         sw    ra, 0(sp)
 1:      li    t0, V_IRQ
         lw    s2, IRQ_CLAIM(t0)
         beqz  s2, 9f
-        li    t1, SRC_CONSOLE
-        bne   s2, t1, 2f
-        call  console_irq
-        j     3f
-2:      call  drv_irq
-3:      li    t0, V_IRQ
+        call  drv_irq
+        li    t0, V_IRQ
         sw    s2, IRQ_COMPLETE(t0)
         j     1b
 9:      lw    ra, 0(sp)
@@ -27,19 +20,21 @@ device_irqs:
         ret
 
 # --- drivers -------------------------------------------------------------------
-# A device other than the console belongs to the process that drives it
-# (drivers, a record per source, 0 for none): its registers are mapped
-# into that process, and the kernel only passes its interrupts on. The
+# A device belongs to the process that drives it (drivers, a record per
+# source, 0 for none): its registers are mapped into that process, and
+# the kernel only passes its interrupts on. The kernel keeps writing its
+# own messages to the console's output, its log, whoever drives it. The
 # driver arms a source when it expects an interrupt; the interrupt masks
 # it again, and receive hands the driver a NOTE_IRQ notice. irq_armed
 # counts the armed sources, so that pick waits for them instead of
 # calling a client stuck while its server waits on the device.
 
 # drive(source): make the caller source a1's driver, and map the
-# device's registers at V_DEVICE + PAGE * (a1 - 1).
+# device's registers, page dev_pages[a1], at V_DEVICE + PAGE * (a1 - 1).
 sys_drive:
-        li    t0, SRC_DISK             # the console stays the kernel's
-        bne   a1, t0, 7f
+        blez  a1, 7f
+        li    t0, NSRC
+        bgt   a1, t0, 7f
         lw    t0, PCB_FILE(s0)
         bnez  t0, 8f
         call  drv_slot
@@ -52,7 +47,13 @@ sys_drive:
         li    t0, 3                    # leaf entry NWIN + a1
         mul   t0, a1, t0
         add   a0, a0, t0
-        li    t1, P_DISK * PAGE + PTE_LEAF + PTE_R + PTE_W + PTE_U + PTE_A + PTE_D
+        la    t1, dev_pages - 3
+        add   t1, t1, t0
+        lw    t1, 0(t1)
+        li    t2, PAGE
+        mul   t1, t1, t2
+        li    t2, PTE_LEAF + PTE_R + PTE_W + PTE_U + PTE_A + PTE_D
+        add   t1, t1, t2
         sw    t1, 3 * NWIN(a0)
 6:      li    a0, 0
         j     sys_return
@@ -90,6 +91,21 @@ sys_arm:
 # phys(address): the physical address of the caller's address a1, which
 # only a driver needs: to give a device memory to move to or from.
 sys_phys:
+        call  drives_any
+        bltz  a0, sys_return
+        mv    a0, s0
+        call  uva
+        beqz  a0, 8f
+        li    t0, DMAP
+        sub   a0, a0, t0
+        j     sys_return
+8:      li    a0, E_FAULT
+        j     sys_return
+
+# drives_any: a0 = 0 if the process in s0 drives a device, else E_PERM.
+# Clobbers t0..t2.
+drives_any:
+        li    a0, 0
         la    t0, drivers
         li    t1, NSRC
 1:      lw    t2, 0(t0)
@@ -98,15 +114,7 @@ sys_phys:
         addi  t1, t1, -1
         bnez  t1, 1b
         li    a0, E_PERM
-        j     sys_return
-2:      mv    a0, s0
-        call  uva
-        beqz  a0, 8f
-        li    t0, DMAP
-        sub   a0, a0, t0
-        j     sys_return
-8:      li    a0, E_FAULT
-        j     sys_return
+2:      ret
 
 # drv_slot: t0 = the address of source a1's entry in drivers; a1 is 1 to
 # NSRC. Clobbers t1.
@@ -170,3 +178,11 @@ drv_ended:
         ble   t1, t2, 1b
         ret
         .nocompress
+
+# Each source's register page, physical, by source from 1.
+dev_pages:
+        .word P_CONSOLE
+        .word P_DISK
+dev_pages_end:
+        .assert dev_pages_end - dev_pages == 3 * NSRC, "a source without a register page in dev_pages"
+

@@ -135,12 +135,12 @@ def test_children_of_an_exited_parent_leave_nothing_behind():
     result = run_image(image)
     assert result.exit_code == 0
     assert sorted(result.exits()) == [(0, 0), (1, 0), (2, 5)]
-    assert process_states(result, image) == [0] * 6
+    assert process_states(result, image) == [0] * image.symbols["NPROC"]
 
 
 def test_a_reaped_child_frees_its_slot_for_the_next_spawn():
-    # NPROC is 6: init and a child at a time, spawned and reaped 8 times.
-    # Without reaping, the sixth spawn would find no free slot.
+    # NPROC is 9: init and a child at a time, spawned and reaped 12 times.
+    # Without reaping, the ninth spawn would find no free slot.
     init = f"""
         li    s2, 0
 1:      li    a0, SYS_SPAWN
@@ -150,8 +150,8 @@ def test_a_reaped_child_frees_its_slot_for_the_next_spawn():
         mv    s1, a0
         {wait_for("s1")}
         addi  s2, s2, 1
-        li    t0, 8
+        li    t0, 12
         blt   s2, t0, 1b
 2:      {exit_with("s2")}
 """
-    assert run(init, exit_code(0)).code_of(0) == 8
+    assert run(init, exit_code(0)).code_of(0) == 12

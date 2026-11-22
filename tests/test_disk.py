@@ -187,6 +187,7 @@ def test_a_client_killed_with_its_block_in_flight_leaves_the_server_usable():
         bnez  s2, 1b
         li    a0, SYS_KILL
         mv    a1, s1
+        li    a2, FOR_SELF
         sys
         {wait_for("s1")}
         mv    s3, a0
@@ -212,7 +213,7 @@ def test_a_driver_sees_the_device_and_its_own_physical_memory():
     program = report(
         "li a0, SYS_PHYS\n        li a1, V_USER\n        sys",  # not a driver yet
         "li a0, SYS_ARM\n        li a1, SRC_DISK\n        sys",
-        drive("SRC_CONSOLE"),  # the kernel's
+        drive("NSRC + 1"),  # no such source
         drive(0),
         drive(),
         drive(),  # its own again
@@ -245,7 +246,7 @@ def test_a_device_has_one_driver_until_it_ends():
         "li a0, SYS_LOOKUP\n        la a1, name\n        li a2, LOOKUP_WAIT\n"
         "        sys\n        mv s1, a0",
         drive(),
-        "li a0, SYS_KILL\n        mv a1, s1\n        sys",
+        "li a0, SYS_KILL\n        mv a1, s1\n        li a2, FOR_SELF\n        sys",
         wait_for("s1") + "\n        mv    a0, a1",
         drive(),
         data='name: .string "disk"\n',

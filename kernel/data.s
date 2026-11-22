@@ -21,15 +21,9 @@ irq_armed: .word 0                     # sources armed by their drivers
 drivers: .words NSRC                   # each source's driver's record, 0 for
                                        # none (devices.s)
 
-foreground: .word NO_FOREGROUND        # the process Ctrl-C kills (input.s)
-conin_head: .word 0                    # the buffer's oldest code point
-conin_count: .word 0                   # how many it holds
-conin_closed: .word 0                  # 1 once the console said it is closed
-
 procs:  .words NPROC * PCB_SIZE / 3     # the process table
         .assert procs - kgp <= 363, "the process table starts out of c.lagp's reach of gp: move kgp"
 
-conin:  .words CONIN_MAX               # console input, a ring (input.s)
 names:  .words NSRV * SRV / 3          # server names (names.s)
 srv_key: .zero SRV_NAME_MAX + 1        # the name a call gave, zero-padded
 

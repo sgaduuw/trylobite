@@ -22,24 +22,48 @@ sys_wait:
         sw    t0, PCB_STATE(s0)
         j     schedule
 
-# kill(pid): end child pid. It goes the next time the kernel would run
-# it, which for one running on another hart is its next trap, within a
-# timer slice; its parent's wait then reports WAIT_KILLED.
+# kill(pid, for): end pid, a child of the caller, or with for not
+# FOR_SELF a child of process for. It goes the next time the kernel would
+# run it, which for one running on another hart is its next trap, within
+# a timer slice; its parent's wait then reports WAIT_KILLED. A child
+# that has ended already gives KILL_ENDED instead, so the console server
+# can tell that a Ctrl-C ended nothing. Only a
+# driver may kill on another's behalf: the console server, which ends
+# the console's foreground process at Ctrl-C with the authority of the
+# process that gave it the console. A driver is trusted with more than
+# that already, since its device can write any page.
 sys_kill:
-        call  find_child
+        li    t0, FOR_SELF
+        beq   a2, t0, 1f
+        call  drives_any
         bltz  a0, sys_return
+        call  find_child_of
+        j     2f
+1:      call  find_child
+2:      bltz  a0, sys_return
+        lw    t0, PCB_STATE(s1)
+        li    t1, ST_ZOMBIE
+        beq   t0, t1, 3f
         mv    a0, a1
         call  kill_pid
         li    a0, 0
         j     sys_return
+3:      li    a0, KILL_ENDED
+        j     sys_return
 
 # find_child: s1 = the record of process a1, and a0 = 0, if it is a child
-# of the process in s0 (ended or not); else a0 = E_NOCHILD. Clobbers t0, t1.
+# of the process in s0 (ended or not); else a0 = E_NOCHILD. find_child_of:
+# the same for a child of process a2. Clobbers t0, t1.
 find_child:
         addi  sp, sp, -3
         sw    ra, 0(sp)
         call  current_pid              # a0: the caller's number
-        bltz  a1, 8f
+        j     1f
+find_child_of:
+        addi  sp, sp, -3
+        sw    ra, 0(sp)
+        mv    a0, a2
+1:      bltz  a1, 8f
         li    t0, NPROC
         bge   a1, t0, 8f
         li    t0, PCB_SIZE
@@ -59,7 +83,7 @@ find_child:
 
 # kill_pid: mark process a0 killed, if it has not ended; on_kill ends it
 # the next time the kernel would run it (ktrap, resume). One blocked in
-# any system call (recv, wait, getc, call, receive, lookup) is made
+# any system call (recv, wait, call, receive, lookup) is made
 # ready for that, since nothing else would wake it. Clobbers a0 and t0..t3.
 kill_pid:
         li    t0, PCB_SIZE
@@ -89,12 +113,7 @@ bury:
         call  ipc_ended                # servers learn of it (ipc.s)
         call  srv_ended                # its names go (names.s)
         call  drv_ended                # and its devices (devices.s)
-        lw    t0, foreground
-        bne   t0, t4, 0f
-        li    t0, NO_FOREGROUND        # the console goes back to nobody
-        sw    t0, foreground
-        call  console_arm
-0:        la    s1, procs
+        la    s1, procs
         li    t3, NPROC * PCB_SIZE
         add   t3, s1, t3               # t3: just past the table
 1:      lw    t0, PCB_PARENT(s1)

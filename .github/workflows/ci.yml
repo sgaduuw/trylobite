@@ -27,14 +27,14 @@ jobs:
       - name: Boot the demo on three harts
         run: detrytus run demo.s --ram-pages 40 --harts 3
       - name: Run a shell session
-        run: printf 'hello\nfail\npingpong\nexit\n' | detrytus run shell.s --ram-pages 40 --harts 3 --input -
+        run: printf 'hello\nfail\npingpong\nexit\n' | detrytus run shell.s --ram-pages 81 --harts 3 --input -
       - name: Use files from the shell
         run: |
           printf 'hello, disk\n' > notes
           tools/fs.py new disk.img 12 notes bin/*.s
           tools/fs.py mkdir disk.img docs
           tools/fs.py put disk.img notes docs/again
-          printf 'ls\nls bin\ncat notes\ncat docs/again\nwrite docs/motd made in the shell\ncd docs\npwd\ncat again\nhello\nexit\n' | detrytus run shell.s --ram-pages 40 --input - --disk disk.img | tee out.txt
+          printf 'ls\nls bin\ncat notes\ncat docs/again\nwrite docs/motd made in the shell\ncd docs\npwd\ncat again\nhello\nexit\n' | detrytus run shell.s --ram-pages 81 --input - --disk disk.img | tee out.txt
           grep -q 'hello from a balanced-ternary machine' out.txt
           grep -qx '/docs' out.txt
           tools/fs.py ls disk.img docs

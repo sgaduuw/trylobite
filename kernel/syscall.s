@@ -27,14 +27,10 @@ syscall_again:                         # resume runs a call again (ipc.s)
         beq   a0, t0, sys_spawn
         li    t0, SYS_HART
         beq   a0, t0, sys_hart
-        li    t0, SYS_GETC
-        beq   a0, t0, sys_getc
         li    t0, SYS_WAIT
         beq   a0, t0, sys_wait
         li    t0, SYS_KILL
         beq   a0, t0, sys_kill
-        li    t0, SYS_FOREGROUND
-        beq   a0, t0, sys_foreground
         li    t0, SYS_SPAWNW
         beq   a0, t0, sys_spawnw
         li    t0, SYS_CALL

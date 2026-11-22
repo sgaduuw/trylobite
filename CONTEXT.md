@@ -799,3 +799,50 @@ since `getc` and Ctrl-C are built on it; `drive` refuses it.
   asks for one at a time, so it would not help yet.
 - Process slots: the shell build now starts two servers, leaving four
   slots for the shell and its programs.
+
+### 2026-11-22 · The console is a process
+
+The kernel's console input (`kernel/input.s`: a buffer, `getc`, the
+foreground process and Ctrl-C) moved into the console server,
+`user/consd.s`, which drives `SRC_CONSOLE` and registers as `console`.
+`getc` (9) and `foreground` (14) are gone as system calls; programs call
+the server with `CN_GETC`, `CN_WRITE` and `CN_FOREGROUND`. The input
+policy is the kernel's old one, unchanged: read only what waiting
+readers need, or everything while a foreground process runs, so input
+typed ahead waits in the device for whoever comes to read it.
+
+- **The kernel keeps its log.** Kernel messages ("process 3 exited",
+  panics), `SYS_PUTC` and `SYS_PUTS` still write the console's output
+  register directly. A kernel needs a way to speak that does not depend
+  on a process being alive, and every test reads its results that way.
+  The shell and `bin/hello` print through the server; retiring `putc`
+  and `puts` for programs belongs with descriptors 0 to 2, later.
+- **The foreground is the server's, the authority the shell's.** A
+  terminal owns its foreground (POSIX `tcsetpgrp` is a terminal call),
+  so `CN_FOREGROUND` is a console call. Ending the process at Ctrl-C is
+  the namer's right, not the server's: `kill(pid, for)` lets a driver
+  end a child of process `for`, which the server passes as whoever
+  named the foreground. A driver could do worse already through DMA, so
+  this adds no trust, and the server cannot end anything the shell could
+  not. The shell gives the console back (`NO_FOREGROUND`) after `wait`,
+  so a number that has ended and come back is never left named.
+- **`KILL_ENDED`.** A child that has ended but not been waited for is
+  still a child, so `kill` used to say 0 for it. It now says
+  `KILL_ENDED` (1), so the server can tell that a Ctrl-C ended nothing:
+  it keeps that Ctrl-C in its buffer, and the next process named the
+  foreground gets it. Otherwise a Ctrl-C typed ahead while a quick
+  program had just ended would throw away the next line instead.
+- **The console's register page is mapped like the disk's**: `drive`
+  takes either source and maps `dev_pages[s]` (`P_CONSOLE` −1, `P_DISK`
+  −14) at `V_DEVICE + PAGE × (s − 1)`.
+- **Nine process slots, not six.** The shell build now starts three
+  servers; with six slots `pingpong` (itself, ping and pong) no longer
+  fit beside the shell. `NPROC` is 9 (`PCB_NOTES` needs 9 trytes, so
+  `PCB_TURN` and `PCB_SIZE` moved by a word), and the shell build's
+  machine grew from 40 to 81 pages, since four processes of servers and
+  the shell take 17 pages before any program runs. Test harness runs now
+  take the build's `RAM_PAGES` unless told otherwise.
+- **Each code point typed is a round trip** to the server, and so is
+  each string the shell prints. Typing was never the hot path: a short
+  session (hello, spin stopped with Ctrl-C, hello, exit) takes about 20%
+  more steps than with the kernel's console (857,000 to 1,033,000).
