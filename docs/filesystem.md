@@ -99,7 +99,7 @@ A file is trytes. Two kinds use this:
 ## The file server's calls
 
 The file server registers the name `fs` with protocol `FS_PROTOCOL`
-(README, Names) before it takes a call. A client looks it up once,
+(kernel.md, Names) before it takes a call. A client looks it up once,
 waiting for it if need be, and treats a missing server or another
 version as no filesystem:
 
@@ -113,7 +113,7 @@ version as no filesystem:
         sw    a0, fs_pid
 ```
 
-A file call is then a `call` to it (README, Messages) with the
+A file call is then a `call` to it (kernel.md, Messages for servers) with the
 operation in `a2` and its arguments in `a3`, `a4` and `a5`; the reply's
 first word, in `a0`, is the result:
 
@@ -126,7 +126,7 @@ first word, in `a0`, is the result:
         sys                            # a0: a descriptor, or why not
 ```
 
-The descriptor `open` gives is the kernel's (README, Descriptors): the
+The descriptor `open` gives is the kernel's (kernel.md, Descriptors): the
 caller reads, writes, seeks and lists through it with the descriptor
 calls, which reach the server as `IO_` operations with the file's
 handle, and closes it with `close`:
