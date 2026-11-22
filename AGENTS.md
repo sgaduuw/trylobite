@@ -95,10 +95,15 @@ pipe.
   `include/layout.s` and loading where it runs, at `V_USER`
   (docs/filesystem.md, Program files); `include/layout.s` must
   therefore assemble without `NPROG` or `RAM_PAGES`.
+- **Servers are found by name** (`kernel/names.s`): a server calls
+  `register` once it is ready, and a client calls `lookup`, with
+  `LOOKUP_WAIT` when it may start before its server, and checks the
+  version. Never give a server a fixed process number.
 - **Files are the file server's, not the kernel's.** `user/fsd.s` is
-  a program; a file call is a `SYS_CALL` to `FS_PID`, and init must
-  start the server first so it gets that number (the shell does; tests
-  pass `files=True` to `run`). The server shares its build's symbol
+  a program that registers as `fs`; a file call is a `SYS_CALL` to the
+  process `lookup` gives (the shell keeps it in `sh_fs`; tests write
+  `CALL_FS`, which `tests/kernel.py` expands, and pass `files=True` to
+  `run`). The server shares its build's symbol
   table, so its labels all start with `fs_`. Each call starts on a fresh
   stack, so a failure anywhere just jumps to a reply tail. A call that
   changes the disk gathers and checks everything first, then changes

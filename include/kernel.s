@@ -27,6 +27,7 @@
         .include "../kernel/devices.s"
         .include "../kernel/input.s"
         .include "../kernel/ipc.s"
+        .include "../kernel/names.s"
 
         .include "../kernel/data.s"
         .include "../kernel/pagetables.s"

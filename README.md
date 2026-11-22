@@ -197,6 +197,8 @@ nine more, as a process uses them.
 | 25 | `reply(pid, w1, w2, w3, w4)` | ends the call of process `pid`, which this process received: 0; −2 if `pid` is not waiting for its reply |
 | 26 | `copyin(pid, from, to, n)` | copies `n` trytes from `from` in process `pid`, whose call this process holds, to its own `to`: 0; −2 as `reply`, −12 if either range is not all mapped, when nothing is copied |
 | 27 | `copyout(pid, from, to, n)` | copies `n` trytes from its own `from` to `to` in process `pid`: as `copyin` |
+| 28 | `register(name, version)` | gives the caller the server name at `name` (a string of 1 to 8 code points) with protocol version `version`: 0; −15 another process has it, −16 all 9 names are taken, −10 `version` below 1 or an empty name, −11 a name too long, −12 not in the caller's memory. Registering a name it has again changes the version |
+| 29 | `lookup(name, how)` | `a0` the process that registered `name`, `a1` its version; −5 nobody has it (`how` `LOOKUP_NOW`, 0), or with `LOOKUP_WAIT` (1) waits until somebody registers it; −10, −11 and −12 as `register` |
 
 Numbers 16 to 22 are free: files are not system calls but calls to the
 file server (below and docs/filesystem.md), which fail with their own
@@ -244,8 +246,9 @@ descriptors (`docs/filesystem.md`). The kernel knows nothing of it: a
 process, the **file server** (`user/fsd.s`), reads it into its block
 windows and answers `call`s to open, read, write and list files and
 to make and remove files and directories, keeping each process's
-descriptors; it writes what a call changed before it replies. init
-starts it first, so it is process `FS_PID` (1). `tools/fs.py` makes and
+descriptors; it writes what a call changed before it replies. It
+registers as `fs`, protocol `FS_PROTOCOL`, and clients find it by that
+name. `tools/fs.py` makes and
 changes filesystems on the host, and the shell's built-ins `ls [DIR]`,
 `cat PATH`, `write PATH TEXT`, `rm PATH`, `mkdir PATH` and `rmdir PATH`
 use them. A word the shell
@@ -272,6 +275,15 @@ that has called `receive` is told of every process that ends, before
 any later call, so it can forget what it kept for one; a call to a
 process that ends fails. A server asleep in `receive` with nobody left
 to call it does not keep the machine from powering off.
+
+**Names.** A server makes itself known with `register(name, version)`
+once it is ready for calls, and a client finds it with `lookup(name)`,
+which gives the server's process number and its protocol version, so
+the client can refuse a version it would misread. With `LOOKUP_WAIT`, a
+client that starts before its server sleeps until the name is there.
+The kernel keeps the names and drops a server's the moment it ends, so
+a name that is found belongs to a live process; there is no separate
+status.
 
 Process numbers are handed out round-robin, so a number is not reused
 until the table of 6 wraps around.

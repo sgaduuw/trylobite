@@ -1,7 +1,7 @@
 """The file server's calls (docs/filesystem.md, user/fsd.s): open, close,
 read, lseek, readdir, stat and spawnf, reading disks tools/fs.py made.
-Each is a SYS_CALL to FS_PID; the harness builds the server in and init
-starts it first."""
+Each is a call to the server, found by its name (CALL_FS, tests/kernel.py);
+the harness builds the server in and init starts it first."""
 
 import re
 
@@ -90,8 +90,7 @@ def said(result) -> list[int]:
 
 def open_(path: str, flags: str = "O_RDONLY") -> str:
     return f"""
-        li    a0, SYS_CALL
-        li    a1, FS_PID
+        CALL_FS
         li    a2, FS_OPEN
         la    a3, {path}
         li    a4, {flags}
@@ -101,8 +100,7 @@ def open_(path: str, flags: str = "O_RDONLY") -> str:
 def read(fd: int | str, n: int | str, to: str = "buf") -> str:
     load = "la" if to.isidentifier() else "li"  # a label, or an address
     return f"""
-        li    a0, SYS_CALL
-        li    a1, FS_PID
+        CALL_FS
         li    a2, FS_READ
         li    a3, {fd}
         {load}    a4, {to}
@@ -112,8 +110,7 @@ def read(fd: int | str, n: int | str, to: str = "buf") -> str:
 
 def lseek(fd: int, offset: int, whence: str) -> str:
     return f"""
-        li    a0, SYS_CALL
-        li    a1, FS_PID
+        CALL_FS
         li    a2, FS_LSEEK
         li    a3, {fd}
         li    a4, {offset}
@@ -181,8 +178,7 @@ def test_what_cannot_be_opened_says_why():
         open_("deep"),
         open_("f", "6"),  # O_CREAT twice
         """
-        li    a0, SYS_CALL
-        li    a1, FS_PID
+        CALL_FS
         li    a2, FS_OPEN
         li    a3, V_USER - 9842
         li    a4, O_RDONLY
@@ -208,27 +204,23 @@ def test_descriptors_are_the_lowest_free_and_there_are_nfd():
     program = report(
         *[open_("f")] * (L["NFD"] + 1),
         """
-        li    a0, SYS_CALL
-        li    a1, FS_PID
+        CALL_FS
         li    a2, FS_CLOSE
         li    a3, 3
         sys""",
         open_("f"),
         """
-        li    a0, SYS_CALL
-        li    a1, FS_PID
+        CALL_FS
         li    a2, FS_CLOSE
         li    a3, 3
         sys""",
         """
-        li    a0, SYS_CALL
-        li    a1, FS_PID
+        CALL_FS
         li    a2, FS_CLOSE
         li    a3, 3
         sys""",
         """
-        li    a0, SYS_CALL
-        li    a1, FS_PID
+        CALL_FS
         li    a2, FS_CLOSE
         li    a3, NFD
         sys""",
@@ -277,8 +269,7 @@ def test_reads_and_seeks_that_cannot_be_done():
 
 def test_readdir_gives_each_entry_in_use_and_then_0():
     step = """
-        li    a0, SYS_CALL
-        li    a1, FS_PID
+        CALL_FS
         li    a2, FS_READDIR
         li    a3, 0
         la    a4, buf
@@ -299,8 +290,7 @@ def test_readdir_gives_each_entry_in_use_and_then_0():
         step,
         open_("f"),
         """
-        li    a0, SYS_CALL
-        li    a1, FS_PID
+        CALL_FS
         li    a2, FS_READDIR
         li    a3, 1
         la    a4, buf
@@ -336,8 +326,7 @@ def test_readdir_gives_each_entry_in_use_and_then_0():
 def test_stat_says_what_a_path_names():
     def stat(path: str, to: str = "statbuf") -> str:
         return f"""
-        li    a0, SYS_CALL
-        li    a1, FS_PID
+        CALL_FS
         li    a2, FS_STAT
         la    a3, {path}
         la    a4, {to}
@@ -413,8 +402,7 @@ def reader(path: str, p: str = "r") -> str:
     """Open path, read it 7 trytes at a time, and exit with the sum of its
     trytes, or with open's failure. Labels start with p."""
     return f"""
-        li    a0, SYS_CALL
-        li    a1, FS_PID
+        CALL_FS
         li    a2, FS_OPEN
         la    a3, {p}path
         li    a4, O_RDONLY
@@ -422,8 +410,7 @@ def reader(path: str, p: str = "r") -> str:
         bltz  a0, 9f
         mv    s2, a0                   # s2: the descriptor
         li    s1, 0                    # s1: the sum of what it read
-1:      li    a0, SYS_CALL
-      li    a1, FS_PID
+1:      CALL_FS
       li    a2, FS_READ
         mv    a3, s2
         la    a4, {p}buf
@@ -500,8 +487,7 @@ def test_spawnf_starts_a_program_file():
 msg:    .string "hello from a file\\n"
 """)
     spawn = """
-        li    a0, SYS_CALL
-        li    a1, FS_PID
+        CALL_FS
         li    a2, FS_SPAWN
         la    a3, {}
         sys"""

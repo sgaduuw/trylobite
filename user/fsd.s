@@ -1,8 +1,10 @@
 # The file server (docs/filesystem.md): a process that owns the
 # filesystem on the disk and answers other processes' calls to open,
-# read, write, make and remove its files and directories. init starts it first, so it is FS_PID.
+# read, write, make and remove its files and directories. It registers
+# as "fs", protocol FS_PROTOCOL, before it takes its first call; clients
+# find it by that name (SYS_LOOKUP).
 #
-# A file call is a SYS_CALL to FS_PID with the FS_ operation in a2 and
+# A file call is a SYS_CALL to the server with the FS_ operation in a2 and
 # its arguments in a3..a5 (include/layout.s); the reply's first word is
 # the result. The server takes one call at a time: it copies a path in
 # with copyin, and data or a name out with copyout, while it holds the
@@ -29,6 +31,18 @@
 
         .compress
         .gp   USER_GP
+
+# Ready: say so by registering. A second file server finds the name
+# taken, and leaves with why.
+fs_main:
+        li    a0, SYS_REGISTER
+        la    a1, fs_srvname
+        li    a2, FS_PROTOCOL
+        sys
+        bgez  a0, fs_start
+        mv    a1, a0
+        li    a0, SYS_EXIT
+        sys
 
 fs_start:
         li    sp, USER_SP              # a fresh stack for every call: a
@@ -1426,6 +1440,7 @@ fs_fds: .words NPROC * NFD * FD / 3    # each process's descriptors
         .equ  FS_ZEROS, 243            # trytes of zeros a hole is read from
 fs_zeros: .zero FS_ZEROS
 fs_name: .zero NAME_MAX + 1
+fs_srvname: .string "fs"             # what it registers as
 fs_dot: .string "."
 fs_dotdot: .string ".."
 fs_noname: .string ""

@@ -2,7 +2,7 @@
 # first word names, waits for it, and says how it ended if not with code
 # 0. Some words are built in: exit, and ls, cat, write, rm, mkdir and
 # rmdir, which use the filesystem on the disk (docs/filesystem.md) through the file server,
-# which the shell starts first, as init, so that it is FS_PID. A word that is neither built in nor a program in the kernel
+# which the shell starts first, as init, and finds by its name. A word that is neither built in nor a program in the kernel
 # image names a program file: a path if it has a slash, else a file in
 # /bin. It stops at the end of input. Programs take no arguments yet.
 
@@ -14,10 +14,21 @@
         .equ  BS, 8                    # backspace, and delete, both erase
         .equ  DEL, 127
         .equ  BUF_MAX, 243             # trytes cat reads at a time
+        .equ  SH_NOFS, -1              # sh_fs with no file server: no process
+                                       # has the number, so a call is E_NOPROC
 
-sh:     li    a0, SYS_SPAWN            # the file server: process FS_PID
+sh:     li    a0, SYS_SPAWN            # the file server
         li    a1, SH_FSD
         sys
+        bltz  a0, prompt               # none: sh_fs stays SH_NOFS
+        li    a0, SYS_LOOKUP           # wait until it is ready
+        la    a1, sh_fsname
+        li    a2, LOOKUP_WAIT
+        sys
+        bltz  a0, prompt
+        li    t0, FS_PROTOCOL          # calls it would misread: none at all
+        bne   a1, t0, prompt
+        sw    a0, sh_fs
 prompt: la    a1, sh_prompt
         li    a0, SYS_PUTS
         sys
@@ -113,7 +124,7 @@ from_disk:
         j     5f
 4:      mv    s5, s0
 5:      li    a0, SYS_CALL
-        li    a1, FS_PID
+        lw    a1, sh_fs
         li    a2, FS_SPAWN
         mv    a3, s5
         sys
@@ -218,7 +229,7 @@ do_ls:  mv    a0, s4
         st    t2, 0(t0)
         addi  s7, t0, 1                # s7: where each name goes after them
 2:      li    a0, SYS_CALL
-        li    a1, FS_PID
+        lw    a1, sh_fs
         li    a2, FS_READDIR
         mv    a3, s6
         la    a4, sh_name
@@ -232,7 +243,7 @@ do_ls:  mv    a0, s4
         la    t1, sh_name
         call  strcpy
         li    a0, SYS_CALL
-        li    a1, FS_PID
+        lw    a1, sh_fs
         li    a2, FS_STAT
         la    a3, sh_path
         la    a4, sh_stat
@@ -269,7 +280,7 @@ do_cat: call  name_arg
         bltz  a0, fail
         mv    s6, a0                   # s6: its descriptor
 1:      li    a0, SYS_CALL
-        li    a1, FS_PID
+        lw    a1, sh_fs
         li    a2, FS_READ
         mv    a3, s6
         la    a4, sh_buf
@@ -293,7 +304,7 @@ do_write:
         call  name_arg
         mv    s7, a1                   # s7: the text
         li    a0, SYS_CALL
-        li    a1, FS_PID
+        lw    a1, sh_fs
         li    a2, FS_OPEN
         mv    a3, s5
         li    a4, O_WRONLY + O_CREAT + O_TRUNC
@@ -311,7 +322,7 @@ do_write:
         sub   s8, t0, s7               # s8: trytes still to write
 3:      beqz  s8, 4f
         li    a0, SYS_CALL
-        li    a1, FS_PID
+        lw    a1, sh_fs
         li    a2, FS_WRITE
         mv    a3, s6
         mv    a4, s7
@@ -334,7 +345,7 @@ do_rmdir:
         li    s8, FS_RMDIR
 1:      call  name_arg
         li    a0, SYS_CALL
-        li    a1, FS_PID
+        lw    a1, sh_fs
         mv    a2, s8
         mv    a3, s5
         sys
@@ -394,7 +405,7 @@ name_arg:
 # close_s6: close descriptor s6. Clobbers a0, a1.
 close_s6:
         li    a0, SYS_CALL
-        li    a1, FS_PID
+        lw    a1, sh_fs
         li    a2, FS_CLOSE
         mv    a3, s6
         sys
@@ -403,7 +414,7 @@ close_s6:
 # open_s5: a0 = a descriptor for path s5, open for reading, or why not.
 open_s5:
         li    a0, SYS_CALL
-        li    a1, FS_PID
+        lw    a1, sh_fs
         li    a2, FS_OPEN
         mv    a3, s5
         li    a4, O_RDONLY
@@ -506,6 +517,9 @@ sh_programs:
         .word sh_pingpong, 3
         .word 0
 
+        .align 1
+sh_fs:       .word SH_NOFS             # the file server's process number
+sh_fsname:   .string "fs"
 sh_pingpong: .string "pingpong"
 sh_exit:     .string "exit"
 sh_ls:       .string "ls"

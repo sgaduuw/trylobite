@@ -126,12 +126,37 @@ def exit_with(register: str) -> str:
 
 
 # init's first lines when the build has the file server: it starts it,
-# as program 3, so that it is process 1, FS_PID.
+# as program 3.
 START_FS = """
         li    a0, SYS_SPAWN
         li    a1, 3
         sys
 """
+
+# A line of its own, CALL_FS, starts a file call in a test program: build
+# expands it to a lookup of the file server's name, waiting for it to
+# register, then a0 = SYS_CALL and a1 = the server, so that a2 onwards
+# follow as for any call. Each program gets its own copy of the name,
+# since all programs share one symbol table.
+CALL_FS = re.compile(r"^( *(?:\w+: *)?)CALL_FS$", re.M)  # a label may lead
+
+
+def find_fs(program: str, n: int) -> str:
+    """program with each CALL_FS expanded, and its name string, labelled
+    find_fs_n, added at its end."""
+    if not CALL_FS.search(program):
+        return program
+    label = f"find_fs_{n}"
+    pad = " " * 8
+    expanded = CALL_FS.sub(
+        lambda m: (
+            f"{m.group(1)}li    a0, SYS_LOOKUP\n{pad}la    a1, {label}\n"
+            f"{pad}li    a2, LOOKUP_WAIT\n{pad}sys\n{pad}mv    a1, a0\n"
+            f"{pad}li    a0, SYS_CALL"
+        ),
+        program,
+    )
+    return f'{expanded}\n{label}: .string "fs"\n'
 
 
 def build(
@@ -143,6 +168,7 @@ def build(
 ) -> Image:
     """The kernel with init as program 0 and prog1, prog2 to spawn; with
     files, also the file server (user/fsd.s), which init starts first."""
+    init, prog1, prog2 = (find_fs(p, n) for n, p in enumerate((init, prog1, prog2)))
     server = ""
     if files:
         init = START_FS + init

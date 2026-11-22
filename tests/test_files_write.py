@@ -15,8 +15,7 @@ W, C, T, A = L["O_WRONLY"], L["O_CREAT"], L["O_TRUNC"], L["O_APPEND"]
 
 def write(fd: int, n: int, src: str = "text") -> str:
     return f"""
-        li    a0, SYS_CALL
-        li    a1, FS_PID
+        CALL_FS
         li    a2, FS_WRITE
         li    a3, {fd}
         la    a4, {src}
@@ -26,16 +25,14 @@ def write(fd: int, n: int, src: str = "text") -> str:
 
 def call(op: str, path: str) -> str:
     return f"""
-        li    a0, SYS_CALL
-        li    a1, FS_PID
+        CALL_FS
         li    a2, {op}
         la    a3, {path}
         sys"""
 
 
 CLOSE_0 = """
-        li    a0, SYS_CALL
-        li    a1, FS_PID
+        CALL_FS
         li    a2, FS_CLOSE
         li    a3, 0
         sys"""
@@ -253,16 +250,14 @@ def test_two_processes_write_at_once():
     def writer(path: str, char: str, p: str) -> str:
         return f"""
         .gp   USER_GP
-        li    a0, SYS_CALL
-        li    a1, FS_PID
+        CALL_FS
         li    a2, FS_OPEN
         la    a3, {p}path
         li    a4, {W + C}
         sys
         mv    s2, a0
         li    s1, 30
-1:      li    a0, SYS_CALL
-        li    a1, FS_PID
+1:      CALL_FS
         li    a2, FS_WRITE
         mv    a3, s2
         la    a4, {p}text

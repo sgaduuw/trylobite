@@ -95,14 +95,28 @@ A file is trytes. Two kinds use this:
 
 ## The file server's calls
 
-The file server is the process `FS_PID` (1): init starts it before
-anything else, as the shell does. A file call is a `call` to it
-(README, Messages) with the operation in `a2` and its arguments in
-`a3`, `a4` and `a5`; the reply's first word, in `a0`, is the result:
+The file server registers the name `fs` with protocol `FS_PROTOCOL`
+(README, Names) before it takes a call. A client looks it up once,
+waiting for it if need be, and treats a missing server or another
+version as no filesystem:
+
+```asm
+        li    a0, SYS_LOOKUP
+        la    a1, fs_name              # fs_name: .string "fs"
+        li    a2, LOOKUP_WAIT
+        sys                            # a0: the server, a1: its version
+        li    t0, FS_PROTOCOL
+        bne   a1, t0, no_files
+        sw    a0, fs_pid
+```
+
+A file call is then a `call` to it (README, Messages) with the
+operation in `a2` and its arguments in `a3`, `a4` and `a5`; the reply's
+first word, in `a0`, is the result:
 
 ```asm
         li    a0, SYS_CALL
-        li    a1, FS_PID
+        lw    a1, fs_pid
         li    a2, FS_OPEN
         la    a3, path
         li    a4, O_RDONLY
