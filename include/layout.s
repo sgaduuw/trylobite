@@ -165,7 +165,8 @@
                                           # driver, of process a2: 0 done (it ends
                                           # before it runs again), KILL_ENDED (it
                                           # had ended already), E_NOCHILD, E_PERM
-                                          # (a2 not FOR_SELF from a non-driver)
+                                          # (a2 not FOR_SELF from a non-driver);
+                                          # or with a2 = KILL_ANY, any process
         .equ  KILL_ENDED, 1               # kill: nothing to end, only to wait for
         # 14 was foreground: the console server keeps the foreground now
         .equ  SYS_SPAWNW, 15              # start the program file whose first
@@ -180,6 +181,8 @@
                                           # none; E_INVAL (a4 negative or above
                                           # ARG_MAX), E_FAULT (not all there)
         .equ  FOR_SELF, -1                # spawnw, kill: the caller is the parent
+        .equ  KILL_ANY, -2                # kill: any process but init (bin/kill):
+                                          # E_NOPROC (none, or ended), E_PERM (init)
         # 16 to 22 were the kernel's file calls: files are the file server's now
 
 # Descriptors (docs/kernel.md, Descriptors). Each process has NDESC of them, 0 to
@@ -315,6 +318,57 @@
                                           # to use; E_FAULT (not in its page or a
                                           # block window), E_PERM (it drives nothing)
 
+# What the kernel can say about itself, for system tools (bin/dmesg,
+# bin/uname, bin/uptime, bin/free). A buffer of words must be word-aligned
+# and lie wholly in the caller's page or one block window.
+        .equ  SYS_LOG,   34               # log(buffer, n, from): copy the kernel's
+                                          # log, from the a3-th code point it ever
+                                          # printed (the oldest it still keeps, if
+                                          # that one is gone), at most a2 of them,
+                                          # to a1: a0 = how many, a1 = where the
+                                          # next read starts; 0 once it has all.
+                                          # E_INVAL (a2 negative), E_FAULT
+        .equ  LOG_SIZE, PAGE              # code points the log keeps: the last
+                                          # page's worth, in a page of its own
+        .equ  SYS_INFO,  35               # info(buffer): the SI_ words at a1:
+                                          # 0, E_FAULT
+        .equ  SI_TIME,    0               # the time CSR: the clock, in ticks
+        .equ  SI_TICKS,   3               # timer interrupts taken since boot
+        .equ  SI_PAGES,   6               # pages of memory (RAM_PAGES)
+        .equ  SI_FREE,    9               # ... of them free
+        .equ  SI_NPROC,  12               # slots in the process table
+        .equ  SI_PROCS,  15               # ... of them in use, zombies included
+        .equ  SI_HARTS,  18               # harts present
+        .equ  SI_RELEASE, 20              # the kernel's version, as a string of
+        .equ  RELEASE_MAX, 8              # at most RELEASE_MAX code points and 0,
+                                          # in the trytes from SI_RELEASE
+        .equ  SYSINFO,   30               # trytes info fills, from SI_TIME - 1
+
+# Processes, for bin/ps, bin/top and bin/kill. A process's name is its
+# program's, as Unix's comm: what spawnw's first argument names, without
+# the directories, or for a program of the kernel image what it says
+# with SYS_NAME, as each does as it starts.
+        .equ  SYS_PROC,  36               # proc(pid, buffer): the PI_ words of
+                                          # process a1 at a2: 0, E_NOPROC (no such
+                                          # process: a free slot), E_FAULT
+        .equ  PI_STATE,   0               # one of the ST_ values below
+        .equ  PI_PARENT,  3               # its parent, or NO_PARENT
+        .equ  PI_PAGES,   6               # pages it holds: its four and its block
+                                          # windows; 0 once ended
+        .equ  PI_CPU,     9               # ticks it has run in user mode
+        .equ  PI_NAME,   11               # its name: PROC_NAME trytes from here
+        .equ  PROC_NAME,  9               # PROC_NAME_MAX code points and a 0
+        .equ  PROC_NAME_MAX, 8
+        .equ  PROCINFO,  21               # trytes proc fills, from PI_STATE - 1
+        .equ  SYS_NAME,  37               # name(string): name the caller after the
+                                          # string at a1 (its last part after a /,
+                                          # PROC_NAME_MAX code points of it): 0,
+                                          # E_FAULT
+        .equ  SYS_SLEEP, 38               # sleep(until): wait until the time CSR
+                                          # reaches a1: 0. Absolute, so a loop
+                                          # that adds its period each time keeps
+                                          # step (bin/top, bin/sleep)
+
 # Files (docs/filesystem.md) come from the file server, which registers
 # as "fs" with protocol FS_PROTOCOL; a program looks it up once, and
 # treats a missing server, or another version, as no filesystem. A file
@@ -336,7 +390,7 @@
 # lseek(offset, whence): the new position, E_INVAL. readdir(buffer): the
 # next entry's inode, its name to the buffer (NAME_MAX + 1 trytes); 0 at
 # the end; E_NOTDIR.
-        .equ  FS_PROTOCOL, 4              # the calls below, as they are now: a
+        .equ  FS_PROTOCOL, 3              # the calls below, as they are now: a
                                           # change a client would misread moves it on
         .equ  FS_OPEN,    0               # open(path, flags): the caller's lowest
                                           # free descriptor, E_NOENT, E_NOTDIR,
@@ -364,7 +418,15 @@
                                           # directory, ended with 0, at the buffer:
                                           # its length, E_NOROOM (n too small),
                                           # E_NAMETOOLONG, E_FAULT
-        .equ  FS_RENAME, 13               # rename(from, to): 0; what from names
+        .equ  FS_STATFS, 13               # statfs(buffer): how full the disk is,
+                                          # as the SF_ words at the (word-aligned)
+                                          # buffer: 0, E_FAULT (bin/df)
+        .equ  SF_BLOCKS,  0               # blocks in the filesystem,
+        .equ  SF_BFREE,   3               # ... of them free
+        .equ  SF_INODES,  6               # inodes a file can have (1 to 728),
+        .equ  SF_IFREE,   9               # ... of them free
+        .equ  STATFS,    12               # trytes statfs fills, from SF_BLOCKS - 1
+        .equ  FS_RENAME, 14               # rename(from, to): 0; what from names
                                           # takes the name to, replacing a file of
                                           # that name: E_BUSY (that file is open,
                                           # or from is the root), E_ISDIR (to is a
@@ -544,7 +606,13 @@
                                           # 298 (in the words at 273 to 297): 1 for
                                           # each of its handles that no descriptor
                                           # has named since receive last told it
-        .equ  PCB_SIZE,   PCB_CLOSED + NHANDLE + 1
+        .equ  PCB_CPU,    PCB_CLOSED + NHANDLE + 1   # ticks it has run in user
+                                          # mode (the time CSR, ktrap adds them)
+        .equ  PCB_RAN,    PCB_CPU + 3     # time when it last started to run (resume)
+        .equ  PCB_NAME,   PCB_RAN + 2     # its name, PROC_NAME trytes, 0-padded:
+                                          # the last part of argv[0] (spawnw) or
+                                          # what it gave SYS_NAME; empty if neither
+        .equ  PCB_SIZE,   PCB_NAME + PROC_NAME + 1
         .assert PCB_SIZE % 3 == 0, "PCB_SIZE is not whole words"
         .assert PCB_NOTES + NPROC <= PCB_TURN - 1, "PCB_NOTES runs into PCB_TURN's trytes"
         .assert (NPROC % 3 == 0) * (NHANDLE % 3 == 0), "receive reads PCB_NOTES and PCB_CLOSED a word at a time"
@@ -566,6 +634,7 @@
                                           # for the reply
         .equ  ST_RECEIVE, -9              # blocked in SYS_RECEIVE
         .equ  ST_LOOKUP, -10              # blocked in SYS_LOOKUP with LOOKUP_WAIT
+        .equ  ST_SLEEP,  -11              # blocked in SYS_SLEEP, until its saved a1
         .equ  NO_FOREGROUND, -1           # CN_FOREGROUND: the console is nobody's
         .equ  NO_PARENT, -1               # PCB_PARENT of init and of orphans:
                                           # process numbers are never negative

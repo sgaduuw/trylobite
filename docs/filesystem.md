@@ -162,7 +162,8 @@ file's last block) and `E_BUSY`.
 | `FS_RMDIR` (10) | `rmdir(path)` | removes an empty directory (`E_NOTEMPTY` otherwise); the root is `E_BUSY`, a name `.` or `..` `E_INVAL` |
 | `FS_CHDIR` (11) | `chdir(path)` | makes the directory the caller's current one; a file is `E_NOTDIR` |
 | `FS_GETCWD` (12) | `getcwd(buffer, n)` | the current directory's path from the root, ended with 0, to the buffer: its length. `E_NOROOM` (Unix's `ERANGE`) when it and its 0 need more than `n` trytes, `E_NAMETOOLONG` when it is longer than `PATH_MAX` |
-| `FS_RENAME` (13) | `rename(from, to)` | gives what `from` names the name `to`, in the same directory or another; a directory moved to another parent gets that as its `..`. A file already named `to` is replaced, and freed if that was its last name; the same file under both names is left alone. Below, what it refuses |
+| `FS_STATFS` (13) | `statfs(buffer)` | how full the disk is, four words at the word-aligned buffer: `SF_BLOCKS` (in the filesystem) and `SF_BFREE` (free in the map), `SF_INODES` (728, inodes 1 to 728) and `SF_IFREE` (free ones). `bin/df` says them. Adding it did not move `FS_PROTOCOL`: an older client never sends it |
+| `FS_RENAME` (14) | `rename(from, to)` | gives what `from` names the name `to`, in the same directory or another; a directory moved to another parent gets that as its `..`. A file already named `to` is replaced, and freed if that was its last name; the same file under both names is left alone. Below, what it refuses |
 
 Numbers 1 to 4 and 7 were `close`, `read`, `lseek`, `readdir` and
 `write` before `FS_PROTOCOL` 2; they are descriptor calls on what

@@ -1115,6 +1115,47 @@ point to.
 - **The version is written in `kernel/data.s`**, as `0.1.0`, the
   package's version in `pyproject.toml`; a test keeps the two equal.
 
+### 2026-11-23 · system tools
+
+- **ps, top, kill, free, uptime, uname, dmesg, sleep and df are disk
+  programs; the kernel only reports.** Eelco asked for "basic tools: ps,
+  df, top, dmesg or equivalents", and agreed to free, kill, uname and
+  uptime alongside. Five small calls give them what they need
+  (`SYS_LOG`, `SYS_INFO`, `SYS_PROC`, `SYS_NAME`, `SYS_SLEEP`), each
+  filling a buffer or waiting; all formatting is in the programs. A
+  "proc server" would only have relayed the same kernel data through
+  one more call, so the process table stays the kernel's to describe.
+  df asks the file server (`FS_STATFS`), as the disk is its business.
+- **The log is a page of its own, kept as the kernel prints.** dmesg
+  needs the boot report after the fact. Everything printed through the
+  kernel (its lines, `putc`, `puts`) is kept, the last page's worth,
+  read back by position so a reader can loop until it has all. The page
+  is taken at boot before the report, so the report counts it (one page
+  less free) and is in it. It is not cleared: `SYS_LOG` never reads past
+  what was written, and clearing a page costs boot thirteen thousand
+  steps, enough to move the hot-plug tests' timing.
+- **A name per process, like Unix's comm.** spawnw names a child after
+  the last part of its argv[0]; a program of the kernel image has no
+  argv, so it names itself with `SYS_NAME` as it starts. `SYS_SPAWN`
+  could have taken a name instead, but every caller of it (tests
+  included) would then have to set an extra register.
+- **CPU time is user-mode ticks of the `time` CSR**, added at each trap
+  from when `resume` last ran the process, so time in the kernel is not
+  counted. The machine has no seconds: one tick per step, and times are
+  said in ticks.
+- **sleep is absolute** (until a time, not for a while), so top's
+  screens keep step however long each takes to draw. Sleepers are woken
+  in `pick`, and an idle hart sets its timer for the earliest one; a
+  sleeper is not a deadlock.
+- **kill ends any process but init.** `kill(pid, FOR_SELF)` only ends a
+  child, and the shell runs one command at a time, so a kill program
+  could have ended nothing. With no users to tell apart, `KILL_ANY` is
+  Unix's root; init is refused, since everything else depends on it. A
+  server killed this way is started again by init, as when it faults.
+- **Adding `FS_STATFS` did not move `FS_PROTOCOL`**: no older client
+  sends it, so none can misread it.
+- **`bin_disk` and CI's disk grew to 27 blocks**: fifteen programs no
+  longer fit in 13 or 20.
 
 ### 2026-11-22 · cp, mv, head, grep and touch
 
@@ -1124,8 +1165,9 @@ point to.
   redirection work without the shell knowing them. The shell's
   built-ins stay the ones that must run in the shell (`cd`) or came
   before programs could have arguments.
-- **`mv` is a rename in the file server** (`FS_RENAME`, `FS_PROTOCOL`
-  4), not a copy and an unlink: it moves directories too, nothing is
+- **`mv` is a rename in the file server** (`FS_RENAME`; like `FS_STATFS`
+  it leaves `FS_PROTOCOL` alone, since an older client never sends it,
+  and `mv` on an older server just fails), not a copy and an unlink: it moves directories too, nothing is
   copied, and like every call that changes the filesystem it gathers and
   checks every block before changing one, so a refused rename leaves the
   disk as it was. It keeps the server's rule of never pulling an open

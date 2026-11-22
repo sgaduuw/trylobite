@@ -16,7 +16,7 @@ a disk of 100 blocks:
 
 ```text
 trylobite: version 0.1.0, a microkernel for detrytus, the balanced-ternary machine
-trylobite: memory: 81 pages (1594323 trytes), 67 free
+trylobite: memory: 81 pages (1594323 trytes), 66 free
 trylobite: harts: 1
 trylobite: irq0: interrupt controller, 2 sources, at page -13
 trylobite: cons0: console, at page -1
@@ -26,7 +26,8 @@ trylobite: starting init
 ```
 
 Memory is the RAM the build is for (`RAM_PAGES`), and free what is
-left after the kernel and the program images, before init has any.
+left after the kernel, the program images and the kernel's log (a page,
+System tools below), before init has any.
 Harts counts those present among the middle nine, which the kernel
 starts once init exists. The interrupt controller and the disk are read
 from the devices themselves (their `SOURCES` and `BLOCKS` registers,
@@ -76,7 +77,7 @@ as the call takes); the result comes back in `a0`.
 | 7 | `spawn(program)` | the new process's number; −1 no free slot, −2 no such program, −3 not enough memory |
 | 8 | `hart()` | the number of the hart running the caller, −4 to +4 |
 | 10 | `wait(pid)` | how child `pid` ended, once it has: `a0` 0 exited, 1 faulted or 2 killed, `a1` its exit code, trap cause, or 0 when killed; `a0` −2 if `pid` is not the caller's child |
-| 13 | `kill(pid, for)` | ends `pid` before it runs again, a child of the caller when `for` is `FOR_SELF` (−1), or, for a driver, a child of process `for`: 0; 1 (`KILL_ENDED`) if it had ended already; −2 if `pid` is not that process's child, −21 `for` from a process that drives nothing |
+| 13 | `kill(pid, for)` | ends `pid` before it runs again, a child of the caller when `for` is `FOR_SELF` (−1), or, for a driver, a child of process `for`: 0; 1 (`KILL_ENDED`) if it had ended already; −2 if `pid` is not that process's child, −21 `for` from a process that drives nothing. With `for` `KILL_ANY` (−2), any process but init: 0; −2 none, or it has ended; −21 for init |
 | 15 | `spawnw(window, for, args, n)` | starts the program file whose first block is in block window `window` (docs/filesystem.md), as the caller's child when `for` is `FOR_SELF` (−1), or as the child of process `for`, whose call the caller holds, with the `n` trytes of arguments at `args` in that parent's memory (docs/filesystem.md, Program arguments): as `spawn`, with −2 when there is no window or no program in it, or `for` is not waiting for the caller, −10 (`E_INVAL`) for `n` below 0 or above `ARG_MAX`, −12 (`E_FAULT`) for arguments not all in the parent's memory |
 | 16 | `close(fd)` | empties descriptor `fd`: 0; −8 if it names nothing |
 | 17 | `give(pid, handle)` | puts the caller's `handle`, 0 to 26, in the lowest free descriptor of process `pid`, whose call the caller holds: the descriptor; −9 none free, −2 `pid` is not waiting for the caller, −10 no such handle |
@@ -96,6 +97,11 @@ as the call takes); the result comes back in `a0`.
 | 31 | `drive(source)` | makes the caller the driver of device source `source` (`SRC_CONSOLE`, 1, or `SRC_DISK`, 2), its registers mapped at `V_DEVICE + PAGE × (source − 1)` until it ends: 0; −19 it has a driver, −10 no such source, −21 the caller runs a program file |
 | 32 | `arm(source)` | lets the source the caller drives interrupt once: 0; −21 it does not drive it |
 | 33 | `phys(address)` | the physical address of the caller's `address`, for a device to use: −12 nothing there, −21 the caller drives no device |
+| 34 | `log(buffer, n, from)` | copies the kernel's log from the `from`-th code point it ever printed (the oldest it keeps, if that one is gone) to `buffer`, at most `n`, and as many as fit in its page: `a0` how many, 0 once there are no more, `a1` where the next read starts; −10 `n` below 0, −12 not in the caller's memory |
+| 35 | `info(buffer)` | the `SI_` words at the word-aligned `buffer` (System tools): 0; −12 not all in one page of the caller's |
+| 36 | `proc(pid, buffer)` | the `PI_` words of process `pid` at the word-aligned `buffer`: 0; −2 no such process (a free slot), −12 as `info` |
+| 37 | `name(string)` | names the caller after the string: its part after the last `/`, at most 8 code points: 0; −12 not in the caller's memory |
+| 38 | `sleep(until)` | waits until the `time` CSR reaches `until`: 0 |
 
 Numbers 9, 11, 12 and 14 are free: console input, blocks and
 files are not system calls but calls to the console server, the disk
@@ -115,6 +121,64 @@ parent waits for it, or until the parent ends too.
 
 Process numbers are handed out round-robin, so a number is not reused
 until the table of `NPROC` (27) wraps around.
+
+## System tools
+
+`bin/` has tools that look at the system as Unix's do: `ps`, `top`,
+`kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep` and `df`. The kernel
+only reports; the tools read it with a few calls and format it
+(`kernel/info.s`, `kernel/proc.s`), and `df` asks the file server
+(`FS_STATFS`, docs/filesystem.md).
+
+**The log.** Everything the kernel prints (its own lines, and `putc` and
+`puts`, which programs use as the log) also goes into a page of its
+own, which keeps the last `LOG_SIZE` (19,683) code points; `log` reads
+it back by position, so a reader that loops until it gets 0 has all of
+it. `dmesg` prints it: the boot report, init's lines, and how each
+process ended.
+
+**The machine.** `info` fills `SI_TIME` (the clock), `SI_TICKS` (timer
+interrupts taken), `SI_PAGES` and `SI_FREE` (memory, in pages),
+`SI_NPROC` and `SI_PROCS` (the process table and the slots in use,
+zombies included), `SI_HARTS` (harts present) and the kernel's version
+as a string from `SI_RELEASE`: `uname -a` says `trylobite 0.1.0
+detrytus`, `uptime` `up 1171367 ticks, 7 processes, 1 hart`, and `free`
+memory in pages and in trytes. The machine has no seconds: its clock,
+the `time` CSR, counts one tick per step (detrytus platform.md, Time),
+so times are in ticks.
+
+**Processes.** `proc` fills, for one process, `PI_STATE` (an `ST_`
+value), `PI_PARENT` (`NO_PARENT`, −1, for none), `PI_PAGES` (its four
+and its block windows; 0 once ended), `PI_CPU` (the ticks it has run in
+user mode: the kernel adds the time from `resume` to the next trap) and
+its name, 8 code points and a 0 from `PI_NAME`. A process's name is the
+last part of the first argument `spawnw` gave it (`/bin/ps` is `ps`), or
+for a program of the kernel image what it gave `name` as it started:
+`init`, `consd`, `piped`, `diskd`, `fsd`, `sh`.
+
+```text
+$ ps
+  PID  PPID STATE    PAGES       TIME NAME
+    0     - receive     4       2515 init
+    1     0 receive     4       7976 consd
+    2     0 receive     4        253 piped
+    3     0 receive     5       5840 diskd
+    4     0 receive     9       2785 fsd
+    5     0 wait        4       1939 sh
+    6     5 run         4       3502 ps
+```
+
+`top [-n COUNT]` clears the terminal and shows the same table with each
+process's share of the clock since the last screen (`CPU%`), every
+million ticks, until Ctrl-C or COUNT screens; it waits with `sleep`,
+whose time is absolute, so the screens keep step. A sleeper is woken
+by the hart that next schedules, and a hart with nothing to run sets
+its timer for the earliest sleeper, so sleeping is neither a busy wait
+nor, with nothing else running, a deadlock.
+
+`kill PID...` ends any process but init (`KILL_ANY`): there are no users
+to tell apart, so this is Unix's root. A server killed this way is
+started again by init, with what needs it, the shell included.
 
 ## Messages for servers
 
@@ -283,7 +347,8 @@ copies it to 1 and 2, then reads a line at a time.
 
 **Built-ins:** `exit`, `ls [DIR]`, `cat [PATH]` (standard input without
 one), `write PATH TEXT`, `rm PATH`, `mkdir PATH`, `rmdir PATH`,
-`cd [DIR]` and `pwd`.
+`cd [DIR]` and `pwd`. The system tools are programs (System tools,
+above).
 
 **Programs.** `pingpong` is in the kernel image. Any other word names a
 program file: a path if it holds a slash, else a file in `/bin`, which
@@ -306,6 +371,8 @@ a small way, and say what fails on standard error as `NAME: why`:
   several names and a directory last (`cp a b dir`) to copy or move
   them into it. `touch FILE...` makes the files that are not there,
   empty.
+- The system tools, `ps`, `top`, `kill` and the rest (System tools,
+  above).
 - `hello`, `fail` (exits with 3) and `spin` (never ends) are for
   tests.
 

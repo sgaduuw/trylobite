@@ -205,7 +205,9 @@ the machine from outside. The terminal is put back as it was afterwards.
 
 The programs on the disk are `hello`, `fail` (exits with 3), `spin`
 (loops for ever, for Ctrl-C), `echo`, `upper` (standard input to output
-in capitals) and `wc` (lines, words and code points).
+in capitals) and `wc` (lines, words and code points), and system tools
+as on Unix: `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`,
+`sleep` and `df` (docs/kernel.md, System tools).
 
 `--ram-pages` must match the `RAM_PAGES` the build declares (40 for
 `demo.s`, 81 for `shell.s`). Without `--harts` the machine has one hart;
@@ -280,12 +282,14 @@ emulator, so trylobite has never run on hardware.
 | `kernel/desc.s` | descriptors: `read`, `write`, `iocall`, `close`, `dup2`, `give` |
 | `kernel/devices.s` | device interrupts, and the drivers that take them |
 | `kernel/harts.s` | starting the other harts, waking an idle one |
-| `kernel/console.s` | the kernel's own log on the console |
+| `kernel/console.s` | the kernel's own log on the console, kept in a page for `dmesg` |
+| `kernel/info.s` | the log and the machine, for system tools: `log`, `info` |
+| `kernel/proc.s` | processes, for system tools: `proc`, `name`, `sleep` |
 | `kernel/lock.s` | the kernel lock |
 | `kernel/data.s` | the process table, buffers, messages |
 | `kernel/pagetables.s` | the boot address space and the kernel's shared leaf table |
 | `user/` | programs built into the kernel image: `demo-init`, `ping` and `pong` for the demo; `init`, `sh`, `pingpong` and the servers `fsd`, `diskd`, `consd` and `piped` for the shell |
-| `bin/` | programs for the disk, each assembled on its own: `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, `head`, `grep`, `cp`, `mv`, `touch` |
+| `bin/` | programs for the disk, each assembled on its own: `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `cp`, `mv`, `touch`, and the system tools `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df` |
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
 | `shell.s` | an 81-page machine starting the shell and its servers |
 | `docs/` | the kernel and the filesystem, described |

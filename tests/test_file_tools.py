@@ -49,7 +49,7 @@ def test_head_says_the_first_lines_of_files_or_its_input(shell):
     )
     assert said(shell, "ls bin | head -n 2\nhead -n 1 < notes\n", on) == (
         "$ ls bin | head -n 2\n"
-        f"{_size('cp')} cp\n{_size('echo')} echo\n"
+        f"{_size('cp')} cp\n{_size('df')} df\n"
         "$ head -n 1 < notes\none apple\n$ \n"
     )
 
@@ -99,7 +99,7 @@ def test_grep_names_the_file_of_each_line_when_there_are_several(shell):
 
 def test_cp_copies_a_file_and_into_a_directory(shell):
     big = "".join(chr(ord("a") + n % 26) for n in range(PAGE + 100))
-    on = bin_disk(24, notes=NOTES, big=big)
+    on = bin_disk(40, notes=NOTES, big=big)
     typed = "cp notes copy\nmkdir d\ncp notes big d\ncp notes copy\nls d\n"
     assert said(shell, typed, on) == (
         f"$ cp notes copy\n$ mkdir d\n$ cp notes big d\n$ cp notes copy\n"

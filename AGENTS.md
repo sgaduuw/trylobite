@@ -29,7 +29,7 @@ uv run pytest
 uv run ruff check tests tools
 uv run ruff format --check tests tools
 detrytus run demo.s --ram-pages 40
-tools/fs.py new disk.img 20 bin/*.s
+tools/fs.py new disk.img 27 bin/*.s
 printf 'hello\nls bin\necho a b | upper\nexit\n' | detrytus run shell.s --ram-pages 81 --input - --disk disk.img
 ```
 
@@ -156,7 +156,19 @@ pipe.
   keeps the foreground that Ctrl-C ends, killing on behalf of the
   process that named it (`kill(pid, for)`, drivers only). The kernel's
   own messages, `SYS_PUTC` and `SYS_PUTS`, still go straight to the
-  console's output, as its log; tests print with them.
+  console's output, as its log; tests print with them. Every code point
+  of the log is also kept in a page of its own for `SYS_LOG` (bin/dmesg):
+  kernel code prints only through `kout` (`kernel/console.s`), never by
+  storing to `V_CONSOLE` itself.
+- **System tools read the kernel, the kernel only reports**
+  (`kernel/info.s`, `kernel/proc.s`): `SYS_INFO`, `SYS_PROC` and
+  `SYS_LOG` fill a caller's buffer, and the bin/ tools format. A
+  program of the kernel image calls `SYS_NAME` first thing, so ps can
+  name it (a disk program is named after its argv[0]); a new one should
+  too. `PCB_CPU` counts user-mode ticks, from `resume` to the next trap.
+  A process in `SYS_SLEEP` is `ST_SLEEP` until its saved a1; `pick`
+  wakes sleepers while `sleepers` is set, and `idle` sets the timer for
+  the earliest, so a sleeper is never counted as a deadlock.
 - **Descriptors are capabilities** (`kernel/desc.s`). A descriptor is
   (server, handle) in the process record, put there only by that server
   (`SYS_GIVE`, to a process whose call it holds); `SYS_READ`,

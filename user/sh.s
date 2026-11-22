@@ -54,7 +54,10 @@
         .equ  SH_EMPTY, -1             # in the line, a word of quotes alone:
                                        # no character is negative
 
-sh:     li    a0, SYS_LOOKUP           # the console server, which init
+sh:     li    a0, SYS_NAME             # for ps: a program of the image
+        la    a1, sh_myname            # has no argv[0] to name it
+        sys
+        li    a0, SYS_LOOKUP           # the console server, which init
         la    a1, sh_conname           # has started (user/init.s)
         li    a2, LOOKUP_NOW
         sys
@@ -1168,4 +1171,5 @@ sh_args:     .zero LINE_MAX + 1        # a program's arguments, each ended by 0
 sh_name:     .zero NAME_MAX + 1        # a name readdir gives
 sh_stat:     .words STAT / 3           # what stat says
 sh_buf:      .zero BUF_MAX + 1         # what cat reads, and a 0 to end it
+sh_myname: .string "sh"
         .nocompress

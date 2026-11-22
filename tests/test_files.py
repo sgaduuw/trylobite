@@ -440,13 +440,13 @@ def test_descriptors_go_with_their_process():
 
 
 def test_a_server_without_pages_for_its_windows_says_so():
-    # The build has 5 programs, so pages 11 to 25 are free; init and the
-    # two servers take 4 each, the disk server a window more, leaving 2
-    # windows, and an open needs three blocks: block 0, the inodes and the
-    # root directory.
+    # The build has 5 programs, so pages 11 to 26 are free, less one for
+    # the kernel's log; init and the two servers take 4 each, the disk
+    # server a window more, leaving 2 windows, and an open needs three
+    # blocks: block 0, the inodes and the root directory.
     program = report(open_("f"), data=string("f", "f"))
-    assert said(run(program, ram_pages=25, disk=disk(f="x"))) == [L["E_NOMEM"]]
-    assert said(run(program, ram_pages=26, disk=disk(f="x"))) == [0]
+    assert said(run(program, ram_pages=26, disk=disk(f="x"))) == [L["E_NOMEM"]]
+    assert said(run(program, ram_pages=27, disk=disk(f="x"))) == [0]
 
 
 def reader(path: str, p: str = "r") -> str:

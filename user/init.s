@@ -35,7 +35,10 @@
         .equ  ROW_NAME, 6              # the name it registers,
         .equ  ROW_NEED, 9              # and the row it needs up, or INIT_NONE
 
-init:   li    a0, 0                    # every row, from the first
+init:   li    a0, SYS_NAME             # for ps: a program of the image
+        la    a1, init_myname          # has no argv[0] to name it
+        sys
+        li    a0, 0                    # every row, from the first
         call  init_start
         call  init_startsh
 
@@ -338,4 +341,5 @@ init_con:      .string "console"
 init_pipe:     .string "pipe"
 init_disk:     .string "disk"
 init_fs:       .string "fs"
+init_myname: .string "init"
         .nocompress

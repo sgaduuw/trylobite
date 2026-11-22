@@ -12,6 +12,10 @@ boot_report:
         sw    ra, 0(sp)
         la    a0, msg_version
         call  kputs
+        la    a0, kversion
+        call  kputs
+        la    a0, msg_about
+        call  kputs
 
         la    a0, msg_memory           # memory: N pages (T trytes), F free
         call  kputs
@@ -28,21 +32,9 @@ boot_report:
         la    a0, msg_free
         call  kputs
 
-        li    a1, 0                    # harts: how many of the middle nine
-        li    a2, -HART_MAX            # are present; start_harts starts them
-1:      li    t0, 27
-        mul   t0, a2, t0
-        li    t1, V_HARTS
-        add   t0, t0, t1
-        lw    t0, HC_STATE(t0)
-        bltz  t0, 2f                   # absent
-        addi  a1, a1, 1
-2:      addi  a2, a2, 1
-        li    t0, HART_MAX
-        ble   a2, t0, 1b
         la    a0, msg_harts
         call  kputs
-        mv    a0, a1
+        call  harts_present
         call  kputn
         li    a0, '\n'
         call  kputc
@@ -87,6 +79,23 @@ boot_report:
         call  kputs
         lw    ra, 0(sp)
         addi  sp, sp, 3
+        ret
+
+# harts_present: a0 = how many of the middle nine harts are present;
+# start_harts starts them. Clobbers t0, t1, a1, a2.
+harts_present:
+        li    a0, 0
+        li    a2, -HART_MAX
+1:      li    t0, 27
+        mul   t0, a2, t0
+        li    t1, V_HARTS
+        add   t0, t0, t1
+        lw    t0, HC_STATE(t0)
+        bltz  t0, 2f                   # absent
+        addi  a0, a0, 1
+2:      addi  a2, a2, 1
+        li    t0, HART_MAX
+        ble   a2, t0, 1b
         ret
 
 # boot_page: ", at page " a1 and the end of the line. Clobbers a0, t0..t5.

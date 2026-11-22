@@ -45,6 +45,9 @@
 # protocol counts as no disk. Then say it is ready by registering. A
 # second file server finds the name taken, and leaves with why.
 fs_main:
+        li    a0, SYS_NAME             # for ps: a program of the image
+        la    a1, fs_myname            # has no argv[0] to name it
+        sys
         li    a0, SYS_LOOKUP
         la    a1, fs_diskname
         li    a2, LOOKUP_WAIT
@@ -391,6 +394,53 @@ fs_stat:
         lw    a3, fs_a2
         addi  a3, a3, ST_INO - 1
         li    a4, STAT
+        sys
+        j     fs_reply                 # 0, or E_FAULT
+
+# statfs(buffer): how full the disk is, as the SF_ words at the buffer:
+# its blocks and inodes, and how many of each are free, from the map and
+# the inode table.
+fs_statfs:
+        call  fs_enter
+        lw    a0, fs_a1
+        li    t0, 3
+        rem   t0, a0, t0
+        bnez  t0, fs_fault             # words must be aligned
+        li    a0, 0
+        call  fs_bget
+        la    s1, fs_sfbuf
+        lw    t3, FS_HEAD_BLOCKS(a0)
+        sw    t3, SF_BLOCKS(s1)
+        li    t1, 0                    # t1: free blocks
+        li    t2, 0                    # t2: the block looked at
+1:      bge   t2, t3, 2f
+        add   t0, a0, t2
+        lt    t0, FS_MAP(t0)
+        bnez  t0, 0f                   # MAP_USED
+        addi  t1, t1, 1
+0:      addi  t2, t2, 1
+        j     1b
+2:      sw    t1, SF_BFREE(s1)
+        li    a0, FS_INODE_BLOCK
+        call  fs_bget
+        li    t0, FS_INODES - ROOT_INO
+        sw    t0, SF_INODES(s1)
+        addi  t2, a0, BLOCK_W0 + ROOT_INO * INODE
+        li    t1, 0                    # t1: free inodes
+        li    t3, FS_INODES - ROOT_INO
+3:      lw    t0, I_TYPE(t2)
+        bnez  t0, 0f                   # T_FREE is 0
+        addi  t1, t1, 1
+0:      addi  t2, t2, INODE
+        addi  t3, t3, -1
+        bnez  t3, 3b
+        sw    t1, SF_IFREE(s1)
+        li    a0, SYS_COPYOUT
+        mv    a1, s0
+        addi  a2, s1, SF_BLOCKS - 1
+        lw    a3, fs_a1
+        addi  a3, a3, SF_BLOCKS - 1
+        li    a4, STATFS
         sys
         j     fs_reply                 # 0, or E_FAULT
 
@@ -1795,10 +1845,10 @@ fs_busy:
         li    a0, E_BUSY
         j     fs_reply
 
-        .equ  FS_NOPS, 14              # the operations, by FS_ number
+        .equ  FS_NOPS, 15              # the operations, by FS_ number
 fs_ops: .word fs_open, fs_inval, fs_inval, fs_inval, fs_inval, fs_stat
         .word fs_spawn, fs_inval, fs_unlink, fs_mkdir, fs_rmdir, fs_chdir
-        .word fs_getcwd, fs_rename     # 1 to 4 and 7 are descriptor calls now
+        .word fs_getcwd, fs_statfs, fs_rename # 1 to 4 and 7 are descriptor calls now
 fs_ioops: .word fs_readdir, fs_lseek, fs_write, fs_read   # from IO_FIRST
         .assert IO_READDIR == IO_FIRST, "fs_ioops must list the IO_ operations in order"
         .assert IO_LSEEK == IO_FIRST + 1, "fs_ioops must list the IO_ operations in order"
@@ -1831,6 +1881,7 @@ fs_wblk: .words NWIN                   # the block each window holds, plus 1;
 fs_wuse: .words NWIN                   # 0 for none. When each was last used,
 fs_wdirty: .words NWIN                 # and 1 if it was changed since read
 fs_statbuf: .words STAT / 3
+fs_sfbuf: .words STATFS / 3             # what statfs says
 fs_files: .words NFILE * FD / 3        # open files, by handle
 fs_cwd: .words NPROC                   # each one's current directory, 0 the root
         .equ  FS_ZEROS, 243            # trytes of zeros a hole is read from
@@ -1844,4 +1895,5 @@ fs_dot: .string "."
 fs_dotdot: .string ".."
 fs_noname: .string ""
 fs_path: .zero PATH_MAX + 1
+fs_myname: .string "fsd"
         .nocompress

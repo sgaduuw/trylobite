@@ -5,7 +5,10 @@
         .section prog1, (P_PROG0 + 1) * PAGE, V_USER
         .gp   USER_GP                  # set by spawn
 
-ping:   li    a0, SYS_RECV
+ping:   li    a0, SYS_NAME             # for ps: a program of the image
+        la    a1, ping_myname          # has no argv[0] to name it
+        sys
+        li    a0, SYS_RECV
         sys
         mv    s1, a0                   # s1: pong
         li    s0, 1
@@ -31,4 +34,5 @@ ping:   li    a0, SYS_RECV
 
         .equ  PING_DIGIT, 14                   # the ? below
 ping_msg: .string "ping: sending ?\n"
+ping_myname: .string "ping"
         .nocompress

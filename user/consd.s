@@ -42,6 +42,9 @@
         .equ  CN_READER, 2             # or in a descriptor's read
 
 cn_main:
+        li    a0, SYS_NAME             # for ps: a program of the image
+        la    a1, cn_myname            # has no argv[0] to name it
+        sys
         li    a0, SYS_DRIVE
         li    a1, SRC_CONSOLE
         sys
@@ -469,4 +472,5 @@ cn_buf: .words CN_MAX                  # console input, a ring
 cn_out: .zero CN_CHUNK                 # what a write prints
 cn_in:  .zero CN_CHUNK                 # what a read gives
 cn_name: .string "console"
+cn_myname: .string "consd"
         .nocompress
