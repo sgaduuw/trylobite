@@ -29,7 +29,7 @@ registers mapped past them, at `V_DEVICE`.
 | 0 | firmware |
 | 1, 2 | kernel code; kernel data |
 | 3, 4, 5 | the boot address space; the kernel's shared leaf table |
-| 6 .. 5 + `NPROG` | program images 0 to `NPROG` − 1 (the demo has 3, the shell build 8) |
+| 6 .. 5 + `NPROG` | program images 0 to `NPROG` − 1, at most 27 (`NPROG_MAX`; the demo has 3, the shell build 8) |
 | 6 + `NPROG` .. `RAM_PAGES` | free pages, handed out by the allocator |
 
 ## System calls
@@ -87,7 +87,7 @@ from its status in `a0`. A process that ends keeps its slot until its
 parent waits for it, or until the parent ends too.
 
 Process numbers are handed out round-robin, so a number is not reused
-until the table of `NPROC` (9) wraps around.
+until the table of `NPROC` (27) wraps around.
 
 ## Messages for servers
 

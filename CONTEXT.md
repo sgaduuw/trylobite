@@ -1021,3 +1021,24 @@ software), how to try it, and how the pieces fit; the memory map, the
 system calls and each server's description moved to `docs/kernel.md`,
 which the comments in `include/layout.s` and `docs/filesystem.md` now
 point to.
+
+### 2026-11-22 · 27 process slots and up to 27 programs in the image
+
+- **Room for an init and for networking.** A separate init (program 0,
+  starting and restarting the servers) takes a slot of its own, which
+  with 9 would leave 3 for programs, one fewer than a four-command
+  pipeline. A network driver and a TCP/IP server are expected too, so
+  `NPROC` went from 9 to 27, not to 12. A slot costs 300 trytes of
+  kernel data (27 take 8,100 of the 19,683-tryte data page, which now
+  asserts it leaves the stack 2,187) and a few words in each server;
+  pages are only used by processes that run.
+- **The image limit moved with it.** A driver has to come from the
+  image, and with init the shell build would fill all 9 image pages.
+  Program `n` was already at page `P_PROG0 + n`; the named pages
+  `P_PROG1` to `P_PROG8` went and `NPROG_MAX` is 27.
+- **Scans that grew with the table were trimmed.** `receive` looks for
+  pending notices a word (three processes or handles) at a time and walks
+  the table for callers by pointer. What remains linear in `NPROC` (the
+  scheduler's pick, the console server's reader scans) costs a shell
+  session about 3% more steps, and some IPC-heavy tests got larger step
+  limits.

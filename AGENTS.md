@@ -82,7 +82,7 @@ pipe.
   pages go back at once, but its slot stays `ST_ZOMBIE`, with how it
   ended in its saved `a0` and `a1`, until `wait` reaps it or the parent
   ends. A program that spawns in a loop must wait for its children, or
-  run out of the table's 9 slots.
+  run out of the table's `NPROC` (27) slots.
 - **Hart 0 handles hot-plug.** It is the hart controller's event hart and
   can never be removed. A hart asked to go only stops itself in `pick`,
   where it holds no process: anything it ran is back in the table.

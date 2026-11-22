@@ -14,8 +14,6 @@ next_slot:  .word 0                    # where spawn starts looking (set at boot
 klock:  .word 0                        # the kernel lock: 1 while a hart holds it
 idle_harts: .words NHART               # 1: the hart waits for work, by index
 leaving: .words NHART                  # 1: the platform asked the hart to go
-epochs: .words NPROC                   # tenants each slot has had (see resume)
-seen:   .words NHART * NPROC           # the epoch each hart last flushed, by slot
 
 irq_armed: .word 0                     # sources armed by their drivers
 drivers: .words NSRC                   # each source's driver's record, 0 for
@@ -23,6 +21,9 @@ drivers: .words NSRC                   # each source's driver's record, 0 for
 
 procs:  .words NPROC * PCB_SIZE / 3     # the process table
         .assert procs - kgp <= 363, "the process table starts out of c.lagp's reach of gp: move kgp"
+
+epochs: .words NPROC                   # tenants each slot has had (see resume)
+seen:   .words NHART * NPROC           # the epoch each hart last flushed, by slot
 
 names:  .words NSRV * SRV / 3          # server names (names.s)
 srv_key: .zero SRV_NAME_MAX + 1        # the name a call gave, zero-padded
@@ -48,3 +49,8 @@ msg_noinit:   .string "trylobite: cannot start init\n"
 msg_hart:     .string "trylobite: hart "
 msg_joined:   .string " joined\n"
 msg_left:     .string " left\n"
+
+# The stack grows down from kstack_top towards the data: keep it room.
+        .equ  KSTACK_ROOM, 2187        # trytes, far more than the deepest call
+kdata_end:
+        .assert kdata_end + KSTACK_ROOM <= kstack_top, "kernel data runs into the kernel stack: shrink the process table (NPROC)"
