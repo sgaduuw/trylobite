@@ -1115,3 +1115,32 @@ point to.
 - **The version is written in `kernel/data.s`**, as `0.1.0`, the
   package's version in `pyproject.toml`; a test keeps the two equal.
 
+
+### 2026-11-22 · cp, mv, head, grep and touch
+
+- **Programs on the disk, not built-ins.** Each is a `bin/` program over
+  the file server, taking its operands as arguments, and `head` and
+  `grep` read standard input when no file is named, so pipes and
+  redirection work without the shell knowing them. The shell's
+  built-ins stay the ones that must run in the shell (`cd`) or came
+  before programs could have arguments.
+- **`mv` is a rename in the file server** (`FS_RENAME`, `FS_PROTOCOL`
+  4), not a copy and an unlink: it moves directories too, nothing is
+  copied, and like every call that changes the filesystem it gathers and
+  checks every block before changing one, so a refused rename leaves the
+  disk as it was. It keeps the server's rule of never pulling an open
+  file from under a process (`E_BUSY` to replace one), and never
+  replaces a directory, where Unix lets one replace an empty directory:
+  `mv` into a directory is what people mean, and the program does that
+  by joining the name itself.
+- **`grep` matches a fixed string.** A regular-expression engine would be
+  most of the program for little use yet; the name stays `grep`, as
+  Unix's `grep -F` behaves, and `-v` was cheap. Lines longer than
+  729 code points are looked at in pieces.
+- **`touch` only makes files**: inodes have no times to bring up to
+  date. It opens with `O_CREAT` for reading, which a directory allows,
+  so `touch DIR` succeeds as on Unix.
+- **No shared library for the programs.** Each repeats its few helpers
+  (length, write to standard error, joining a directory and a name),
+  since a disk program is assembled on its own and the tools have no
+  linker yet.

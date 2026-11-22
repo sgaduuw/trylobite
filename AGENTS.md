@@ -120,6 +120,13 @@ pipe.
   `a0` = argc and `a1` = `V_ARGV`, a list of string addresses ended by
   a 0 word, the command first (`spawnw`; `bin/echo.s` is the smallest
   example), and with descriptors 0, 1 and 2 inherited from its parent.
+  Make it behave as its Unix namesake, in a small way: operands as
+  arguments, standard input when a filter is given no file, complaints
+  on standard error as `NAME: what: why`, and exit 1 when anything
+  failed (`bin/cp.s` is a full example). Each disk program repeats the
+  few helpers it needs: there is no library to link. `bin_disk` in
+  `tests/kernel.py` makes room for every program; a test that writes
+  much asks for more blocks.
 - **Servers are found by name** (`kernel/names.s`): a server calls
   `register` once it is ready, and a client calls `lookup`, with
   `LOOKUP_WAIT` when it may start before its server, and checks the

@@ -847,6 +847,151 @@ fs_getcwd:
 8:      li    a0, E_NOROOM
         j     fs_reply
 
+# rename(from, to): give what from names the name to instead, in the
+# same directory or another, as Unix's rename does. A file already
+# named to is replaced, and goes once that was its last name, unless a
+# process has it open (E_BUSY). A directory is never replaced: one
+# named to is E_ISDIR for a file and E_EXIST for a directory, which
+# Unix would let replace an empty one. A directory moved to another
+# parent has its .. made the new one, and may not go inside itself
+# (E_INVAL). The root can neither move (E_BUSY) nor be replaced
+# (E_EXIST), and neither name may be . or .. (E_INVAL).
+fs_rename:
+        call  fs_enter
+        lw    a0, fs_a1
+        call  fs_namei_parent
+        beqz  a1, fs_busy              # the root
+        sw    a0, fs_rfrom             # the directory it is named in
+        call  fs_dotcheck
+        lw    a0, fs_rfrom
+        call  fs_dirfind
+        beqz  a0, fs_noent
+        lw    t0, D_INO(a0)
+        sw    t0, fs_rino              # what moves
+        la    a0, fs_rname1
+        call  fs_namesave
+        lw    a0, fs_a2
+        call  fs_namei_parent
+        beqz  a1, fs_exist             # the root
+        sw    a0, fs_rto               # the directory it will be named in
+        call  fs_nameok
+        la    a0, fs_rname2
+        call  fs_namesave
+
+        sw    zero, fs_rdir            # a directory may not go inside itself:
+        lw    a0, fs_rino              # climb from the new parent to the root,
+        call  fs_iget                  # and it must not be on the way
+        lw    t0, I_TYPE(a0)
+        li    t1, T_DIR
+        bne   t0, t1, 3f
+        li    t0, 1
+        sw    t0, fs_rdir
+        lw    s2, fs_rto               # s2: the directory reached
+1:      lw    t0, fs_rino
+        beq   s2, t0, fs_inval
+        li    t0, ROOT_INO
+        beq   s2, t0, 3f
+        call  fs_namedotdot
+        mv    a0, s2
+        call  fs_dirfind
+        beqz  a0, fs_eio
+        lw    s2, D_INO(a0)
+        j     1b
+
+3:      la    a0, fs_rname2            # gather: the entry that will name it
+        call  fs_nameload
+        lw    a0, fs_rto
+        call  fs_dirfind
+        sw    zero, fs_rold
+        beqz  a0, 4f
+        mv    s3, a0                   # s3: that entry, naming s5 now
+        lw    s5, D_INO(s3)
+        lw    t0, fs_rino
+        beq   s5, t0, fs_none          # the same file already: nothing to do
+        lw    t0, fs_rdir
+        bnez  t0, fs_exist
+        mv    a0, s5
+        call  fs_iget
+        lw    t0, I_TYPE(a0)
+        li    t1, T_DIR
+        beq   t0, t1, fs_isdir
+        mv    a0, s5
+        call  fs_inoopen
+        mv    a0, s5
+        call  fs_truncprep             # in case this is its last name
+        li    a0, 0                    # and the map that frees its blocks
+        call  fs_bget
+        sw    s5, fs_rold
+        li    s4, 0                    # s4: 1 if s3 grows the directory
+        j     5f
+4:      beqz  a1, fs_nospc             # the directory is full
+        mv    s3, a1
+        mv    s4, a2
+5:      la    a0, fs_rname1            # the entry that goes
+        call  fs_nameload
+        lw    a0, fs_rfrom
+        call  fs_dirfind
+        beqz  a0, fs_eio
+        mv    s2, a0                   # s2: that entry
+        li    s5, 0                    # s5: a moved directory's .., or 0
+        lw    t0, fs_rdir
+        beqz  t0, 6f
+        lw    t0, fs_rfrom
+        lw    t1, fs_rto
+        beq   t0, t1, 6f
+        call  fs_namedotdot
+        lw    a0, fs_rino
+        call  fs_dirfind
+        beqz  a0, fs_eio
+        mv    s5, a0
+
+6:      mv    a0, s3                   # change: the new name,
+        lw    a1, fs_rino
+        la    a2, fs_rname2
+        call  fs_direntset
+        mv    a0, s2                   # and the old one goes
+        li    a1, NO_INO
+        la    a2, fs_noname
+        call  fs_direntset
+        lw    a0, fs_rto
+        call  fs_dirdirty
+        lw    a0, fs_rfrom
+        call  fs_dirdirty
+        beqz  s4, 7f
+        lw    a0, fs_rto
+        call  fs_iget
+        lw    t0, I_SIZE(a0)
+        addi  t0, t0, DIRENT
+        sw    t0, I_SIZE(a0)
+7:      beqz  s5, 8f                   # a directory with a new parent:
+        lw    t0, fs_rto               # its .. names that,
+        sw    t0, D_INO(s5)
+        lw    a0, fs_rino
+        call  fs_dirdirty
+        lw    a0, fs_rfrom             # which gains a link the old one loses
+        call  fs_iget
+        lw    t0, I_LINKS(a0)
+        addi  t0, t0, -1
+        sw    t0, I_LINKS(a0)
+        lw    a0, fs_rto
+        call  fs_iget
+        lw    t0, I_LINKS(a0)
+        addi  t0, t0, 1
+        sw    t0, I_LINKS(a0)
+8:      lw    a0, fs_rold              # a file replaced loses a name, and
+        beqz  a0, 9f                   # goes with its last
+        call  fs_iget
+        lw    t0, I_LINKS(a0)
+        addi  t0, t0, -1
+        sw    t0, I_LINKS(a0)
+        bgtz  t0, 9f
+        lw    a0, fs_rold
+        call  fs_ifree
+9:      li    a0, FS_INODE_BLOCK
+        call  fs_bdirty
+        li    a0, 0
+        j     fs_reply
+
 # --- helpers for changing the filesystem -----------------------------------------
 
 # fs_creat: for open with O_CREAT: a0 = the inode named fs_name in
@@ -1020,6 +1165,36 @@ fs_nameok:
         addi  t1, t1, 1
         j     1b
 9:      ret
+
+# fs_namesave: copy fs_name to the NAME_MAX + 1 trytes at a0, so that
+# another lookup may use fs_name. Clobbers a0, t0..t2.
+fs_namesave:
+        la    t0, fs_name
+        mv    t1, a0
+        j     0f
+# fs_nameload: copy the name saved at a0 back to fs_name. Clobbers a0,
+# t0..t2.
+fs_nameload:
+        mv    t0, a0
+        la    t1, fs_name
+0:      li    t2, NAME_MAX + 1
+1:      lt    a0, 0(t0)
+        st    a0, 0(t1)
+        addi  t0, t0, 1
+        addi  t1, t1, 1
+        addi  t2, t2, -1
+        bnez  t2, 1b
+        ret
+
+# fs_namedotdot: make fs_name .., to look a directory's parent up.
+# Clobbers t0, t1.
+fs_namedotdot:
+        la    t0, fs_name
+        li    t1, '.'
+        st    t1, 0(t0)
+        st    t1, 1(t0)
+        st    zero, 2(t0)
+        ret
 
 # fs_ialloc: a0 = the lowest free inode; replies E_NOSPC when there is
 # none. Clobbers a1..a3, t0..t6.
@@ -1620,17 +1795,17 @@ fs_busy:
         li    a0, E_BUSY
         j     fs_reply
 
-        .equ  FS_NOPS, 13              # the operations, by FS_ number
+        .equ  FS_NOPS, 14              # the operations, by FS_ number
 fs_ops: .word fs_open, fs_inval, fs_inval, fs_inval, fs_inval, fs_stat
         .word fs_spawn, fs_inval, fs_unlink, fs_mkdir, fs_rmdir, fs_chdir
-        .word fs_getcwd                # 1 to 4 and 7 are descriptor calls now
+        .word fs_getcwd, fs_rename     # 1 to 4 and 7 are descriptor calls now
 fs_ioops: .word fs_readdir, fs_lseek, fs_write, fs_read   # from IO_FIRST
         .assert IO_READDIR == IO_FIRST, "fs_ioops must list the IO_ operations in order"
         .assert IO_LSEEK == IO_FIRST + 1, "fs_ioops must list the IO_ operations in order"
         .assert IO_WRITE == IO_FIRST + 2, "fs_ioops must list the IO_ operations in order"
         .assert IO_READ == IO_FIRST + 3, "fs_ioops must list the IO_ operations in order"
         .assert NFILE <= NHANDLE, "more files than handles to give for them"
-        .assert FS_GETCWD == FS_NOPS - 1, "fs_ops must list every FS_ operation"
+        .assert FS_RENAME == FS_NOPS - 1, "fs_ops must list every FS_ operation"
 
         .equ  FS_NODISK, -1            # fs_disk with no disk server: no process
                                        # has the number, so a call is E_NOPROC
@@ -1647,6 +1822,11 @@ fs_off: .word 0                        # write: the position in its block,
 fs_newind: .word 0                     # 1 if the indirect block is new,
 fs_newdata: .word 0                    # 1 if the data block is new
 fs_parent: .word 0                     # 1: fs_namei stops before the last name
+fs_rfrom: .word 0                      # rename: the directory it leaves,
+fs_rto: .word 0                        # the one it goes to,
+fs_rino: .word 0                       # what moves,
+fs_rdir: .word 0                       # 1 if that is a directory,
+fs_rold: .word 0                       # and a file it replaces, or 0
 fs_wblk: .words NWIN                   # the block each window holds, plus 1;
 fs_wuse: .words NWIN                   # 0 for none. When each was last used,
 fs_wdirty: .words NWIN                 # and 1 if it was changed since read
@@ -1656,6 +1836,8 @@ fs_cwd: .words NPROC                   # each one's current directory, 0 the roo
         .equ  FS_ZEROS, 243            # trytes of zeros a hole is read from
 fs_zeros: .zero FS_ZEROS
 fs_name: .zero NAME_MAX + 1
+fs_rname1: .zero NAME_MAX + 1           # rename: the old name
+fs_rname2: .zero NAME_MAX + 1           # and the new
 fs_srvname: .string "fs"             # what it registers as
 fs_diskname: .string "disk"           # whom it reads and writes blocks with
 fs_dot: .string "."

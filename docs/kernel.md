@@ -290,7 +290,24 @@ program file: a path if it holds a slash, else a file in `/bin`, which
 the file server starts as the shell's child, with the line's words as
 its arguments, the command first (`wc notes more`, `echo hi`). A program
 finds them as `argc` and `argv` at `V_ARGV` (docs/filesystem.md,
-Program arguments).
+Program arguments). Those in `bin/` behave as their Unix namesakes, in
+a small way, and say what fails on standard error as `NAME: why`:
+
+- `echo [WORD]...` says its arguments; `upper` copies standard input
+  with a to z made capitals.
+- `wc [FILE]...` counts lines, words and code points; `head [-n N]
+  [FILE]...` says the first N lines (10); `grep [-v] TEXT [FILE]...`
+  says the lines holding TEXT, or with `-v` those that do not, as a
+  fixed string (Unix's `grep -F`), and exits with 1 when none did. Each
+  reads standard input when no file is named, so it works in a pipe:
+  `ls bin | grep e | head -n 2`.
+- `cp FROM TO` copies a file, and `mv FROM TO` renames one, or a
+  directory (`FS_RENAME`), replacing a file of that name; both take
+  several names and a directory last (`cp a b dir`) to copy or move
+  them into it. `touch FILE...` makes the files that are not there,
+  empty.
+- `hello`, `fail` (exits with 3) and `spin` (never ends) are for
+  tests.
 
 **Redirection.** After the command, `> PATH` sends standard output to a
 file, made empty or new, `>> PATH` to its end, and `< PATH` takes

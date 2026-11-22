@@ -336,7 +336,7 @@
 # lseek(offset, whence): the new position, E_INVAL. readdir(buffer): the
 # next entry's inode, its name to the buffer (NAME_MAX + 1 trytes); 0 at
 # the end; E_NOTDIR.
-        .equ  FS_PROTOCOL, 3              # the calls below, as they are now: a
+        .equ  FS_PROTOCOL, 4              # the calls below, as they are now: a
                                           # change a client would misread moves it on
         .equ  FS_OPEN,    0               # open(path, flags): the caller's lowest
                                           # free descriptor, E_NOENT, E_NOTDIR,
@@ -364,6 +364,14 @@
                                           # directory, ended with 0, at the buffer:
                                           # its length, E_NOROOM (n too small),
                                           # E_NAMETOOLONG, E_FAULT
+        .equ  FS_RENAME, 13               # rename(from, to): 0; what from names
+                                          # takes the name to, replacing a file of
+                                          # that name: E_BUSY (that file is open,
+                                          # or from is the root), E_ISDIR (to is a
+                                          # directory), E_EXIST (from is a
+                                          # directory and to exists, or to is the
+                                          # root), E_INVAL (. or .., or a directory
+                                          # into itself), E_NOSPC, as open fails
         .equ  PATH_MAX, 243               # trytes a path may have, its 0 not counted
 
 # Blocks come from the disk server, which registers as "disk" with
