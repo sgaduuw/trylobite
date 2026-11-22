@@ -1,8 +1,8 @@
 # Program 0 of shell.s: a shell. It reads a line, runs the program its
 # first word names, waits for it, and says how it ended if not with code
 # 0. Some words are built in: exit, and ls and cat, which read the
-# filesystem on the disk (docs/filesystem.md) through the kernel's file
-# calls. A word that is neither built in nor a program in the kernel
+# filesystem on the disk (docs/filesystem.md) through the file server,
+# which the shell starts first, as init, so that it is FS_PID. A word that is neither built in nor a program in the kernel
 # image names a program file: a path if it has a slash, else a file in
 # /bin. It stops at the end of input. Programs take no arguments yet.
 
@@ -15,7 +15,9 @@
         .equ  DEL, 127
         .equ  BUF_MAX, 243             # trytes cat reads at a time
 
-sh:
+sh:     li    a0, SYS_SPAWN            # the file server: process FS_PID
+        li    a1, SH_FSD
+        sys
 prompt: la    a1, sh_prompt
         li    a0, SYS_PUTS
         sys
@@ -110,8 +112,10 @@ from_disk:
         la    s5, sh_path
         j     5f
 4:      mv    s5, s0
-5:      li    a0, SYS_SPAWNF
-        mv    a1, s5
+5:      li    a0, SYS_CALL
+        li    a1, FS_PID
+        li    a2, FS_SPAWN
+        mv    a3, s5
         sys
         bgez  a0, started
         li    t0, E_NOEXEC
@@ -121,6 +125,8 @@ from_disk:
         li    t0, E_NOTDIR
         beq   a0, t0, unknown
         li    t0, E_NOFS
+        beq   a0, t0, unknown
+        li    t0, E_NOPROC             # no file server
         beq   a0, t0, unknown
         li    t0, E_NAMETOOLONG        # no file has a name that long
         beq   a0, t0, unknown
@@ -202,10 +208,7 @@ do_ls:  mv    a0, s4
         lt    t0, 0(s5)
         bnez  t0, 1f
         la    s5, sh_root
-1:      li    a0, SYS_OPEN
-        mv    a1, s5
-        li    a2, O_RDONLY
-        sys
+1:      call  open_s5
         bltz  a0, fail
         mv    s6, a0                   # s6: its descriptor
         la    t0, sh_path              # the directory and a slash, for stat
@@ -214,9 +217,11 @@ do_ls:  mv    a0, s4
         li    t2, '/'
         st    t2, 0(t0)
         addi  s7, t0, 1                # s7: where each name goes after them
-2:      li    a0, SYS_READDIR
-        mv    a1, s6
-        la    a2, sh_name
+2:      li    a0, SYS_CALL
+        li    a1, FS_PID
+        li    a2, FS_READDIR
+        mv    a3, s6
+        la    a4, sh_name
         sys
         bltz  a0, failc
         beqz  a0, 6f                   # no more
@@ -226,9 +231,11 @@ do_ls:  mv    a0, s4
         mv    t0, s7
         la    t1, sh_name
         call  strcpy
-        li    a0, SYS_STAT
-        la    a1, sh_path
-        la    a2, sh_stat
+        li    a0, SYS_CALL
+        li    a1, FS_PID
+        li    a2, FS_STAT
+        la    a3, sh_path
+        la    a4, sh_stat
         sys
         la    s5, sh_path
         bltz  a0, failc
@@ -258,16 +265,15 @@ do_ls:  mv    a0, s4
 
 # cat PATH: print a file, a block's worth or less at a time.
 do_cat: call  name_arg
-        li    a0, SYS_OPEN
-        mv    a1, s5
-        li    a2, O_RDONLY
-        sys
+        call  open_s5
         bltz  a0, fail
         mv    s6, a0                   # s6: its descriptor
-1:      li    a0, SYS_READ
-        mv    a1, s6
-        la    a2, sh_buf
-        li    a3, BUF_MAX
+1:      li    a0, SYS_CALL
+        li    a1, FS_PID
+        li    a2, FS_READ
+        mv    a3, s6
+        la    a4, sh_buf
+        li    a5, BUF_MAX
         sys
         bltz  a0, failc
         beqz  a0, 2f                   # the end
@@ -333,8 +339,20 @@ name_arg:
 
 # close_s6: close descriptor s6. Clobbers a0, a1.
 close_s6:
-        li    a0, SYS_CLOSE
-        mv    a1, s6
+        li    a0, SYS_CALL
+        li    a1, FS_PID
+        li    a2, FS_CLOSE
+        mv    a3, s6
+        sys
+        ret
+
+# open_s5: a0 = a descriptor for path s5, open for reading, or why not.
+open_s5:
+        li    a0, SYS_CALL
+        li    a1, FS_PID
+        li    a2, FS_OPEN
+        mv    a3, s5
+        li    a4, O_RDONLY
         sys
         ret
 
@@ -415,6 +433,7 @@ sh_errors:
         .word E_NOTDIR, sh_notdir
         .word E_ISDIR, sh_isdir
         .word E_NOFS, sh_nofs
+        .word E_NOPROC, sh_nofs          # no file server to ask
         .word E_NAMETOOLONG, sh_toolong
         .word 0
 

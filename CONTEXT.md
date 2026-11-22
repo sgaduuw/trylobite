@@ -655,3 +655,33 @@ kernel gains what a server needs, before the server itself:
   take the window in `a2`.
 - **A server asleep in `receive` does not count as deadlock**: with
   nothing else left, the machine powers off as when all have exited.
+
+### 2026-11-22 · The filesystem moves into a file server
+
+The in-kernel filesystem of #26 goes; a process, `user/fsd.s`, reads
+the same on-disk format and answers calls (the messages of the entry
+above). Eelco chose this over files in the kernel.
+
+- **No library: a file call is a `call`.** The assembler has one symbol
+  table per build and no macros, so a library included by two programs
+  of one build would define its labels twice. A file call is instead
+  `SYS_CALL` to `FS_PID` with an `FS_` operation in `a2`, written out
+  where it is made, as system calls are.
+- **The server is process 1 by convention**: init starts it first (the
+  shell does, the test harness's `files=True` does), so nothing needs a
+  name service yet.
+- **The same operations, errors and limits**, so the shell's output and
+  most tests did not change, except process numbers: every program the
+  shell starts is one higher. `PATH_DEPTH` went with the kernel's cache,
+  which needed every directory of a path at once; the server walks a
+  path a block at a time, so a path is limited by length instead,
+  `PATH_MAX` (243), the buffer it is copied into.
+- **The server caches blocks in its nine windows**, least recently used
+  going first, and blocks while it reads one: one call at a time is
+  simple and nothing yet needs more.
+- **Programs start through the server.** `FS_SPAWN` reads a program
+  file's first block into a window and calls `spawnw(window, client)`,
+  which makes the new process the client's child, not the server's, so
+  the shell can still wait for it and give it the console.
+- **The restartable-call machinery stays only for `receive`**, and the
+  kernel's block cache, its dirty states and `ST_BUF` are gone.

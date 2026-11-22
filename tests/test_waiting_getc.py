@@ -103,7 +103,7 @@ def test_the_shell_waits_at_its_prompt_for_what_is_typed():
         "trylobite: booting\n"
         "$ hello\n"
         "hello from a balanced-ternary machine\n"
-        "trylobite: process 1 exited with code 0\n"
+        "trylobite: process 2 exited with code 0\n"
         "$ exit\n"
         "trylobite: process 0 exited with code 0\n"
     ), out

@@ -5,9 +5,7 @@
 on_syscall:
         csrr  t0, stval                # the instruction after the sys: tpc + 3
         sw    t0, PCB_PC(s0)           # is wrong when the sys is in a bundle
-syscall_again:                         # resume runs an abandoned call again
-        lw    t0, buf_clock            # blocks it uses from now on are its
-        sw    t0, PCB_BSTART(s0)       # own, until it ends (cache.s)
+syscall_again:                         # resume runs a call again (ipc.s)
         lw    a0, PCB_A0(s0)
         lw    a1, PCB_A1(s0)
         lw    a2, PCB_A2(s0)
@@ -45,20 +43,6 @@ syscall_again:                         # resume runs an abandoned call again
         beq   a0, t0, sys_foreground
         li    t0, SYS_SPAWNW
         beq   a0, t0, sys_spawnw
-        li    t0, SYS_OPEN
-        beq   a0, t0, sys_open
-        li    t0, SYS_CLOSE
-        beq   a0, t0, sys_close
-        li    t0, SYS_READ
-        beq   a0, t0, sys_read
-        li    t0, SYS_LSEEK
-        beq   a0, t0, sys_lseek
-        li    t0, SYS_READDIR
-        beq   a0, t0, sys_readdir
-        li    t0, SYS_STAT
-        beq   a0, t0, sys_stat
-        li    t0, SYS_SPAWNF
-        beq   a0, t0, sys_spawnf
         li    t0, SYS_CALL
         beq   a0, t0, sys_call
         li    t0, SYS_RECEIVE
@@ -186,20 +170,36 @@ sys_spawn:
         call  do_spawn                 # a1: the program
         j     sys_return
 
-# spawnw(): start the program file whose first block the caller has read
-# into its block window. The window must hold one: it starts with
-# EXEC_MAGIC, so a text file is refused, as is a caller with no window.
+# spawnw(window, for): start the program file whose first block the
+# caller has read into block window a1. The window must hold one: it
+# starts with EXEC_MAGIC, so a text file is refused, as is a window the
+# caller does not have. The new process is the caller's child, or with
+# a2 not FOR_SELF the child of process a2, whose call the caller holds:
+# so the file server starts a program for the process that asked.
 sys_spawnw:
-        lw    s5, PCB_BLOCKPG(s0)      # s5: the window's page
+        bltz  a1, 1f
+        li    t0, NWIN
+        bge   a1, t0, 1f
+        li    t0, 3
+        mul   t0, a1, t0
+        add   t0, t0, s0
+        lw    s5, PCB_WINS(t0)         # s5: the window's page
         beqz  s5, 1f
         mv    a0, s5
         call  kva
         lw    t0, BLOCK_W0(a0)
         li    t1, EXEC_MAGIC
         bne   t0, t1, 1f
-        call  current_pid
+        lw    a1, PCB_A2(s0)
+        li    t0, FOR_SELF
+        beq   a1, t0, 2f
+        call  client_of                # its child, if we hold its call
+        bltz  a0, sys_return
+        lw    a2, PCB_A2(s0)
+        j     3f
+2:      call  current_pid
         mv    a2, a0                   # the caller is the parent
-        li    s6, 1                    # from a program file
+3:      li    s6, 1                    # from a program file
         call  spawn_page
         j     sys_return
 1:      li    a0, E_NOPROG

@@ -169,36 +169,14 @@
                                           # nobody with NO_FOREGROUND: Ctrl-C
                                           # then kills it. 0 done, E_NOCHILD
         .equ  SYS_SPAWNW, 15              # start the program file whose first
-                                          # block is in block window 0 (see
-                                          # EXEC_MAGIC): its process number,
-                                          # E_NOSLOT, E_NOPROG, E_NOMEM
-
-# Files (docs/filesystem.md). A path is a 0-terminated string in the
-# caller's page; it starts at the root, with or without a leading /.
-# Each also fails with E_NOFS (no disk, or no filesystem on it), E_IO
-# (the disk refused a block, or holds nonsense) or E_NOMEM (no page for
-# the kernel's block cache), and those taking a path or buffer with
-# E_FAULT (it is not all in the caller's page or block window).
-        .equ  SYS_OPEN,  16               # open path a1 with flags a2 (O_RDONLY):
-                                          # the lowest free descriptor, E_NOENT,
-                                          # E_NOTDIR, E_NAMETOOLONG, E_MFILE, E_INVAL
-        .equ  SYS_CLOSE, 17               # close descriptor a1: 0, E_BADF
-        .equ  SYS_READ,  18               # read up to a3 trytes from descriptor a1
-                                          # to a2: how many (0 at the end of the
-                                          # file; never past the end of a block),
-                                          # E_BADF, E_ISDIR, E_INVAL
-        .equ  SYS_LSEEK, 19               # move descriptor a1 to a2 from where
-                                          # a3 says (SEEK_SET, SEEK_CUR, SEEK_END):
-                                          # the new position, E_BADF, E_INVAL
-        .equ  SYS_READDIR, 20             # the next entry of directory descriptor
-                                          # a1: its name to a2 (NAME_MAX + 1 trytes),
-                                          # a0 = its inode, or 0 at the end;
-                                          # E_BADF, E_NOTDIR
-        .equ  SYS_STAT,  21               # what path a1 names, to the STAT trytes
-                                          # at a2 (ST_ fields): 0, as open fails
-        .equ  SYS_SPAWNF, 22              # start the program file at path a1: as
-                                          # spawnw, E_NOEXEC for no program, and
-                                          # as open fails
+                                          # block is in block window a1 (see
+                                          # EXEC_MAGIC), as a child of the caller
+                                          # (a2 = FOR_SELF) or of process a2, whose
+                                          # call the caller holds: its process
+                                          # number, E_NOSLOT, E_NOPROG, E_NOMEM,
+                                          # E_NOPROC
+        .equ  FOR_SELF, -1                # spawnw: the caller is the parent
+        # 16 to 22 were the kernel's file calls: files are the file server's now
 
 # Messages for servers (README, Messages). A message is four words, a2 to
 # a5 as sent; a server answers each call with a reply of four words.
@@ -219,6 +197,37 @@
         .equ  FROM_KERNEL, -1             # receive: no process sent this
         .equ  NOTE_ENDED, 0               # ... a process ended, its number in a2
 
+# Files (docs/filesystem.md) come from the file server, process FS_PID,
+# which init starts first. A program calls it through the routines of
+# user/files.s, which take their arguments in a1..a3 and return a0, as
+# system calls do; each is a call with the FS_ operation in a2 and the
+# arguments in a3..a5, and the reply's first word is the result. A path
+# is a 0-terminated string in the caller's memory, from the root with or
+# without a leading /. Each fails with E_NOFS (no disk, no filesystem on
+# it, or no file server), E_IO (the disk refused a block, or holds
+# nonsense), and those taking a path or buffer with E_FAULT (it is not all
+# in the caller's page or a block window it has).
+        .equ  FS_PID, 1
+        .equ  FS_OPEN,    0               # open(path, flags): the lowest free
+                                          # descriptor, E_NOENT, E_NOTDIR,
+                                          # E_NAMETOOLONG, E_MFILE, E_INVAL
+        .equ  FS_CLOSE,   1               # close(fd): 0, E_BADF
+        .equ  FS_READ,    2               # read(fd, buffer, n): how many (0 at the
+                                          # end; never past the end of a block),
+                                          # E_BADF, E_ISDIR, E_INVAL
+        .equ  FS_LSEEK,   3               # lseek(fd, offset, whence): the new
+                                          # position, E_BADF, E_INVAL
+        .equ  FS_READDIR, 4               # readdir(fd, buffer): the next entry's
+                                          # inode, its name to the buffer
+                                          # (NAME_MAX + 1 trytes); 0 at the end;
+                                          # E_BADF, E_NOTDIR
+        .equ  FS_STAT,    5               # stat(path, buffer): 0, the ST_ words at
+                                          # the buffer; as open fails
+        .equ  FS_SPAWN,   6               # spawnf(path): starts the program file
+                                          # as the caller's child: as spawnw, and
+                                          # E_NOEXEC for no program, as open fails
+        .equ  PATH_MAX, 243               # trytes a path may have, its 0 not counted
+
         .equ  E_NOCALL,  -1               # no system call with that number
         .equ  E_FULL,    -1               # send: the receiver's mailbox is full
         .equ  E_NOPROC,  -2               # send: no such process
@@ -231,7 +240,8 @@
         .equ  GETC_NONE, -1               # getc: no more input; any negative means none
         .equ  E_NOCHILD, -2               # wait: not a child of the caller
         .equ  E_NOBLOCK, -2               # bread, bwrite: no such block, or no disk
-        .equ  E_NOFS,    -4               # files: no disk, or no filesystem on it
+        .equ  E_NOFS,    -4               # files: no disk, no filesystem on it, or
+                                          # no file server
         .equ  E_NOENT,   -5               # no such file or directory
         .equ  E_NOTDIR,  -6               # a name on the path is not a directory;
                                           # readdir: not a directory
@@ -239,15 +249,19 @@
         .equ  E_BADF,    -8               # no such open descriptor
         .equ  E_MFILE,   -9               # open: every descriptor is in use
         .equ  E_INVAL,  -10               # a flag, count or position out of range
-        .equ  E_NAMETOOLONG, -11          # a name past NAME_MAX, or a path of
-                                          # more than PATH_DEPTH names
+        .equ  E_NAMETOOLONG, -11          # a name past NAME_MAX, or a path past
+                                          # PATH_MAX
         .equ  E_FAULT,  -12               # a path or buffer outside the caller;
                                           # copyin, copyout: outside either process
         .equ  E_NOEXEC, -13               # spawnf: not a program file
         .equ  E_IO,     -14               # the disk refused (bread, bwrite, files)
 
         .equ  O_RDONLY, 0                 # open: for reading, the only way yet
-        .equ  NFD, 8                      # descriptors per process, 0 to 7
+        .equ  NFD, 8                      # descriptors per process, 0 to 7, kept
+        .equ  FD,           9             # by the file server: three words each,
+        .equ  FD_INO,       0             # the inode, NO_INO when closed,
+        .equ  FD_POS,       3             # the position, in trytes,
+        .equ  FD_FLAGS,     6             # and what open was given
         .equ  SEEK_SET, 0                 # lseek: from the start,
         .equ  SEEK_CUR, 1                 # from where it is,
         .equ  SEEK_END, 2                 # from the end
@@ -294,22 +308,18 @@
         .equ  PCB_DPAGE,  123             # the physical page it moves to or from,
         .equ  PCB_DCMD,   126             # and BLOCK_READ or BLOCK_WRITE
         .equ  PCB_RETRY,  129             # 1: run its system call again when it
-                                          # next runs (see kernel/cache.s)
-        .equ  PCB_BSTART, 132             # buf_clock when its call last started
-        .equ  PCB_FDS,    135             # NFD descriptors of FD trytes each:
-        .equ  FD,           9             # three words, from PCB_FDS + FD * fd:
-        .equ  FD_INO,       0             # the inode, NO_INO when closed
-        .equ  FD_POS,       3             # the position, in trytes
-        .equ  FD_FLAGS,     6             # what open was given
-        .equ  PCB_WINS,   207             # its block windows' pages, a word each,
+                                          # next runs (ipc.s wakes a server so)
+        .equ  PCB_WINS,   132             # its block windows' pages, a word each,
         .equ  NWIN,         9             # 0 for none: window k is at V_BLOCK + PAGE * k
-        .equ  PCB_BLOCKPG, PCB_WINS       # window 0, the one spawnw reads
-        .equ  PCB_SERVES, 234             # 1 once it has called receive: it is told
+        .equ  PCB_BLOCKPG, PCB_WINS       # window 0
+        .equ  PCB_SERVES, 159             # 1 once it has called receive: it is told
                                           # of every process that ends
-        .equ  PCB_NOTES,  237             # NPROC trytes: 1 for each process that has
-                                          # ended since receive last told it
-        .equ  PCB_TURN,   243             # receive: the caller it took last
-        .equ  PCB_SIZE,   246
+        .equ  PCB_NOTES,  161             # NPROC trytes, 161 to 166 (the words at
+                                          # 162 and 165): 1 for each process that
+                                          # has ended since receive last told it
+        .equ  PCB_TURN,   168             # receive: the caller it took last
+        .equ  PCB_SIZE,   171
+        .assert PCB_NOTES + NPROC <= PCB_TURN - 1, "PCB_NOTES runs into PCB_TURN's trytes"
         .equ  PAGES_PER_PROCESS, 4
 
         .equ  ST_EXITED, 0                # also: a free slot
@@ -322,9 +332,7 @@
                                           # its parent waits for it
         .equ  ST_GETC,   -4               # blocked in SYS_GETC, until input comes
         .equ  ST_DISK,   -5               # waiting for its disk command (PCB_D*):
-                                          # bread, bwrite, or a block the cache lacks
-        .equ  ST_BUF,    -6               # waiting for a block someone else's
-                                          # command is reading into the cache
+                                          # bread or bwrite
         .equ  ST_CALL,   -7               # its call waits for PCB_PEER to receive it
         .equ  ST_REPLY,  -8               # PCB_PEER has received its call: waits
                                           # for the reply
@@ -333,23 +341,10 @@
         .equ  NO_PARENT, -1               # PCB_PARENT of init and of orphans:
                                           # process numbers are never negative
 
-# --- the kernel's block cache (kernel/cache.s) ---------------------------------
-# NBUF slots of BUF trytes, each a page holding one block; a slot's page
-# is taken from the free pages the first time the slot is needed.
-        .equ  NBUF, 8
-        .equ  BUF,        12              # trytes per slot: four words,
-        .equ  BUF_BLOCK,   0              # the block it holds,
-        .equ  BUF_PAGE,    3              # its page, 0 until it has one,
-        .equ  BUF_STATE,   6              # BUF_EMPTY, BUF_VALID or BUF_FILLING,
-        .equ  BUF_USED,    9              # and when it was last used (buf_clock)
-        .equ  BUF_EMPTY,   0
-        .equ  BUF_VALID,   1              # holds the block
-        .equ  BUF_FILLING, 2              # a command is reading the block into it
-
 # --- the filesystem (docs/filesystem.md) ----------------------------------------
 # Block 0 holds a header and the map of free blocks, block 1 the inodes;
 # every other block holds a file's or a directory's data. Offsets are in
-# trytes from a block's centre, as the kernel's cache and a program's
+# trytes from a block's centre, as a program's
 # block window address them. Memory is centred (detrytus isa.md 5.2): a
 # block's words sit at -9840, -9837, ..., 9840, and its trytes run from
 # -9841 to 9841.
@@ -389,9 +384,6 @@
         .equ  D_INO, 18                   # its inode, NO_INO when unused
         .equ  NO_INO, 0
         .equ  NAME_MAX, 17                # code points in a name; one is left for 0
-        .equ  PATH_DEPTH, 6               # names a path may have: an open
-                                          # needs every directory on its way
-                                          # in the kernel's cache at once
 
 # A program file: EXEC_MAGIC, then the program's image, as assembled to
 # run from V_USER (its first word there, so its first tryte at V_USER - 1).

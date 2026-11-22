@@ -135,11 +135,12 @@ it, or else the one on the PATH is used.
 | `kernel/pagetables.s` | the boot address space and the kernel's shared leaf table |
 | `kernel/lock.s` | the kernel lock |
 | `kernel/harts.s` | starting the other harts, waking an idle one |
+| `kernel/ipc.s` | messages for servers: `call`, `receive`, `reply`, `copyin`, `copyout` |
 | `include/kernel.s` | firmware and kernel together, without programs: included by a build such as `demo.s`, not run on its own |
-| `user/` | programs built into the kernel image: `init` (program 0 of the demo), `ping` (1) and `pong` (2); `sh` (program 0 of the shell build) and `pingpong` (3) |
+| `user/` | programs built into the kernel image: `init` (program 0 of the demo), `ping` (1) and `pong` (2); `sh` (program 0 of the shell build), `pingpong` (3) and `fsd`, the file server (4) |
 | `bin/` | programs for the disk, each assembled on its own: `hello`, `fail` and `spin` |
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
-| `shell.s` | the same machine, starting the shell, with sh, ping, pong and pingpong |
+| `shell.s` | the same machine, starting the shell, with sh, ping, pong, pingpong and the file server |
 | `docs/filesystem.md` | the on-disk format of the filesystem |
 | `tools/fs.py` | builds and reads filesystem images on the host |
 | `tests/` | the tests, and a harness that builds the kernel with test programs |
@@ -157,15 +158,15 @@ Every address space has three regions, one per mid-table entry:
 The first two regions are shared by every address space. A new process
 costs four pages: a root, a mid and a leaf table, and its own page,
 into which `spawn` copies the program image loaded at boot, or
-`spawnf` and `spawnw` a program file read from the disk. The kernel's
-block cache takes up to 8 more pages, as it needs them.
+`spawnw` a program file read from the disk. Block windows take up to
+nine more, as a process uses them.
 
 | Physical page | Contents |
 |---------------|----------|
 | 0 | firmware |
 | 1, 2 | kernel code; kernel data |
 | 3, 4, 5 | the boot address space; the kernel's shared leaf table |
-| 6 .. 5 + `NPROG` | program images 0 to `NPROG` − 1 (the demo has 3, the shell build 4) |
+| 6 .. 5 + `NPROG` | program images 0 to `NPROG` − 1 (the demo has 3, the shell build 5) |
 | 6 + `NPROG` .. `RAM_PAGES` | free pages, handed out by the allocator |
 
 ## System calls
@@ -190,23 +191,18 @@ block cache takes up to 8 more pages, as it needs them.
 | 12 | `bwrite(block, window)` | writes the block window to the block: as `bread` |
 | 13 | `kill(pid)` | ends child `pid` before it runs again: 0; −2 if `pid` is not the caller's child |
 | 14 | `foreground(pid)` | gives the console to child `pid`, so that Ctrl-C kills it, or to nobody with `NO_FOREGROUND` (−1): 0; −2 if `pid` is not the caller's child |
-| 15 | `spawnw()` | starts the program file whose first block is in block window 0 (docs/filesystem.md): as `spawn`, with −2 when there is no window or no program in it |
-| 16 | `open(path, flags)` | the lowest free file descriptor, for reading (`O_RDONLY`, the only flag yet) |
-| 17 | `close(fd)` | 0 |
-| 18 | `read(fd, buffer, n)` | how many trytes it copied, at most `n` and never past the end of the file or of a block; 0 at the end |
-| 19 | `lseek(fd, offset, whence)` | the new position, from the start, where it is, or the end (`SEEK_SET`, `SEEK_CUR`, `SEEK_END`) |
-| 20 | `readdir(fd, buffer)` | the inode of the directory's next entry, its name in the buffer; 0 at the end |
-| 21 | `stat(path, buffer)` | 0, with the inode, type, links and size in four words at the buffer |
-| 22 | `spawnf(path)` | starts the program file at the path: as `spawn` |
+| 15 | `spawnw(window, for)` | starts the program file whose first block is in block window `window` (docs/filesystem.md), as the caller's child when `for` is `FOR_SELF` (−1), or as the child of process `for`, whose call the caller holds: as `spawn`, with −2 when there is no window or no program in it, or `for` is not waiting for the caller |
 | 23 | `call(pid, w1, w2, w3, w4)` | sends four words to process `pid` and waits for its reply: the reply's four words in `a0` to `a3`; `a0` −2 if there is no such process or it ends first, −3 if `pid` is the caller |
 | 24 | `receive()` | waits for a call: `a0` the caller, `a1` to `a4` its words; or `a0` `FROM_KERNEL` (−1), `a1` `NOTE_ENDED`, `a2` a process that ended |
 | 25 | `reply(pid, w1, w2, w3, w4)` | ends the call of process `pid`, which this process received: 0; −2 if `pid` is not waiting for its reply |
 | 26 | `copyin(pid, from, to, n)` | copies `n` trytes from `from` in process `pid`, whose call this process holds, to its own `to`: 0; −2 as `reply`, −12 if either range is not all mapped, when nothing is copied |
 | 27 | `copyout(pid, from, to, n)` | copies `n` trytes from its own `from` to `to` in process `pid`: as `copyin` |
 
-The file calls (16 to 22) fail with their own negative numbers, −4 to
-−14: no filesystem, no such file, not a directory, a bad descriptor and
-so on, each named in `include/layout.s` (`E_NOENT`, `E_BADF`, ...).
+Numbers 16 to 22 are free: files are not system calls but calls to the
+file server (below and docs/filesystem.md), which fail with their own
+negative numbers, −4 to −14: no filesystem, no such file, not a
+directory, a bad descriptor and so on, each named in `include/layout.s`
+(`E_NOENT`, `E_BADF`, ...).
 
 A call whose result is a status, or a value that is never negative,
 reports failure with a negative number; `include/layout.s` names each
@@ -244,14 +240,15 @@ N`; the file keeps what was written for the next run.
 
 The disk can hold a filesystem, shaped like a Unix one: inodes, nested
 directories with `.` and `..`, and files reached by path through file
-descriptors (`docs/filesystem.md`). The kernel reads it through a cache
-of blocks; a call that needs a block not in the cache sleeps until the
-disk has read it, then runs again from the start. It is read-only for
-now. `tools/fs.py` makes and changes filesystems on the host, and the
+descriptors (`docs/filesystem.md`). The kernel knows nothing of it: a
+process, the **file server** (`user/fsd.s`), reads it into its block
+windows and answers `call`s to open, read and list files, keeping each
+process's descriptors. init starts it first, so it is process
+`FS_PID` (1). It is read-only for now. `tools/fs.py` makes and changes filesystems on the host, and the
 shell's built-ins `ls [DIR]` and `cat PATH` read them. A word the shell
 does not know as a built-in or a program in the kernel image names a
 program file: a path if it holds a slash, else a file in `/bin`, which
-`spawnf` starts. `tools/fs.py` stores a `.s` or `.dti` file as a
+the file server starts as the shell's child. `tools/fs.py` stores a `.s` or `.dti` file as a
 program, in `/bin`:
 
 ```bash

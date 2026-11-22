@@ -40,15 +40,17 @@ def disk_with(**files: list[int] | str):
     return (path, 5), first
 
 
-def start_from(block: int) -> str:
+def start_from(block: int, window: int = 0, parent: str = "FOR_SELF") -> str:
     """Read block into the window, spawnw, and exit with the child's code,
     or with spawnw's failure."""
     return f"""
         li    a0, SYS_BREAD
         li    a1, {block}
-        li    a2, 0
+        li    a2, {window}
         sys
         li    a0, SYS_SPAWNW
+        li    a1, {window}
+        li    a2, {parent}
         sys
         bltz  a0, 9f
         mv    s1, a0
@@ -105,9 +107,20 @@ def test_text_is_not_a_program():
     assert run(start_from(first["notes"]), disk=disk).code_of(0) == E_NOPROG
 
 
+def test_any_window_will_do_but_only_for_a_caller_held():
+    disk, first = disk_with(greet=program_file(GREET))
+    assert run(start_from(first["greet"], window=8), disk=disk).code_of(0) == 42
+    # A parent other than the caller must be a process whose call it holds:
+    # init holds nobody's.
+    result = run(start_from(first["greet"], parent="0"), disk=disk)
+    assert result.code_of(0) == -2  # E_NOPROC
+
+
 def test_there_is_nothing_to_start_without_a_window():
     program = f"""
         li    a0, SYS_SPAWNW
+        li    a1, 0
+        li    a2, FOR_SELF
         sys
         {exit_with("a0")}
 """

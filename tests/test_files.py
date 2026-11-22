@@ -1,15 +1,22 @@
-"""The kernel's file calls (docs/filesystem.md): open, close, read, lseek,
-readdir, stat and spawnf, reading disks tools/fs.py made. Each reads
-blocks through the kernel's cache and runs again from the start when a
-block has to come from the disk (kernel/cache.s)."""
+"""The file server's calls (docs/filesystem.md, user/fsd.s): open, close,
+read, lseek, readdir, stat and spawnf, reading disks tools/fs.py made.
+Each is a SYS_CALL to FS_PID; the harness builds the server in and init
+starts it first."""
 
 import re
 
-from tests.kernel import _assemble, exit_with, new_disk, run, wait_for
+from tests import kernel
+from tests.kernel import _assemble, exit_with, new_disk, wait_for
 from tools import fs
 from tools.fs import PAGE, Filesystem, program_file
 
 L = fs.L
+
+
+def run(*args, **options):
+    """kernel.run, with the file server built in and started first."""
+    return kernel.run(*args, files=True, **options)
+
 
 # putn: print a0 in decimal and a space, in one puts, so that a child's
 # output cannot come between them. Clobbers a0, a1, t0..t3.
@@ -83,28 +90,34 @@ def said(result) -> list[int]:
 
 def open_(path: str, flags: str = "O_RDONLY") -> str:
     return f"""
-        li    a0, SYS_OPEN
-        la    a1, {path}
-        li    a2, {flags}
+        li    a0, SYS_CALL
+        li    a1, FS_PID
+        li    a2, FS_OPEN
+        la    a3, {path}
+        li    a4, {flags}
         sys"""
 
 
 def read(fd: int | str, n: int | str, to: str = "buf") -> str:
     load = "la" if to.isidentifier() else "li"  # a label, or an address
     return f"""
-        li    a0, SYS_READ
-        li    a1, {fd}
-        {load}    a2, {to}
-        li    a3, {n}
+        li    a0, SYS_CALL
+        li    a1, FS_PID
+        li    a2, FS_READ
+        li    a3, {fd}
+        {load}    a4, {to}
+        li    a5, {n}
         sys"""
 
 
 def lseek(fd: int, offset: int, whence: str) -> str:
     return f"""
-        li    a0, SYS_LSEEK
-        li    a1, {fd}
-        li    a2, {offset}
-        li    a3, {whence}
+        li    a0, SYS_CALL
+        li    a1, FS_PID
+        li    a2, FS_LSEEK
+        li    a3, {fd}
+        li    a4, {offset}
+        li    a5, {whence}
         sys"""
 
 
@@ -160,7 +173,7 @@ def test_a_path_goes_through_directories():
 
 
 def test_what_cannot_be_opened_says_why():
-    deep = "/".join("abcdefg")  # seven names: more than PATH_DEPTH
+    deep = "/".join(["d" * 17] * 14)  # 251 trytes: more than PATH_MAX
     program = report(
         open_("missing"),
         open_("through"),
@@ -168,9 +181,11 @@ def test_what_cannot_be_opened_says_why():
         open_("deep"),
         open_("f", "1"),  # only O_RDONLY, yet
         """
-        li    a0, SYS_OPEN
-        li    a1, V_USER - 9842
-        li    a2, O_RDONLY
+        li    a0, SYS_CALL
+        li    a1, FS_PID
+        li    a2, FS_OPEN
+        li    a3, V_USER - 9842
+        li    a4, O_RDONLY
         sys""",
         data=string("missing", "nope")
         + string("through", "f/x")
@@ -193,21 +208,29 @@ def test_descriptors_are_the_lowest_free_and_there_are_nfd():
     program = report(
         *[open_("f")] * (L["NFD"] + 1),
         """
-        li    a0, SYS_CLOSE
-        li    a1, 3
+        li    a0, SYS_CALL
+        li    a1, FS_PID
+        li    a2, FS_CLOSE
+        li    a3, 3
         sys""",
         open_("f"),
         """
-        li    a0, SYS_CLOSE
-        li    a1, 3
+        li    a0, SYS_CALL
+        li    a1, FS_PID
+        li    a2, FS_CLOSE
+        li    a3, 3
         sys""",
         """
-        li    a0, SYS_CLOSE
-        li    a1, 3
+        li    a0, SYS_CALL
+        li    a1, FS_PID
+        li    a2, FS_CLOSE
+        li    a3, 3
         sys""",
         """
-        li    a0, SYS_CLOSE
-        li    a1, NFD
+        li    a0, SYS_CALL
+        li    a1, FS_PID
+        li    a2, FS_CLOSE
+        li    a3, NFD
         sys""",
         data=string("f", "f"),
     )
@@ -254,9 +277,11 @@ def test_reads_and_seeks_that_cannot_be_done():
 
 def test_readdir_gives_each_entry_in_use_and_then_0():
     step = """
-        li    a0, SYS_READDIR
-        li    a1, 0
-        la    a2, buf
+        li    a0, SYS_CALL
+        li    a1, FS_PID
+        li    a2, FS_READDIR
+        li    a3, 0
+        la    a4, buf
         sys
         mv    s1, a0
         blez  a0, 1f
@@ -274,9 +299,11 @@ def test_readdir_gives_each_entry_in_use_and_then_0():
         step,
         open_("f"),
         """
-        li    a0, SYS_READDIR
-        li    a1, 1
-        la    a2, buf
+        li    a0, SYS_CALL
+        li    a1, FS_PID
+        li    a2, FS_READDIR
+        li    a3, 1
+        la    a4, buf
         sys""",
         data=string("d", "/d") + string("f", "/d/one"),
     )
@@ -309,9 +336,11 @@ def test_readdir_gives_each_entry_in_use_and_then_0():
 def test_stat_says_what_a_path_names():
     def stat(path: str, to: str = "statbuf") -> str:
         return f"""
-        li    a0, SYS_STAT
-        la    a1, {path}
-        la    a2, {to}
+        li    a0, SYS_CALL
+        li    a1, FS_PID
+        li    a2, FS_STAT
+        la    a3, {path}
+        la    a4, {to}
         sys"""
 
     fields = [f"        lw    a0, statbuf + ST_{f}" for f in ("INO", "TYPE", "LINKS")]
@@ -349,29 +378,56 @@ def test_without_a_filesystem_there_are_no_files():
     assert said(run(program, disk=(new_disk(), 3))) == [L["E_NOFS"]]  # blank
 
 
-def test_a_cache_too_small_for_a_call_fails_it_rather_than_hang():
-    # The build has 3 programs, so pages 9 to 13 are free and init takes 4
-    # of them: the cache gets one page, and an open needs three blocks.
+def test_descriptors_go_with_their_process():
+    # Each child opens every descriptor and exits with them open. The
+    # fifth gets process number 2 again, and finds them all free: the
+    # server closed the first one's when the kernel said it had ended.
+    child = report(*[open_("f")] * L["NFD"], data=string("f", "f"))
+    init = f"""
+        li    s2, 5
+1:      li    a0, SYS_SPAWN
+        li    a1, 1
+        sys
+        mv    s1, a0
+        {wait_for("s1")}
+        addi  s2, s2, -1
+        bnez  s2, 1b
+        li    a1, 0
+        {exit_with("s1")}
+"""
+    result = run(init, child, disk=disk(f="x"))
+    assert result.code_of(0) == 2
+    assert said(result) == list(range(L["NFD"])) * 5
+
+
+def test_a_server_without_pages_for_its_windows_says_so():
+    # The build has 4 programs, so pages 10 to 19 are free; init and the
+    # server take 4 each, leaving 2 windows, and an open needs three
+    # blocks: block 0, the inodes and the root directory.
     program = report(open_("f"), data=string("f", "f"))
-    assert said(run(program, ram_pages=13, disk=disk(f="x"))) == [L["E_NOMEM"]]
-    assert said(run(program, ram_pages=15, disk=disk(f="x"))) == [0]
+    assert said(run(program, ram_pages=19, disk=disk(f="x"))) == [L["E_NOMEM"]]
+    assert said(run(program, ram_pages=20, disk=disk(f="x"))) == [0]
 
 
 def reader(path: str, p: str = "r") -> str:
     """Open path, read it 7 trytes at a time, and exit with the sum of its
     trytes, or with open's failure. Labels start with p."""
     return f"""
-        li    a0, SYS_OPEN
-        la    a1, {p}path
-        li    a2, O_RDONLY
+        li    a0, SYS_CALL
+        li    a1, FS_PID
+        li    a2, FS_OPEN
+        la    a3, {p}path
+        li    a4, O_RDONLY
         sys
         bltz  a0, 9f
         mv    s2, a0                   # s2: the descriptor
         li    s1, 0                    # s1: the sum of what it read
-1:      li    a0, SYS_READ
-        mv    a1, s2
-        la    a2, {p}buf
-        li    a3, 7
+1:      li    a0, SYS_CALL
+      li    a1, FS_PID
+      li    a2, FS_READ
+        mv    a3, s2
+        la    a4, {p}buf
+        li    a5, 7
         sys
         blez  a0, 3f
         la    t0, {p}buf
@@ -416,7 +472,7 @@ def test_two_processes_read_files_at_once():
         max_steps=20_000_000,
     )
     sums = sum(map(ord, a)), sum(map(ord, b))
-    assert sorted(result.code_of(p) for p in (1, 2)) == sorted(sums)
+    assert sorted(result.code_of(p) for p in (2, 3)) == sorted(sums)
     assert result.code_of(0) == sum(sums)
 
 
@@ -444,8 +500,10 @@ def test_spawnf_starts_a_program_file():
 msg:    .string "hello from a file\\n"
 """)
     spawn = """
-        li    a0, SYS_SPAWNF
-        la    a1, {}
+        li    a0, SYS_CALL
+        li    a1, FS_PID
+        li    a2, FS_SPAWN
+        la    a3, {}
         sys"""
     program = report(
         spawn.format("p") + "\n        mv    s1, a0",
@@ -464,7 +522,7 @@ msg:    .string "hello from a file\\n"
     result = run(program, disk=on)
     assert "hello from a file\n" in result.console
     assert said(result) == [
-        1,
+        2,  # the child: process 1 is the file server
         42,
         L["E_NOEXEC"],
         L["E_NOEXEC"],
@@ -473,9 +531,9 @@ msg:    .string "hello from a file\\n"
     ]
 
 
-def test_a_killed_reader_leaves_the_cache_usable():
-    # A child is killed as soon as it starts, perhaps while it waits for a
-    # block; the parent then reads the same file through the cache.
+def test_a_killed_reader_leaves_the_server_usable():
+    # A child is killed as soon as it starts, perhaps while the server
+    # holds its call; the parent then reads the same file.
     init = f"""
         li    a0, SYS_SPAWN
         li    a1, 1

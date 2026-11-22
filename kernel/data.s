@@ -31,9 +31,6 @@ procs:  .words NPROC * PCB_SIZE / 3     # the process table
 
 conin:  .words CONIN_MAX               # console input, a ring (input.s)
 
-bufs:   .words NBUF * BUF / 3          # the block cache's slots (cache.s)
-buf_clock: .word 0                     # counts bget calls: BUF_USED's clock
-kname:  .zero NAME_MAX + 1             # the name namei looks up
 
 numbuf: .zero 16
 numbuf_end:
