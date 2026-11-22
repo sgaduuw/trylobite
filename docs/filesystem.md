@@ -294,7 +294,9 @@ arguments: `a0` is 0 and the list is just its 0 word.
 
 The shell gives a program the words of its command line, split at
 spaces, the command first as typed (`wc`, or `/bin/wc`), without the
-redirections. `echo` says its arguments; `wc FILE...` counts each file
+redirections. Quoting keeps a space, `|`, `<` or `>` in a word, as in a
+Unix shell: `'...'` and `"..."` (where `\"` and `\\` are `"` and `\`),
+or `\` before one character; `""` alone is an empty argument. `echo` says its arguments; `wc FILE...` counts each file
 named, with a total for two or more, and standard input with none.
 
 ```text
@@ -334,4 +336,4 @@ directory with anything in it.
 
 ## Later
 
-Directories of more than one block, and `rename`. Quoting in the shell, so an argument can hold a space.
+Directories of more than one block, and `rename`.

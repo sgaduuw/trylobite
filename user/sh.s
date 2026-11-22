@@ -20,6 +20,11 @@
 # inherits, and points it back at the next prompt. Its own complaints go
 # to standard error, so they reach the console whatever is redirected.
 #
+# Quotes make characters themselves, as in a Unix shell: 'a b' and "a b"
+# are one word holding a space, \ makes the next character itself, and a
+# quoted |, < or > neither pipes nor redirects. Inside "...", \ quotes
+# only " and \. "" or '' alone is an empty word.
+#
 # A | between commands makes a pipeline: each command's standard output
 # goes into a pipe (the pipe server's) that is the next one's standard
 # input. The shell starts every program of the line before it waits for
@@ -46,6 +51,8 @@
         .equ  SH_PARKOUT, NDESC - 3    # output wait while the line starts
         .equ  SH_STAGES, 4             # commands a pipeline may have
         .equ  SH_NOPIPE, -1            # sh_pipe with no pipe server, alike
+        .equ  SH_EMPTY, -1             # in the line, a word of quotes alone:
+                                       # no character is negative
 
 sh:     li    a0, SYS_SPAWN            # the console server
         li    a1, SH_CONSD
@@ -177,7 +184,94 @@ eof:    li    a1, '\n'                # end the last prompt's line
 enter:  li    a1, '\n'
         call  putc
         st    zero, 0(s1)
-        la    t0, sh_segs              # cut the line at each |, a command
+
+# Quoting: undo it in place, before anything looks for words, | or
+# redirections. In '...' every character is itself; in "..." too, but
+# that \" and \\ stand for " and \; elsewhere \ makes the character after
+# it itself. A space, |, < or > made itself this way is stored negated,
+# which no typed character is, so nothing splits or redirects at it, and
+# word (or unquote) turns it back. A word made of quotes alone ("" or '')
+# is SH_EMPTY, so that it is still there, as an empty argument. Nothing
+# grows, so the line is rewritten as it is read.
+        mv    t0, s0                   # t0: what is read next
+        mv    t1, s0                   # t1: where what is kept goes
+        mv    t3, s0                   # t3: where the word being read starts
+        li    a2, 0                    # a2: the quote it is in, or 0
+        li    a3, 0                    # a3: 1 once the word has had quotes
+q_next: lt    t2, 0(t0)
+        addi  t0, t0, 1
+        bnez  a2, q_in
+        beqz  t2, q_brk
+        li    a0, '\''
+        beq   t2, a0, q_open
+        li    a0, '"'
+        beq   t2, a0, q_open
+        li    a0, '\\'
+        beq   t2, a0, q_esc
+        li    a0, ' '                  # what ends a word: kept, as typed
+        beq   t2, a0, q_brk
+        li    a0, '|'
+        beq   t2, a0, q_brk
+        li    a0, '<'
+        beq   t2, a0, q_brk
+        li    a0, '>'
+        beq   t2, a0, q_brk
+        j     q_keep
+q_open: mv    a2, t2
+        li    a3, 1
+        j     q_next
+q_esc:  lt    t2, 0(t0)
+        beqz  t2, q_bs                 # nothing after it: the \ itself
+        addi  t0, t0, 1
+        j     q_lit
+q_bs:   li    t2, '\\'
+        j     q_keep
+q_in:   beqz  t2, q_unmatched
+        beq   t2, a2, q_close
+        li    a0, '"'                  # in '...', nothing is special
+        bne   a2, a0, q_lit
+        li    a0, '\\'
+        bne   t2, a0, q_lit
+        lt    a0, 0(t0)                # in "...", \ makes " and \ themselves
+        li    a1, '"'
+        beq   a0, a1, 1f
+        li    a1, '\\'
+        bne   a0, a1, q_lit            # and is itself before anything else
+1:      mv    t2, a0
+        addi  t0, t0, 1
+        j     q_lit
+q_close:
+        li    a2, 0
+        j     q_next
+q_lit:  li    a0, ' '                  # t2 is itself: if it would split or
+        beq   t2, a0, 1f               # redirect, negated
+        li    a0, '|'
+        beq   t2, a0, 1f
+        li    a0, '<'
+        beq   t2, a0, 1f
+        li    a0, '>'
+        bne   t2, a0, q_keep
+1:      neg   t2, t2
+q_keep: st    t2, 0(t1)
+        addi  t1, t1, 1
+        j     q_next
+q_brk:  beqz  a3, 1f                   # t2 ends a word: a space, |, < or >,
+        bne   t1, t3, 1f               # or the line's end. Quotes and
+        li    a0, SH_EMPTY             # nothing else are an empty word
+        st    a0, 0(t1)
+        addi  t1, t1, 1
+1:      li    a3, 0
+        st    t2, 0(t1)
+        addi  t1, t1, 1
+        mv    t3, t1
+        bnez  t2, q_next
+        j     q_done
+q_unmatched:
+        call  to_err
+        la    a1, sh_unmatched
+        j     say
+
+q_done: la    t0, sh_segs              # cut the line at each |, a command
         sw    s0, 0(t0)                # after each
         li    t1, 1                    # t1: how many
         li    t3, '|'
@@ -263,7 +357,9 @@ r_path: lt    t0, 0(s6)                # the rest of the word, or the next
         beqz  s2, 3f                   # which comes back once it is open
         bne   s2, t1, 2b
         st    zero, 0(s6)
-3:      li    a0, SYS_CALL
+3:      mv    a0, s5                   # it leaves the line, so is undone
+        call  unquote                  # in place
+        li    a0, SYS_CALL
         lw    a1, sh_fs
         li    a2, FS_OPEN
         mv    a3, s5
@@ -333,9 +429,9 @@ from_disk:
         call  strcpy
         addi  s3, t0, 1                # s3: where the next one goes
         mv    a0, s4
-6:      call  word                     # then each word of the rest
-        lt    t0, 0(a0)
-        beqz  t0, 7f
+6:      call  word                     # then each word of the rest, which
+        beq   a0, a1, 7f               # may be empty (""): none if nothing
+                                       # was taken
         mv    s6, a1
         mv    t0, s3
         mv    t1, a0
@@ -675,7 +771,9 @@ do_cat: mv    a0, s4
 # replacing what it held.
 do_write:
         call  name_arg
-        mv    s7, a1                   # s7: the text
+        mv    s7, a1                   # s7: the text, as typed but for
+        mv    a0, s7                   # its quoting
+        call  unquote
         li    a0, SYS_CALL
         lw    a1, sh_fs
         li    a2, FS_OPEN
@@ -882,7 +980,8 @@ strcpy: lt    t2, 0(t1)
 1:      ret
 
 # word: split the first word off the string at a0. a0 = the word, ended
-# with 0; a1 = what follows, past its spaces. Clobbers t0, t1.
+# with 0, its quoting undone (unquote); a1 = what follows, past its
+# spaces, which is a0 if there was no word. Clobbers t0, t1, a2, a3.
 word:   li    t1, ' '
 1:      lt    t0, 0(a0)                # skip leading spaces
         bne   t0, t1, 2f
@@ -898,7 +997,24 @@ word:   li    t1, ' '
 5:      addi  a1, a1, 1                # and the next one's start
         lt    t0, 0(a1)
         beq   t0, t1, 5b
-9:      ret
+9:                                     # then undo its quoting
+
+# unquote: give the string at a0 back what quoting kept from it, in place:
+# each negated character is itself again, and SH_EMPTY goes. Clobbers t0,
+# t1, a2, a3.
+unquote:
+        mv    a2, a0                   # a2: what is read next
+        mv    a3, a0                   # a3: where it goes
+1:      lt    t0, 0(a2)
+        addi  a2, a2, 1
+        li    t1, SH_EMPTY
+        beq   t0, t1, 1b
+        bgez  t0, 2f
+        neg   t0, t0
+2:      st    t0, 0(a3)
+        addi  a3, a3, 1
+        bnez  t0, 1b
+        ret
 
 # streq: a0 = 1 if the strings at a0 and a1 are the same, else 0.
 # Clobbers t0, t1.
@@ -1042,6 +1158,7 @@ sh_nocmd:    .string "sh: a command is missing around |"
 sh_twobi:    .string "sh: one built-in to a pipeline"
 sh_many:     .string "sh: too many commands in the pipeline"
 sh_nopipe:   .string "sh: cannot make a pipe: "
+sh_unmatched: .string "sh: a quote is not closed"
 sh_sh:       .string "sh: "
 sh_colon:    .string ": "
 sh_noent:    .string "no such file or directory"

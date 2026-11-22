@@ -308,7 +308,9 @@ sends standard output to a file, made empty or new, `>> PATH` to its
 end, and `< PATH` takes standard input from one, for that command alone,
 built-in or program: `hello > out`, `ls >>list`, `cat < notes`. The
 shell's own complaints go to standard error, the console, whatever is
-redirected.
+redirected. Quotes work as in a Unix shell: `echo "hello   world"` and
+`echo 'a | b'` give one argument each, keeping the spaces and the `|`,
+`\` makes the next character itself, and `""` is an empty argument.
 
 A `|` between commands makes a **pipeline**: `hello | upper | wc`, up to
 four commands. Pipes come from a process, the **pipe server**
