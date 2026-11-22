@@ -45,9 +45,16 @@ def disk_with(**files: list[int] | str):
     return (path, 5), first
 
 
-def start_from(block: int, window: int = 0, parent: str = "FOR_SELF") -> str:
-    """Read block into the window, spawnw, and exit with the child's code,
-    or with spawnw's failure. The disk server is process 1."""
+def start_from(
+    block: int,
+    window: int = 0,
+    parent: str = "FOR_SELF",
+    args: str = "0",
+    n: str = "0",
+) -> str:
+    """Read block into the window, spawnw with n trytes of arguments at
+    args, and exit with the child's code, or with spawnw's failure. The
+    disk server is process 1."""
     return f"""
         li    a0, SYS_WINDOW
         li    a1, {window}
@@ -60,6 +67,8 @@ def start_from(block: int, window: int = 0, parent: str = "FOR_SELF") -> str:
         li    a0, SYS_SPAWNW
         li    a1, {window}
         li    a2, {parent}
+        li    a3, {args}
+        li    a4, {n}
         sys
         bltz  a0, 9f
         mv    s1, a0

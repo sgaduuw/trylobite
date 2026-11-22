@@ -156,7 +156,7 @@ file's last block) and `E_BUSY`.
 |-----------|------|------|
 | `FS_OPEN` (0) | `open(path, flags)` | gives the caller's lowest free descriptor (of `NDESC`, 9), at position 0 of the file or directory. `flags` is below. `E_MFILE` when the caller has no descriptor free, or the server has `NFILE` (27) files open; with `O_CREAT` the file may have been made by then |
 | `FS_STAT` (5) | `stat(path, buffer)` | four words at the word-aligned buffer: `ST_INO`, `ST_TYPE`, `ST_LINKS` and `ST_SIZE` |
-| `FS_SPAWN` (6) | `spawnf(path)` | starts the program file at the path as the caller's child: the server reads its first block into a window and gives it to `spawnw` with the caller as the parent. Anything but a program file is `E_NOEXEC` |
+| `FS_SPAWN` (6) | `spawnf(path, args, n)` | starts the program file at the path as the caller's child, with the `n` trytes of arguments at `args` in the caller's memory (Program arguments): the server reads its first block into a window and gives it to `spawnw` with the caller as the parent. Anything but a program file is `E_NOEXEC` |
 | `FS_UNLINK` (8) | `unlink(path)` | removes a file's name from its directory, and frees the file when no name is left. A directory is `E_ISDIR`, a name `.` or `..` `E_INVAL` |
 | `FS_MKDIR` (9) | `mkdir(path)` | makes an empty directory, holding `.` and `..`: `E_EXIST` if the name is taken |
 | `FS_RMDIR` (10) | `rmdir(path)` | removes an empty directory (`E_NOTEMPTY` otherwise); the root is `E_BUSY`, a name `.` or `..` `E_INVAL` |
@@ -245,7 +245,8 @@ file or directory`, and carry on.
 A command that is neither built in nor one of the programs in the
 kernel image (only `pingpong`) is a program file, which `spawnf`
 (`FS_SPAWN`) starts: the path given, if it holds a slash, or else the file of that
-name in `/bin`, as a Unix shell searches its `PATH`. Nothing there, or
+name in `/bin`, as a Unix shell searches its `PATH`, with the line's
+words (redirections left out) as its arguments. Nothing there, or
 no filesystem, is `sh: no such program: NAME`; a text file or a
 directory is `sh: not a program: NAME`. The programs in `bin/` are
 meant for `/bin`.
@@ -272,6 +273,35 @@ and runs:
         .gp   USER_GP
 hello:  ...
         .nocompress
+```
+
+## Program arguments
+
+A program started with `spawnw` (and so with `spawnf`) gets arguments,
+as a C program gets `argc` and `argv`: it starts with `a0` the number
+of them and `a1` the address `V_ARGV`, where a word per argument holds
+the address of its string, ended by 0, and a 0 word follows the last.
+The parent names a block of at most `ARG_MAX` (243) trytes in its own
+memory, the strings one after another, each ended by 0 (the last may
+end at the block's end instead); `spawnw` copies it into the lower half
+of the child's page, which nothing else uses, from `V_ARGS`, and builds
+the list at `V_ARGV`, the page's first word. The block is read in the
+parent's memory whoever calls, so the file server passes its client's
+`args` and `n` straight to `spawnw` without copying them. A count out of
+range is `E_INVAL`, a block not all in the parent's memory `E_FAULT`,
+and no program starts. A count of 0 starts the program with no
+arguments: `a0` is 0 and the list is just its 0 word.
+
+The shell gives a program the words of its command line, split at
+spaces, the command first as typed (`wc`, or `/bin/wc`), without the
+redirections. `echo` says its arguments; `wc FILE...` counts each file
+named, with a total for two or more, and standard input with none.
+
+```text
+$ wc notes more
+1 2 12 notes
+2 3 14 more
+3 5 26 total
 ```
 
 ## The host tool
@@ -304,4 +334,4 @@ directory with anything in it.
 
 ## Later
 
-Arguments for programs. Directories of more than one block, and `rename`.
+Directories of more than one block, and `rename`. Quoting in the shell, so an argument can hold a space.

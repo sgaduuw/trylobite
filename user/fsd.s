@@ -394,9 +394,10 @@ fs_stat:
         sys
         j     fs_reply                 # 0, or E_FAULT
 
-# spawnf(path): start the program file path names, as the caller's
-# child, from its first block in one of the server's windows. The child
-# starts in the caller's current directory. (Should the slot it takes be
+# spawnf(path, args, n): start the program file path names, as the
+# caller's child, from its first block in one of the server's windows,
+# with the n trytes of arguments at args in the caller's memory. The
+# child starts in the caller's current directory. (Should the slot it takes be
 # freed while this call runs, by another hart, the notice of that ends
 # comes after and sends the child to the root: harmless, and rare, since
 # the kernel hands slots out round the table.)
@@ -421,7 +422,9 @@ fs_spawn:
         sub   a1, a0, t0
         li    t0, PAGE
         div   a1, a1, t0
-        mv    a2, s0                   # the caller is the parent
+        mv    a2, s0                   # the caller is the parent,
+        lw    a3, fs_a2                # and its arguments are in its memory,
+        lw    a4, fs_a3                # where the kernel reads them
         li    a0, SYS_SPAWNW
         sys
         bltz  a0, fs_reply

@@ -539,6 +539,7 @@ msg:    .string "hello from a file\\n"
         CALL_FS
         li    a2, FS_SPAWN
         la    a3, {}
+        li    a5, 0
         sys"""
     program = report(
         spawn.format("p") + "\n        mv    s1, a0",

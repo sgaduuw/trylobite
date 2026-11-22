@@ -175,7 +175,11 @@
                                           # (a2 = FOR_SELF) or of process a2, whose
                                           # call the caller holds: its process
                                           # number, E_NOSLOT, E_NOPROG, E_NOMEM,
-                                          # E_NOPROC
+                                          # E_NOPROC. a3 and a4: its arguments,
+                                          # a4 trytes at a3 in the parent's
+                                          # memory (see ARG_MAX), or a4 = 0 for
+                                          # none; E_INVAL (a4 negative or above
+                                          # ARG_MAX), E_FAULT (not all there)
         .equ  FOR_SELF, -1                # spawnw, kill: the caller is the parent
         # 16 to 22 were the kernel's file calls: files are the file server's now
 
@@ -333,7 +337,7 @@
 # lseek(offset, whence): the new position, E_INVAL. readdir(buffer): the
 # next entry's inode, its name to the buffer (NAME_MAX + 1 trytes); 0 at
 # the end; E_NOTDIR.
-        .equ  FS_PROTOCOL, 2              # the calls below, as they are now: a
+        .equ  FS_PROTOCOL, 3              # the calls below, as they are now: a
                                           # change a client would misread moves it on
         .equ  FS_OPEN,    0               # open(path, flags): the caller's lowest
                                           # free descriptor, E_NOENT, E_NOTDIR,
@@ -344,8 +348,10 @@
         # 1 to 4 were close, read, lseek and readdir: descriptor calls now
         .equ  FS_STAT,    5               # stat(path, buffer): 0, the ST_ words at
                                           # the buffer; as open fails
-        .equ  FS_SPAWN,   6               # spawnf(path): starts the program file
-                                          # as the caller's child: as spawnw, and
+        .equ  FS_SPAWN,   6               # spawnf(path, args, n): starts the
+                                          # program file as the caller's child,
+                                          # with the n trytes of arguments at args
+                                          # in the caller's memory: as spawnw, and
                                           # E_NOEXEC for no program, as open fails
         # 7 was write
         .equ  FS_UNLINK,  8               # unlink(path): 0, E_ISDIR, E_BUSY (open),
@@ -608,3 +614,14 @@
         .equ  EXEC_IMAGE, BLOCK_W0 + 3    # word 1: the image's first word
         .equ  EXEC_MAX, 9843              # trytes an image may have: V_USER - 1
                                           # to the top of the page, stack included
+
+# A program's arguments (spawnw). The parent gives a block of strings,
+# each ended by a 0 (the last may end at the block's end instead): the
+# shell gives the command's words, the command first, as Unix's argv.
+# spawnw copies them into the lower half of the child's page, which
+# nothing else uses, and starts it with a0 = how many (argc) and a1 =
+# V_ARGV, a word per argument holding its address, then a 0 word.
+        .equ  ARG_MAX, 243                # trytes of arguments, their 0s included
+        .equ  V_ARGV, V_USER - 9840       # argv: the page's first word, and
+                                          # ARG_MAX + 1 words from there
+        .equ  V_ARGS, V_ARGV - 1 + 3 * (ARG_MAX + 1)   # the strings, after it

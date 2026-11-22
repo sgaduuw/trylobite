@@ -28,7 +28,7 @@ def said(shell, typed: str, on) -> str:
 
 
 def test_output_goes_to_the_file_and_comes_back_after(shell):
-    on = bin_disk(12)
+    on = bin_disk(13)
     out = said(shell, "pwd > p\npwd\nhello >out\ncat out\n", on)
     assert out == (
         "$ pwd > p\n$ pwd\n/\n$ hello >out\n"
@@ -40,7 +40,7 @@ def test_output_goes_to_the_file_and_comes_back_after(shell):
 
 
 def test_output_replaces_with_one_arrow_and_adds_with_two(shell):
-    on = bin_disk(12, notes="old text that is long\n")
+    on = bin_disk(13, notes="old text that is long\n")
     said(shell, "pwd > notes\nhello >> notes\npwd >>notes\n", on)
     assert Filesystem.load(on[0]).read("notes") == (
         "/\nhello from a balanced-ternary machine\n/\n"
@@ -48,7 +48,7 @@ def test_output_replaces_with_one_arrow_and_adds_with_two(shell):
 
 
 def test_input_comes_from_the_file(shell):
-    on = bin_disk(12, notes="one\ntwo\n")
+    on = bin_disk(13, notes="one\ntwo\n")
     out = said(shell, "cat < notes\ncat <notes >copy\ncat copy\n", on)
     assert out == (
         "$ cat < notes\none\ntwo\n$ cat <notes >copy\n$ cat copy\none\ntwo\n$ \n"
@@ -56,7 +56,7 @@ def test_input_comes_from_the_file(shell):
 
 
 def test_a_redirection_comes_out_of_the_words_wherever_it_is(shell):
-    on = bin_disk(12)
+    on = bin_disk(13)
     said(shell, "write >w a  b > x c\n", on)
     made = Filesystem.load(on[0])
     # write's file is its first word left, a, and the text follows as typed
@@ -65,7 +65,7 @@ def test_a_redirection_comes_out_of_the_words_wherever_it_is(shell):
 
 
 def test_complaints_reach_the_console_and_the_file_stays_empty(shell):
-    on = bin_disk(12)
+    on = bin_disk(13)
     out = said(shell, "cat nope > out\nfail > out2\ncat < nope\nls >\nls >>  \n", on)
     assert out == (
         "$ cat nope > out\nsh: nope: no such file or directory\n"
@@ -81,6 +81,6 @@ def test_complaints_reach_the_console_and_the_file_stays_empty(shell):
 def test_redirected_files_are_closed_each_time(shell):
     # More redirections than the file server keeps files open (NFILE):
     # each command's file closes at the next prompt.
-    on = bin_disk(12)
+    on = bin_disk(13)
     out = said(shell, "pwd >> p\n" * 30 + "cat p\n", on)
     assert out.endswith("$ cat p\n" + "/\n" * 30 + "$ \n")

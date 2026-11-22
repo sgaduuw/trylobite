@@ -9,7 +9,8 @@
 # starts the console server, then the disk server and the file server
 # that needs it, and finds the servers by their names. A word that is neither
 # built in nor a program in the kernel image names a program file: a
-# path if it has a slash, else a file in /bin. It stops at the end of input. Programs take no arguments yet.
+# path if it has a slash, else a file in /bin, and gets the line's words
+# as its arguments, the command first. It stops at the end of input.
 #
 # A word after the command that starts with < or > redirects: < PATH makes
 # the file standard input, > PATH standard output, made empty or new, and
@@ -327,10 +328,28 @@ from_disk:
         la    s5, sh_path
         j     5f
 4:      mv    s5, s0
-5:      li    a0, SYS_CALL
+5:      la    t0, sh_args              # its arguments: the command as typed,
+        mv    t1, s0
+        call  strcpy
+        addi  s3, t0, 1                # s3: where the next one goes
+        mv    a0, s4
+6:      call  word                     # then each word of the rest
+        lt    t0, 0(a0)
+        beqz  t0, 7f
+        mv    s6, a1
+        mv    t0, s3
+        mv    t1, a0
+        call  strcpy
+        addi  s3, t0, 1
+        mv    a0, s6
+        j     6b
+7:      li    a0, SYS_CALL
         lw    a1, sh_fs
         li    a2, FS_SPAWN
         mv    a3, s5
+        la    a4, sh_args
+        la    t0, sh_args
+        sub   a5, s3, t0
         sys
         bgez  a0, started
         li    t0, E_NOEXEC
@@ -1044,6 +1063,7 @@ sh_digits:   .zero 12
 sh_digits_end: .zero 1
 sh_line:     .zero LINE_MAX + 1
 sh_path:     .zero LINE_MAX + NAME_MAX + 3   # a path the shell puts together
+sh_args:     .zero LINE_MAX + 1        # a program's arguments, each ended by 0
 sh_name:     .zero NAME_MAX + 1        # a name readdir gives
 sh_stat:     .words STAT / 3           # what stat says
 sh_buf:      .zero BUF_MAX + 1         # what cat reads, and a 0 to end it
