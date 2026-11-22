@@ -18,7 +18,7 @@ def shell():
 def said(shell, typed: str, on=None) -> str:
     """What the shell printed between booting and its exit, without the
     kernel's lines."""
-    result = run_image(shell, input=typed, disk=on or bin_disk(12), max_steps=8_000_000)
+    result = run_image(shell, input=typed, disk=on or bin_disk(13), max_steps=8_000_000)
     assert result.exit_code == 0, result.console
     console = result.console.removeprefix("trylobite: booting\n")
     return re.sub(r"trylobite: [^\n]*\n", "", console)
@@ -34,7 +34,7 @@ def test_programs_pipe_into_each_other(shell):
 
 
 def test_a_built_in_can_write_into_a_pipe_or_read_from_one(shell):
-    on = bin_disk(12, notes="one two\nthree\n")
+    on = bin_disk(13, notes="one two\nthree\n")
     assert said(shell, "cat notes | wc\nhello | cat\nls | upper\n", on) == (
         f"$ cat notes | wc\n2 3 14\n$ hello | cat\n{HELLO}"
         "$ ls | upper\nBIN/\n14 NOTES\n$ \n"
@@ -45,14 +45,14 @@ def test_a_pipe_carries_more_than_it_holds(shell):
     # 3,640 code points, five times what a pipe holds, through three
     # programs and a built-in.
     big = ("abcdefghij" * 9 + "\n") * 40
-    on = bin_disk(12, big=big)
+    on = bin_disk(13, big=big)
     assert said(shell, "cat big | upper | upper | wc\n", on) == (
         "$ cat big | upper | upper | wc\n40 40 3640\n$ \n"
     )
 
 
 def test_redirections_mix_with_pipes(shell):
-    on = bin_disk(12, notes="quiet words\n")
+    on = bin_disk(13, notes="quiet words\n")
     out = said(
         shell, "upper < notes | wc > count\ncat count\nhello | upper > up\ncat up\n", on
     )

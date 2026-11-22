@@ -157,6 +157,7 @@ buf:    .zero 50
         CALL_FS
         li    a2, FS_SPAWN
         la    a3, where
+        li    a5, 0
         sys
         mv    s1, a0""",
         wait_for("s1") + "\n        mv    a0, a1",

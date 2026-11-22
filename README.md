@@ -43,8 +43,9 @@ runs the program it names, waits for it and says how it ended. Only
 `pingpong` (the demo above, as a program) is built into the kernel
 image; other programs are files in `/bin` on the disk, from `bin/`:
 `hello`, `fail` (which exits with 3), `spin` (a runaway that loops
-for ever), and two filters for pipelines, `upper` (standard input to
-output in capitals) and `wc` (counts lines, words and code points).
+for ever), `echo` (says its arguments), and two filters for pipelines,
+`upper` (standard input to output in capitals) and `wc` (counts lines,
+words and code points of the files it is given, or of standard input).
 It also has the built-in `exit` and the file built-ins further down,
 and stops at the end of its input. Ctrl-C ends the program the shell is
 waiting for, and at the prompt drops the line typed so far:
@@ -139,7 +140,7 @@ it, or else the one on the PATH is used.
 | `kernel/desc.s` | descriptors: `read`, `write`, `iocall`, `close`, `dup2` and `give`, routed to servers, and the notice when a handle's last descriptor goes |
 | `include/kernel.s` | firmware and kernel together, without programs: included by a build such as `demo.s`, not run on its own |
 | `user/` | programs built into the kernel image: `init` (program 0 of the demo), `ping` (1) and `pong` (2); `sh` (program 0 of the shell build), `pingpong` (3), `fsd`, the file server (4), `diskd`, the disk server (5), `consd`, the console server (6), and `piped`, the pipe server (7) |
-| `bin/` | programs for the disk, each assembled on its own: `hello`, `fail`, `spin`, `upper` and `wc` |
+| `bin/` | programs for the disk, each assembled on its own: `hello`, `fail`, `spin`, `echo`, `upper` and `wc` |
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
 | `shell.s` | the same machine, starting the shell, with sh, ping, pong, pingpong, the file, disk, console and pipe servers |
 | `docs/filesystem.md` | the on-disk format of the filesystem |
@@ -189,7 +190,7 @@ registers mapped past them, at `V_DEVICE`.
 | 8 | `hart()` | the number of the hart running the caller, −4 to +4 |
 | 10 | `wait(pid)` | how child `pid` ended, once it has: `a0` 0 exited, 1 faulted or 2 killed, `a1` its exit code, trap cause, or 0 when killed; `a0` −2 if `pid` is not the caller's child |
 | 13 | `kill(pid, for)` | ends `pid` before it runs again, a child of the caller when `for` is `FOR_SELF` (−1), or, for a driver, a child of process `for`: 0; 1 (`KILL_ENDED`) if it had ended already; −2 if `pid` is not that process's child, −21 `for` from a process that drives nothing |
-| 15 | `spawnw(window, for)` | starts the program file whose first block is in block window `window` (docs/filesystem.md), as the caller's child when `for` is `FOR_SELF` (−1), or as the child of process `for`, whose call the caller holds: as `spawn`, with −2 when there is no window or no program in it, or `for` is not waiting for the caller |
+| 15 | `spawnw(window, for, args, n)` | starts the program file whose first block is in block window `window` (docs/filesystem.md), as the caller's child when `for` is `FOR_SELF` (−1), or as the child of process `for`, whose call the caller holds, with the `n` trytes of arguments at `args` in that parent's memory (docs/filesystem.md, Program arguments): as `spawn`, with −2 when there is no window or no program in it, or `for` is not waiting for the caller, −10 (`E_INVAL`) for `n` below 0 or above `ARG_MAX`, −12 (`E_FAULT`) for arguments not all in the parent's memory |
 | 16 | `close(fd)` | empties descriptor `fd`: 0; −8 if it names nothing |
 | 17 | `give(pid, handle)` | puts the caller's `handle`, 0 to 26, in the lowest free descriptor of process `pid`, whose call the caller holds: the descriptor; −9 none free, −2 `pid` is not waiting for the caller, −10 no such handle |
 | 18 | `dup2(fd, to)` | makes descriptor `to` a copy of `fd`, closing what `to` held: `to`; −8 if `fd` names nothing or `to` is not 0 to 8 |
@@ -301,7 +302,8 @@ changes filesystems on the host, and the shell's built-ins `ls [DIR]`,
 `cd [DIR]` and `pwd` use them. A word the shell
 does not know as a built-in or a program in the kernel image names a
 program file: a path if it holds a slash, else a file in `/bin`, which
-the file server starts as the shell's child. After the command, `> PATH`
+the file server starts as the shell's child, with the line's words as
+its arguments, the command first (`wc notes more`, `echo hi`). After the command, `> PATH`
 sends standard output to a file, made empty or new, `>> PATH` to its
 end, and `< PATH` takes standard input from one, for that command alone,
 built-in or program: `hello > out`, `ls >>list`, `cat < notes`. The

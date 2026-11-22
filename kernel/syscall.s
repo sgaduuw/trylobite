@@ -186,12 +186,15 @@ sys_spawn:
         call  do_spawn                 # a1: the program
         j     sys_return
 
-# spawnw(window, for): start the program file whose first block the
-# caller has read into block window a1. The window must hold one: it
-# starts with EXEC_MAGIC, so a text file is refused, as is a window the
-# caller does not have. The new process is the caller's child, or with
-# a2 not FOR_SELF the child of process a2, whose call the caller holds:
-# so the file server starts a program for the process that asked.
+# spawnw(window, for, args, n): start the program file whose first
+# block the caller has read into block window a1. The window must hold
+# one: it starts with EXEC_MAGIC, so a text file is refused, as is a
+# window the caller does not have. The new process is the caller's
+# child, or with a2 not FOR_SELF the child of process a2, whose call the
+# caller holds: so the file server starts a program for the process that
+# asked. Its arguments are the a4 trytes at a3 in the parent's memory,
+# read there whoever calls, so the file server passes on its client's
+# without copying them (ARG_MAX in include/layout.s).
 sys_spawnw:
         bltz  a1, 1f
         li    t0, NWIN
@@ -215,9 +218,80 @@ sys_spawnw:
         j     3f
 2:      call  current_pid
         mv    a2, a0                   # the caller is the parent
-3:      li    s6, 1                    # from a program file
+        mv    s1, s0
+3:      mv    s7, s1                   # s7: the parent's record
+        lw    t0, PCB_A4(s0)           # the arguments must all be there
+        bltz  t0, 4f
+        li    t1, ARG_MAX
+        bgt   t0, t1, 4f
+        beqz  t0, 0f
+        mv    a0, s7
+        lw    a1, PCB_A3(s0)
+        call  uva                      # one page: ARG_MAX is far below one
+        beqz  a0, 5f
+        lw    t0, PCB_A4(s0)
+        blt   a1, t0, 5f
+0:      lw    a2, PCB_A2(s0)           # the parent again: uva took it
+        li    t0, FOR_SELF
+        bne   a2, t0, 0f
+        call  current_pid
+        mv    a2, a0
+0:      li    s6, 1                    # from a program file
         call  spawn_page
-        j     sys_return
+        bltz  a0, sys_return
+        j     spawn_args
 1:      li    a0, E_NOPROG
+        j     sys_return
+4:      li    a0, E_INVAL
+        j     sys_return
+5:      li    a0, E_FAULT
+        j     sys_return
+
+# spawn_args: give child a0, just made by spawnw, the arguments spawnw's
+# caller named (PCB_A3, PCB_A4) in the memory of the parent whose record
+# is s7, checked already: copy them to V_ARGS in the child's page, a
+# pointer to each to V_ARGV, and start it with a0 = how many and a1 =
+# V_ARGV. The page below V_USER is still all 0, so each string and the
+# list end with a 0 whatever the block holds. Returns from spawnw.
+spawn_args:
+        mv    s2, a0                   # s2: the child
+        li    t0, PCB_SIZE
+        mul   t0, a0, t0
+        la    s1, procs
+        add   s1, s1, t0               # s1: its record
+        mv    a0, s7
+        lw    a1, PCB_A3(s0)
+        call  uva                      # a0: where the block is (any, if empty)
+        lw    t0, PCB_USERPG(s1)
+        li    t1, PAGE
+        mul   t0, t0, t1
+        li    t1, DMAP + V_ARGV - V_USER
+        add   t2, t0, t1               # t2: the next argv word, in the kernel
+        li    t1, V_ARGS - V_ARGV
+        add   t3, t2, t1               # t3: the next string tryte, in the kernel
+        li    t4, V_ARGS               # t4: ... and in the child
+        lw    t5, PCB_A4(s0)           # t5: trytes left
+        li    a1, 0                    # a1: how many arguments
+        li    a2, 1                    # a2: 1 when the next tryte starts one
+1:      blez  t5, 3f
+        beqz  a2, 2f
+        sw    t4, 0(t2)
+        addi  t2, t2, 3
+        addi  a1, a1, 1
+2:      lt    t0, 0(a0)
+        st    t0, 0(t3)
+        li    a2, 0
+        bnez  t0, 0f
+        li    a2, 1                    # a 0 ends this one
+0:
+        addi  a0, a0, 1
+        addi  t3, t3, 1
+        addi  t4, t4, 1
+        addi  t5, t5, -1
+        j     1b
+3:      sw    a1, PCB_A0(s1)
+        li    t0, V_ARGV
+        sw    t0, PCB_A1(s1)
+        mv    a0, s2
         j     sys_return
         .nocompress

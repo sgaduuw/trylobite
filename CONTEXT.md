@@ -957,3 +957,39 @@ Eelco asked for pipes, on the descriptors of #35 and #36.
   has nine process slots, five of them the shell and its servers.
 - **`bin/upper` and `bin/wc`** are filters to pipe into, since programs
   take no arguments yet.
+
+### 2026-11-22 · Program arguments
+
+Programs started from the disk took no arguments, so `wc` could only
+count standard input. Now a program starts as a C program does, with
+`a0` = argc and `a1` = argv.
+
+- **The kernel copies them, at spawn.** `spawnw` takes a block of
+  strings (`args`, `n`), at most `ARG_MAX` (243) trytes, and copies it
+  into the child before it first runs, with the pointer list built
+  beside it. Nobody else can write the new process's page: the file
+  server holds its client's call, not the child's, and a library in
+  the child would need the parent to keep the block until it had read
+  it.
+- **Read in the parent's memory, whoever calls.** The file server
+  starts programs for its clients; were the block read in the caller's
+  memory, the server would have to copy each block in first. The
+  kernel already lets the server reach its client's memory while it
+  holds the call, so `spawnw` reads there, and `spawnf(path, args, n)`
+  passes its client's two words straight through. `FS_PROTOCOL` became
+  3, since a client of 2 would leave garbage in `n`.
+- **The lower half of the page.** A program's image starts at
+  `V_USER − 1` and its stack is at the top, so the 9,841 trytes below
+  `V_USER` were always zero and unused. The list sits at the page's
+  first word (`V_ARGV`, `ARG_MAX` + 1 words, room for the most
+  arguments a block can hold) and the strings after it (`V_ARGS`):
+  fixed addresses, nothing for a program to make room for, and the
+  page's zeros end the last string and the list whatever the block
+  holds.
+- **The shell splits at spaces** and gives the command first, as
+  typed, without the redirections, which it takes out of the line
+  before. No quoting yet, so no argument holds a space.
+- **`wc FILE...`** opens each file through the file server, which it
+  looks up itself, as Unix's `wc` names each and totals two or more;
+  `echo` is new, the smallest use of argv. The test disks grew a block
+  for it.
