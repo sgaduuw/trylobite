@@ -242,10 +242,13 @@ The disk can hold a filesystem, shaped like a Unix one: inodes, nested
 directories with `.` and `..`, and files reached by path through file
 descriptors (`docs/filesystem.md`). The kernel knows nothing of it: a
 process, the **file server** (`user/fsd.s`), reads it into its block
-windows and answers `call`s to open, read and list files, keeping each
-process's descriptors. init starts it first, so it is process
-`FS_PID` (1). It is read-only for now. `tools/fs.py` makes and changes filesystems on the host, and the
-shell's built-ins `ls [DIR]` and `cat PATH` read them. A word the shell
+windows and answers `call`s to open, read, write and list files and
+to make and remove files and directories, keeping each process's
+descriptors; it writes what a call changed before it replies. init
+starts it first, so it is process `FS_PID` (1). `tools/fs.py` makes and
+changes filesystems on the host, and the shell's built-ins `ls [DIR]`,
+`cat PATH`, `write PATH TEXT`, `rm PATH`, `mkdir PATH` and `rmdir PATH`
+use them. A word the shell
 does not know as a built-in or a program in the kernel image names a
 program file: a path if it holds a slash, else a file in `/bin`, which
 the file server starts as the shell's child. `tools/fs.py` stores a `.s` or `.dti` file as a
@@ -255,7 +258,7 @@ program, in `/bin`:
 tools/fs.py new disk.img 100 notes.txt bin/*.s
 tools/fs.py mkdir disk.img docs
 tools/fs.py put disk.img README.md docs
-printf 'ls\nls bin\ncat docs/README.md\n' > session.txt
+printf 'ls\nls bin\ncat docs/README.md\nwrite docs/motd hello\n' > session.txt
 detrytus run shell.s --ram-pages 40 --input session.txt --disk disk.img
 ```
 

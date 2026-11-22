@@ -210,11 +210,14 @@
         .equ  FS_PID, 1
         .equ  FS_OPEN,    0               # open(path, flags): the lowest free
                                           # descriptor, E_NOENT, E_NOTDIR,
-                                          # E_NAMETOOLONG, E_MFILE, E_INVAL
+                                          # E_NAMETOOLONG, E_MFILE, E_INVAL,
+                                          # E_ISDIR (a directory, to write);
+                                          # with O_CREAT also E_NOSPC
         .equ  FS_CLOSE,   1               # close(fd): 0, E_BADF
         .equ  FS_READ,    2               # read(fd, buffer, n): how many (0 at the
                                           # end; never past the end of a block),
-                                          # E_BADF, E_ISDIR, E_INVAL
+                                          # E_BADF (not open for reading),
+                                          # E_ISDIR, E_INVAL
         .equ  FS_LSEEK,   3               # lseek(fd, offset, whence): the new
                                           # position, E_BADF, E_INVAL
         .equ  FS_READDIR, 4               # readdir(fd, buffer): the next entry's
@@ -226,6 +229,15 @@
         .equ  FS_SPAWN,   6               # spawnf(path): starts the program file
                                           # as the caller's child: as spawnw, and
                                           # E_NOEXEC for no program, as open fails
+        .equ  FS_WRITE,   7               # write(fd, buffer, n): how many (never
+                                          # past the end of a block), E_BADF (not
+                                          # open for writing), E_INVAL, E_NOSPC,
+                                          # E_FBIG
+        .equ  FS_UNLINK,  8               # unlink(path): 0, E_ISDIR, E_BUSY (open),
+                                          # E_INVAL (. or ..), as open fails
+        .equ  FS_MKDIR,   9               # mkdir(path): 0, E_EXIST, E_NOSPC, E_INVAL
+        .equ  FS_RMDIR,  10               # rmdir(path): 0, E_NOTEMPTY, E_NOTDIR,
+                                          # E_BUSY (open, or the root), E_INVAL
         .equ  PATH_MAX, 243               # trytes a path may have, its 0 not counted
 
         .equ  E_NOCALL,  -1               # no system call with that number
@@ -255,8 +267,18 @@
                                           # copyin, copyout: outside either process
         .equ  E_NOEXEC, -13               # spawnf: not a program file
         .equ  E_IO,     -14               # the disk refused (bread, bwrite, files)
+        .equ  E_EXIST,  -15               # mkdir: the name is taken
+        .equ  E_NOSPC,  -16               # no free block or inode, or a full directory
+        .equ  E_NOTEMPTY, -17             # rmdir: it holds more than . and ..
+        .equ  E_FBIG,   -18               # write: past a file's last block
+        .equ  E_BUSY,   -19               # unlink, rmdir: a process has it open
 
-        .equ  O_RDONLY, 0                 # open: for reading, the only way yet
+        .equ  O_RDONLY, 0                 # open: the access mode is the flags mod
+        .equ  O_WRONLY, 1                 # 3. Add any of O_CREAT (make a file not
+        .equ  O_RDWR,   2                 # there), O_TRUNC (empty a file opened for
+        .equ  O_CREAT,  3                 # writing) and O_APPEND (write at its end,
+        .equ  O_TRUNC,  9                 # each time): ternary digits of 0 or 1,
+        .equ  O_APPEND, 27                # so they add as Unix flags OR together
         .equ  NFD, 8                      # descriptors per process, 0 to 7, kept
         .equ  FD,           9             # by the file server: three words each,
         .equ  FD_INO,       0             # the inode, NO_INO when closed,

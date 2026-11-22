@@ -685,3 +685,23 @@ above). Eelco chose this over files in the kernel.
   the shell can still wait for it and give it the console.
 - **The restartable-call machinery stays only for `receive`**, and the
   kernel's block cache, its dirty states and `ST_BUF` are gone.
+
+### 2026-11-22 · The file server writes
+
+The write side of #27, written for the kernel's cache, moves into the
+server: `FS_WRITE`, `FS_UNLINK`, `FS_MKDIR` and `FS_RMDIR`, and `open`
+with `O_CREAT`, `O_TRUNC` and `O_APPEND`, with the same errors and
+flags as #27, and the shell's `write`, `rm`, `mkdir` and `rmdir`.
+
+- **Write-through, before the reply.** A call marks the windows it
+  changes dirty, and `fs_reply` writes them all with `bwrite` before
+  it replies. #27's cache wrote back when the disk was idle and at
+  power-off; the server cannot see power-off, and writing first means a
+  caller that has its reply has its change on the disk.
+- **Gather, then commit.** Each call reads every block it needs and
+  checks what can fail (a free block, a free inode, the name, the
+  copyin of the data) before changing any, so a failing call changes
+  nothing and no call leaves the disk half done.
+- **Open files cannot be removed**: `unlink` and `rmdir` of an inode
+  some descriptor holds is `E_BUSY`, as in #27, rather than Unix's
+  keeping it until the last close.
