@@ -4,7 +4,7 @@ call. A block is a page, so the window holds exactly one."""
 
 from tests.kernel import EXIT, exit_with, new_disk, run, wait_for
 
-E_IO, E_NOBLOCK = -1, -2  # include/layout.s
+E_IO, E_NOBLOCK = -14, -2  # include/layout.s
 MESSAGE = "kept on a ternary disk\n"
 
 

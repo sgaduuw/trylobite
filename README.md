@@ -41,8 +41,9 @@ Milestone 3 works too: the kernel can start a shell instead. `shell.s`
 builds it with `sh` as program 0, which reads a line from the console,
 runs the program it names, waits for it and says how it ended. Only
 `pingpong` (the demo above, as a program) is built into the kernel
-image; other programs are files on the disk, from `bin/`: `hello`,
-`fail` (which exits with 3) and `spin` (a runaway that loops for ever).
+image; other programs are files in `/bin` on the disk, from `bin/`:
+`hello`, `fail` (which exits with 3) and `spin` (a runaway that loops
+for ever).
 It also has the built-in `exit` and the file built-ins further down,
 and stops at the end of its input. Ctrl-C ends the program the shell is
 waiting for, and at the prompt drops the line typed so far:
@@ -155,8 +156,9 @@ Every address space has three regions, one per mid-table entry:
 
 The first two regions are shared by every address space. A new process
 costs four pages: a root, a mid and a leaf table, and its own page,
-into which `spawn` copies the program image loaded at boot, or `spawnw`
-a program file read from the disk.
+into which `spawn` copies the program image loaded at boot, or
+`spawnf` and `spawnw` a program file read from the disk. The kernel's
+block cache takes up to 8 more pages, as it needs them.
 
 | Physical page | Contents |
 |---------------|----------|
@@ -168,8 +170,8 @@ a program file read from the disk.
 
 ## System calls
 
-`sys` with the call number in `a0` and arguments in `a1` and `a2`; the
-result comes back in `a0`.
+`sys` with the call number in `a0` and arguments in `a1`, `a2` and
+`a3`; the result comes back in `a0`.
 
 | Number | Call | Result |
 |--------|------|--------|
@@ -184,11 +186,22 @@ result comes back in `a0`.
 | 8 | `hart()` | the number of the hart running the caller, −4 to +4 |
 | 9 | `getc()` | the next code point of console input, waiting for one; negative once no more will come |
 | 10 | `wait(pid)` | how child `pid` ended, once it has: `a0` 0 exited, 1 faulted or 2 killed, `a1` its exit code, trap cause, or 0 when killed; `a0` −2 if `pid` is not the caller's child |
-| 11 | `bread(block)` | reads the block into the block window: 0; −1 the disk failed, −2 no such block (or no disk), −3 no memory for the window |
+| 11 | `bread(block)` | reads the block into the block window: 0; −14 the disk failed, −2 no such block (or no disk), −3 no memory for the window |
 | 12 | `bwrite(block)` | writes the block window to the block: as `bread` |
 | 13 | `kill(pid)` | ends child `pid` before it runs again: 0; −2 if `pid` is not the caller's child |
 | 14 | `foreground(pid)` | gives the console to child `pid`, so that Ctrl-C kills it, or to nobody with `NO_FOREGROUND` (−1): 0; −2 if `pid` is not the caller's child |
 | 15 | `spawnw()` | starts the program file whose first block is in the block window (docs/filesystem.md): as `spawn`, with −2 when there is no window or no program in it |
+| 16 | `open(path, flags)` | the lowest free file descriptor, for reading (`O_RDONLY`, the only flag yet) |
+| 17 | `close(fd)` | 0 |
+| 18 | `read(fd, buffer, n)` | how many trytes it copied, at most `n` and never past the end of the file or of a block; 0 at the end |
+| 19 | `lseek(fd, offset, whence)` | the new position, from the start, where it is, or the end (`SEEK_SET`, `SEEK_CUR`, `SEEK_END`) |
+| 20 | `readdir(fd, buffer)` | the inode of the directory's next entry, its name in the buffer; 0 at the end |
+| 21 | `stat(path, buffer)` | 0, with the inode, type, links and size in four words at the buffer |
+| 22 | `spawnf(path)` | starts the program file at the path: as `spawn` |
+
+The file calls (16 to 22) fail with their own negative numbers, −4 to
+−14: no filesystem, no such file, not a directory, a bad descriptor and
+so on, each named in `include/layout.s` (`E_NOENT`, `E_BADF`, ...).
 
 A call whose result is a status, or a value that is never negative,
 reports failure with a negative number; `include/layout.s` names each
@@ -223,19 +236,24 @@ by DMA, sleeping until the disk interrupts; one command runs at a time and
 the rest wait their turn. Run with `detrytus run --disk FILE --disk-blocks
 N`; the file keeps what was written for the next run.
 
-The disk can hold a filesystem: a flat directory and a FAT in block 0
-(`docs/filesystem.md`). `tools/fs.py` makes one on the host, and the
-shell's built-ins `ls`, `cat NAME`, `write NAME TEXT` (the text and a
-newline) and `rm NAME` use it. A word the shell does not know as a
-built-in or a program in the kernel image names a program file on it:
-the shell reads the file's first block into its window and `spawnw`
-starts it. `tools/fs.py` stores a `.s` or `.dti` file as a program:
+The disk can hold a filesystem, shaped like a Unix one: inodes, nested
+directories with `.` and `..`, and files reached by path through file
+descriptors (`docs/filesystem.md`). The kernel reads it through a cache
+of blocks; a call that needs a block not in the cache sleeps until the
+disk has read it, then runs again from the start. It is read-only for
+now. `tools/fs.py` makes and changes filesystems on the host, and the
+shell's built-ins `ls [DIR]` and `cat PATH` read them. A word the shell
+does not know as a built-in or a program in the kernel image names a
+program file: a path if it holds a slash, else a file in `/bin`, which
+`spawnf` starts. `tools/fs.py` stores a `.s` or `.dti` file as a
+program, in `/bin`:
 
 ```bash
 tools/fs.py new disk.img 100 notes.txt bin/*.s
-printf 'ls\nwrite motd hello, disk\ncat motd\n' > session.txt
+tools/fs.py mkdir disk.img docs
+tools/fs.py put disk.img README.md docs
+printf 'ls\nls bin\ncat docs/README.md\n' > session.txt
 detrytus run shell.s --ram-pages 40 --input session.txt --disk disk.img
-tools/fs.py cat disk.img motd
 ```
 
 Process numbers are handed out round-robin, so a number is not reused

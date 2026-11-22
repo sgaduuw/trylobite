@@ -5,6 +5,9 @@
 on_syscall:
         csrr  t0, stval                # the instruction after the sys: tpc + 3
         sw    t0, PCB_PC(s0)           # is wrong when the sys is in a bundle
+syscall_again:                         # resume runs an abandoned call again
+        lw    t0, buf_clock            # blocks it uses from now on are its
+        sw    t0, PCB_BSTART(s0)       # own, until it ends (cache.s)
         lw    a0, PCB_A0(s0)
         lw    a1, PCB_A1(s0)
         lw    a2, PCB_A2(s0)
@@ -42,6 +45,20 @@ on_syscall:
         beq   a0, t0, sys_foreground
         li    t0, SYS_SPAWNW
         beq   a0, t0, sys_spawnw
+        li    t0, SYS_OPEN
+        beq   a0, t0, sys_open
+        li    t0, SYS_CLOSE
+        beq   a0, t0, sys_close
+        li    t0, SYS_READ
+        beq   a0, t0, sys_read
+        li    t0, SYS_LSEEK
+        beq   a0, t0, sys_lseek
+        li    t0, SYS_READDIR
+        beq   a0, t0, sys_readdir
+        li    t0, SYS_STAT
+        beq   a0, t0, sys_stat
+        li    t0, SYS_SPAWNF
+        beq   a0, t0, sys_spawnf
         li    a0, E_NOCALL
 
 sys_return:                            # a0: the result

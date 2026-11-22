@@ -44,6 +44,8 @@ pick:
         beq   t0, t1, idle
         li    t1, ST_DISK
         beq   t0, t1, idle
+        li    t1, ST_BUF
+        beq   t0, t1, idle
         addi  s1, s1, PCB_SIZE
         blt   s1, t3, 6b
 

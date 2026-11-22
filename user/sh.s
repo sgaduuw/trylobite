@@ -1,10 +1,10 @@
 # Program 0 of shell.s: a shell. It reads a line, runs the program its
 # first word names, waits for it, and says how it ended if not with code
-# 0. Some words are built in: exit, and ls, cat, write and rm, which use
-# the filesystem on the disk (docs/filesystem.md) through the block
-# window. A word that is neither built in nor a program in the kernel
-# image is looked up on the disk, and a program file of that name is
-# run. It stops at the end of input. Programs take no arguments yet.
+# 0. Some words are built in: exit, and ls and cat, which read the
+# filesystem on the disk (docs/filesystem.md) through the kernel's file
+# calls. A word that is neither built in nor a program in the kernel
+# image names a program file: a path if it has a slash, else a file in
+# /bin. It stops at the end of input. Programs take no arguments yet.
 
         .compress
         .section prog0, P_PROG0 * PAGE, V_USER
@@ -13,14 +13,7 @@
         .equ  LINE_MAX, 60             # characters kept from a line
         .equ  BS, 8                    # backspace, and delete, both erase
         .equ  DEL, 127
-        .equ  NOT_FS, -4               # fs_load: block 0 holds no filesystem
-                                       # (bread's own failures are -1 to -3)
-        .equ  NO_ENTRY, -1             # find: no such file; entries are at
-                                       # positive addresses
-        .equ  W_DIR, V_BLOCK + FS_DIR  # block 0's directory, in the window
-        .equ  W_DIR_END, W_DIR + FS_FILES * FS_DIRENT
-        .equ  W_FAT, V_BLOCK + FS_FAT  # ... and its FAT
-        .equ  W_TEXT, V_BLOCK + BLOCK_T0   # a data block's text
+        .equ  BUF_MAX, 243             # trytes cat reads at a time
 
 sh:
 prompt: la    a1, sh_prompt
@@ -99,23 +92,39 @@ enter:  li    a0, SYS_PUTC
         addi  s2, s2, 6
         j     7b
 
-# from_disk: run the program file named s0, if the disk has one. Its
-# first block holds the whole program; spawnw starts it from the window.
+# from_disk: run the program file s0 names: a path, if it has a slash;
+# else the file of that name in /bin, as a Unix shell searches its PATH.
 from_disk:
-        call  fs_load
-        bnez  a0, unknown              # no filesystem, so no programs on it
-        mv    a0, s0
-        call  find
-        bltz  a0, unknown
-        lw    a1, DE_FIRST(a0)
-        bltz  a1, not_prog             # FAT_END: an empty file
-        li    a0, SYS_BREAD
+        mv    t0, s0
+        li    t2, '/'
+1:      lt    t1, 0(t0)
+        beqz  t1, 2f
+        beq   t1, t2, 4f               # a path
+        addi  t0, t0, 1
+        j     1b
+2:      la    t0, sh_path              # /bin/ and the name
+        la    t1, sh_bin
+        call  strcpy
+        mv    t1, s0
+        call  strcpy
+        la    s5, sh_path
+        j     5f
+4:      mv    s5, s0
+5:      li    a0, SYS_SPAWNF
+        mv    a1, s5
         sys
-        bnez  a0, cant_read
-        li    a0, SYS_SPAWNW
-        sys
-        li    t0, E_NOPROG
-        bne   a0, t0, started
+        bgez  a0, started
+        li    t0, E_NOEXEC
+        beq   a0, t0, not_prog
+        li    t0, E_NOENT              # nothing there, or nothing to look in
+        beq   a0, t0, unknown
+        li    t0, E_NOTDIR
+        beq   a0, t0, unknown
+        li    t0, E_NOFS
+        beq   a0, t0, unknown
+        li    t0, E_NAMETOOLONG        # no file has a name that long
+        beq   a0, t0, unknown
+        j     started                  # cannot start it, for another reason
 not_prog:
         la    a1, sh_notprog
         li    a0, SYS_PUTS
@@ -185,193 +194,124 @@ do_exit:
         li    a1, 0
         sys
 
-# ls: each file's size and name.
-do_ls:  call  fs_load
-        bnez  a0, cant_read
-        li    s5, W_DIR                # s5: the entry
-1:      li    t0, W_DIR_END
-        bge   s5, t0, prompt
-        lt    t0, DE_NAME(s5)
-        beqz  t0, 2f                   # unused
-        lw    a0, DE_SIZE(s5)
+# ls [DIR]: each entry of DIR, or of /, but those whose names start with
+# a dot: a file's size and name, a directory's name and a slash.
+do_ls:  mv    a0, s4
+        call  word
+        mv    s5, a0                   # s5: the directory
+        lt    t0, 0(s5)
+        bnez  t0, 1f
+        la    s5, sh_root
+1:      li    a0, SYS_OPEN
+        mv    a1, s5
+        li    a2, O_RDONLY
+        sys
+        bltz  a0, fail
+        mv    s6, a0                   # s6: its descriptor
+        la    t0, sh_path              # the directory and a slash, for stat
+        mv    t1, s5
+        call  strcpy
+        li    t2, '/'
+        st    t2, 0(t0)
+        addi  s7, t0, 1                # s7: where each name goes after them
+2:      li    a0, SYS_READDIR
+        mv    a1, s6
+        la    a2, sh_name
+        sys
+        bltz  a0, failc
+        beqz  a0, 6f                   # no more
+        lt    t1, sh_name
+        li    t2, '.'
+        beq   t1, t2, 2b               # hidden, as ls hides them
+        mv    t0, s7
+        la    t1, sh_name
+        call  strcpy
+        li    a0, SYS_STAT
+        la    a1, sh_path
+        la    a2, sh_stat
+        sys
+        la    s5, sh_path
+        bltz  a0, failc
+        lw    t1, sh_stat + ST_TYPE
+        li    t2, T_DIR
+        beq   t1, t2, 3f
+        lw    a0, sh_stat + ST_SIZE
         call  putn
         li    a0, SYS_PUTC
         li    a1, ' '
         sys
-        li    a0, SYS_PUTS
-        addi  a1, s5, DE_NAME
+3:      li    a0, SYS_PUTS
+        la    a1, sh_name
         sys
+        lw    t1, sh_stat + ST_TYPE
+        li    t2, T_DIR
+        bne   t1, t2, 4f
         li    a0, SYS_PUTC
+        li    a1, '/'
+        sys
+4:      li    a0, SYS_PUTC
         li    a1, '\n'
         sys
-2:      addi  s5, s5, FS_DIRENT
-        j     1b
-
-# cat NAME: print a file. The window holds one block, so block 0 is read
-# again for the FAT before each next block of the file.
-do_cat: call  name_arg
-        call  fs_load
-        bnez  a0, cant_read
-        mv    a0, s5
-        call  find
-        bltz  a0, no_file
-        lw    s6, DE_SIZE(a0)          # s6: trytes still to print
-        lw    s7, DE_FIRST(a0)         # s7: the block they start in
-1:      blez  s6, prompt
-        li    a0, SYS_BREAD
-        mv    a1, s7
-        sys
-        bnez  a0, cant_read
-        li    t0, PAGE
-        bge   s6, t0, 2f               # it fills the block: puts stops at its end
-        li    t0, W_TEXT
-        add   t0, t0, s6
-        st    zero, 0(t0)              # end the text where the file does
-2:      li    a0, SYS_PUTS
-        li    a1, W_TEXT
-        sys
-        li    t0, PAGE
-        sub   s6, s6, t0
-        blez  s6, prompt
-        call  fs_load
-        bnez  a0, cant_read
-        shi   t0, s7, 1                # x3: one word per block
-        li    t1, W_FAT
-        add   t0, t0, t1
-        lw    s7, 0(t0)
-        j     1b
-
-# write NAME TEXT: make file NAME hold TEXT and a newline, replacing it if
-# it is there. The text goes to a free block first and block 0 last, so a
-# write cut short leaves the old file whole (docs/filesystem.md); that
-# means it needs a free block even to replace a file.
-do_write:
-        call  name_arg
-        mv    s6, a1                   # s6: the text
-        mv    t0, s5                   # a name fits in an entry
-1:      lt    t1, 0(t0)
-        beqz  t1, 2f
-        addi  t0, t0, 1
-        j     1b
-2:      sub   t0, t0, s5
-        li    t1, FS_NAME_MAX
-        bgt   t0, t1, bad_name
-        call  fs_load
-        bnez  a0, cant_read
-        mv    a0, s5
-        call  find
-        mv    s7, a0                   # s7: its entry: the old one, or
-        bgez  s7, 4f
-        li    s7, W_DIR                # the first unused one
-3:      li    t0, W_DIR_END
-        bge   s7, t0, dir_full
-        lt    t0, DE_NAME(s7)
-        beqz  t0, 4f
-        addi  s7, s7, FS_DIRENT
-        j     3b
-4:      li    s8, 1                    # s8: the first free block
-        li    t0, V_BLOCK
-        lw    t2, FS_HEAD_BLOCKS(t0)
-5:      bge   s8, t2, disk_full
-        shi   t0, s8, 1
-        li    t1, W_FAT
-        add   t0, t0, t1
-        lw    t0, 0(t0)
-        li    t1, FAT_FREE
-        beq   t0, t1, 6f
-        addi  s8, s8, 1
-        j     5b
-6:      li    t0, V_BLOCK + BLOCK_W0   # clear the window: the rest of the
-        li    t1, V_BLOCK - BLOCK_W0   # block stays zero
-7:      sw    zero, 0(t0)
-        addi  t0, t0, 3
-        ble   t0, t1, 7b
-        li    t0, W_TEXT
-        mv    t1, s6
-8:      lt    t2, 0(t1)
-        beqz  t2, 9f
-        st    t2, 0(t0)
-        addi  t0, t0, 1
-        addi  t1, t1, 1
-        j     8b
-9:      li    t2, '\n'
-        st    t2, 0(t0)
-        li    t1, W_TEXT - 1
-        sub   s6, t0, t1               # s6: the size, newline and all
-        li    a0, SYS_BWRITE
-        mv    a1, s8
-        sys
-        bnez  a0, cant_write
-        call  fs_load                  # now block 0
-        bnez  a0, cant_read
-        lt    t0, DE_NAME(s7)
-        beqz  t0, 1f                   # a new file
-        mv    a0, s7
-        call  unchain                  # the old text's blocks
-1:      mv    t0, s5
-        addi  t1, s7, DE_NAME
-2:      lt    t2, 0(t0)
-        st    t2, 0(t1)
-        addi  t0, t0, 1
-        addi  t1, t1, 1
-        bnez  t2, 2b
-        sw    s6, DE_SIZE(s7)
-        sw    s8, DE_FIRST(s7)
-        shi   t0, s8, 1
-        li    t1, W_FAT
-        add   t0, t0, t1
-        li    t1, FAT_END
-        sw    t1, 0(t0)
-        j     save
-
-# rm NAME: remove a file.
-do_rm:  call  name_arg
-        call  fs_load
-        bnez  a0, cant_read
-        mv    a0, s5
-        call  find
-        bltz  a0, no_file
-        mv    s7, a0
-        call  unchain
-        addi  t0, s7, -3 + FS_DIRENT   # the entry's last word
-1:      sw    zero, 0(t0)
-        addi  t0, t0, -3
-        bge   t0, s7, 1b
-save:   li    a0, SYS_BWRITE           # block 0 back to the disk
-        li    a1, 0
-        sys
-        bnez  a0, cant_write
+        j     2b
+6:      call  close_s6
         j     prompt
 
-# What the built-ins say when they cannot go on.
-cant_read:
-        la    a1, sh_cantread
-        j     1f
-cant_write:
-        la    a1, sh_cantwrite
-1:      mv    s3, a0
+# cat PATH: print a file, a block's worth or less at a time.
+do_cat: call  name_arg
+        li    a0, SYS_OPEN
+        mv    a1, s5
+        li    a2, O_RDONLY
+        sys
+        bltz  a0, fail
+        mv    s6, a0                   # s6: its descriptor
+1:      li    a0, SYS_READ
+        mv    a1, s6
+        la    a2, sh_buf
+        li    a3, BUF_MAX
+        sys
+        bltz  a0, failc
+        beqz  a0, 2f                   # the end
+        la    t0, sh_buf
+        add   t0, t0, a0
+        st    zero, 0(t0)
+        li    a0, SYS_PUTS
+        la    a1, sh_buf
+        sys
+        j     1b
+2:      call  close_s6
+        j     prompt
+
+# failc: close descriptor s6, then fail. fail: say why a call about path
+# s5 failed with a0, as Unix tools do, and go back to the prompt.
+failc:  mv    s3, a0
+        call  close_s6
+        mv    a0, s3
+fail:   mv    s3, a0                   # s3: why
+        la    a1, sh_sh
+        li    a0, SYS_PUTS
+        sys
+        mv    a1, s5
+        li    a0, SYS_PUTS
+        sys
+        la    a1, sh_colon
+        li    a0, SYS_PUTS
+        sys
+        la    s2, sh_errors            # s2: the table entry tried
+1:      lw    t0, 0(s2)
+        beqz  t0, 2f                   # not in the table
+        beq   t0, s3, 3f
+        addi  s2, s2, 6
+        j     1b
+2:      la    a1, sh_error
         li    a0, SYS_PUTS
         sys
         mv    a0, s3
         call  putn
         j     newline
-no_file:
-        la    a1, sh_nofile
-        li    a0, SYS_PUTS
-        sys
-        mv    a1, s5
+3:      lw    a1, 3(s2)
         j     say
 no_name:
         la    a1, sh_noname
-        j     say
-bad_name:
-        la    a1, sh_badname
-        j     say
-dir_full:
-        la    a1, sh_dirfull
-        j     say
-disk_full:
-        la    a1, sh_diskfull
 say:    li    a0, SYS_PUTS
         sys
         j     newline
@@ -391,54 +331,22 @@ name_arg:
         beqz  t0, no_name
         ret
 
-# fs_load: read block 0 into the window and check it holds a filesystem.
-# a0 = 0, bread's failure, or NOT_FS. Clobbers a1, t0..t2.
-fs_load:
-        li    a0, SYS_BREAD
-        li    a1, 0
+# close_s6: close descriptor s6. Clobbers a0, a1.
+close_s6:
+        li    a0, SYS_CLOSE
+        mv    a1, s6
         sys
-        bnez  a0, 9f
-        li    t1, V_BLOCK
-        li    a0, NOT_FS
-        lw    t0, FS_HEAD_MAGIC(t1)
-        li    t2, FS_MAGIC
-        bne   t0, t2, 9f
-        lw    t0, FS_HEAD_VERSION(t1)
-        li    t2, FS_VERSION
-        bne   t0, t2, 9f
-        li    a0, 0
-9:      ret
+        ret
 
-# find: the entry, in the window's block 0, of the file named at a0, or
-# NO_ENTRY. Clobbers a1, t0..t4.
-find:   mv    t2, a0                   # t2: the name
-        li    t3, W_DIR                # t3: the entry tried
-        mv    t4, ra                   # streq is a leaf: ra lasts in t4
-1:      li    t0, W_DIR_END
-        bge   t3, t0, 8f
-        addi  a0, t3, DE_NAME
-        mv    a1, t2
-        call  streq                    # an unused entry's name is empty
-        bnez  a0, 9f
-        addi  t3, t3, FS_DIRENT
-        j     1b
-8:      li    t3, NO_ENTRY
-9:      mv    a0, t3
-        jalr  zero, 0(t4)
-
-# unchain: mark the blocks of the file whose entry is at a0 free, in the
-# window's FAT. Clobbers t0..t2.
-unchain:
-        lw    t0, DE_FIRST(a0)
-1:      bltz  t0, 9f                   # FAT_END: no more
-        shi   t1, t0, 1
-        li    t2, W_FAT
-        add   t1, t1, t2
-        lw    t0, 0(t1)
-        li    t2, FAT_FREE
-        sw    t2, 0(t1)
-        j     1b
-9:      ret
+# strcpy: copy the string at t1 to t0, and leave t0 at its ending 0.
+# Clobbers t1, t2.
+strcpy: lt    t2, 0(t1)
+        st    t2, 0(t0)
+        beqz  t2, 1f
+        addi  t0, t0, 1
+        addi  t1, t1, 1
+        j     strcpy
+1:      ret
 
 # word: split the first word off the string at a0. a0 = the word, ended
 # with 0; a1 = what follows, past its spaces. Clobbers t0, t1.
@@ -499,8 +407,15 @@ sh_builtins:
         .word sh_exit, do_exit
         .word sh_ls, do_ls
         .word sh_cat, do_cat
-        .word sh_write, do_write
-        .word sh_rm, do_rm
+        .word 0
+
+# Each entry: a failure from a file call, and what to say about it.
+sh_errors:
+        .word E_NOENT, sh_noent
+        .word E_NOTDIR, sh_notdir
+        .word E_ISDIR, sh_isdir
+        .word E_NOFS, sh_nofs
+        .word E_NAMETOOLONG, sh_toolong
         .word 0
 
 # Each entry: the name, and the program number to spawn; 0 ends it.
@@ -513,8 +428,6 @@ sh_pingpong: .string "pingpong"
 sh_exit:     .string "exit"
 sh_ls:       .string "ls"
 sh_cat:      .string "cat"
-sh_write:    .string "write"
-sh_rm:       .string "rm"
 sh_prompt:   .string "$ "
 sh_rubout:   .tryte BS, ' ', BS, 0     # back, blank, back: the assembler has no \b
 sh_unknown:  .string "sh: no such program: "
@@ -524,14 +437,22 @@ sh_exited:   .string "sh: exit "
 sh_faulted:  .string "sh: fault "
 sh_killed:   .string "sh: killed"
 sh_cancel:   .string "^C\n"
-sh_cantread: .string "sh: cannot read the filesystem: "
-sh_cantwrite: .string "sh: cannot write the disk: "
-sh_nofile:   .string "sh: no such file: "
 sh_noname:   .string "sh: which file?"
-sh_badname:  .string "sh: a name has at most 17 characters"
-sh_dirfull:  .string "sh: the directory is full"
-sh_diskfull: .string "sh: the disk is full"
+sh_sh:       .string "sh: "
+sh_colon:    .string ": "
+sh_noent:    .string "no such file or directory"
+sh_notdir:   .string "not a directory"
+sh_isdir:    .string "is a directory"
+sh_nofs:     .string "no filesystem on the disk"
+sh_toolong:  .string "name too long"
+sh_error:    .string "error "
+sh_root:     .string "/"
+sh_bin:      .string "/bin/"
 sh_digits:   .zero 12
 sh_digits_end: .zero 1
 sh_line:     .zero LINE_MAX + 1
+sh_path:     .zero LINE_MAX + NAME_MAX + 3   # a path the shell puts together
+sh_name:     .zero NAME_MAX + 1        # a name readdir gives
+sh_stat:     .words STAT / 3           # what stat says
+sh_buf:      .zero BUF_MAX + 1         # what cat reads, and a 0 to end it
         .nocompress

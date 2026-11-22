@@ -563,3 +563,61 @@ typing the name is what a shell user expects.
   as `sh: no such program`, as before; a text or empty file is `sh: not
   a program`, from `spawnw`'s `E_NOPROG` (an empty file has no block to
   read, so the shell says so itself).
+
+### 2026-11-22 · A POSIX-shaped filesystem, read in the kernel
+
+The owner asked to move from the bootstrap filesystem to a POSIX-shaped
+one: descriptors, paths, nested directories. Full POSIX is not the aim
+(there is no C compiler to need it), but the shape is. Three places for
+the code were weighed again: the kernel, a file-server process, and a
+library in each program. The kernel was the recommendation, and is
+what this change builds.
+
+- **System calls that run again**, rather than a driver that can pause.
+  The obstacle the bootstrap ran into was that a system call cannot
+  wait halfway: one kernel stack, one disk command per call. So a file
+  call reads blocks through a cache (`kernel/cache.s`), and a miss
+  starts the read, sleeps the caller and abandons the call; once the
+  block is in, `resume` runs the whole call again (`PCB_RETRY`), finding
+  it and the earlier blocks in the cache. The price is a rule: a file
+  call changes nothing before its last block read. Nothing in this
+  first step writes, so the rule costs nothing yet; a call that writes
+  will gather its blocks first and change them all at once, under the
+  kernel lock, which also makes each change atomic.
+- **Rejected: a file server.** It is the microkernel's way, but needed
+  new IPC first (messages are one word with no sender), copying between
+  address spaces, a way to hear that a client died, and the whole
+  filesystem in one page beside its tables. **Rejected: a library** in
+  each program: descriptors no other process could share or inherit,
+  nothing stopping two writers, and its code in every program's page.
+- **The cache is up to 8 pages, taken when first needed**, so a build
+  that never touches files loses no memory, and tests that use up
+  memory on purpose see no change. A call needs every block it touches
+  in the cache at once, which bounds a path to `PATH_DEPTH` (6) names
+  and a directory to one block for now. A call never evicts a block it
+  used itself (`PCB_BSTART`): with too little memory it fails with
+  `E_NOMEM` rather than evicting and refilling for ever, which the
+  first version did. Two processes could still keep evicting each
+  other's blocks with a tiny cache; with 8 pages and 6 processes that
+  needs paths far deeper than anything uses.
+- **Layout**: block 0 a header and a map of free blocks, one tryte per
+  block (simplest to address); block 1 729 inodes of nine words (type,
+  links, size, 5 direct blocks, one indirect); directories as files of
+  21-tryte entries with `.` and `..`. Blocks are pages, so 5 direct
+  blocks already hold 98,415 trytes, and one indirect block reaches
+  6,566 blocks.
+- **read stops at a block's end.** A short read is POSIX, and moving at
+  most one block per call keeps each call to the blocks one cache fill
+  at a time can give. Callers loop until 0, as POSIX callers must.
+- **Descriptors live in the process record**, eight of them, lowest
+  free first, so 0, 1 and 2 can become the console later, opened before
+  a program starts, as Unix does it.
+- **Errors are new names from −4 down**, so a call that both reads a
+  path and spawns (`spawnf`) never gives one number two meanings.
+  `E_IO` moved from −1 to −14 for the same reason: −1 is `E_NOSLOT`.
+- **`spawnf(path)` starts a program file**, and the shell uses it,
+  looking a bare word up in `/bin`, as a shell searches its `PATH`.
+  `spawnw` stays for programs that read raw blocks.
+- **The shell lost `write` and `rm`** for now: they wrote the old format
+  through the block window. They come back over `write` and `unlink`
+  system calls in the next step.

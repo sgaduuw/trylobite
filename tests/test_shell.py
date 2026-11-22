@@ -79,14 +79,21 @@ def test_programs_come_from_the_disk(shell):
 
 
 def test_a_text_file_is_not_a_program(shell):
-    result = session(shell, "notes\nhello\n", bin_disk(notes="li a0, 4\n", empty=""))
-    assert "$ notes\nsh: not a program: notes\n$ hello\nhello from" in result.console
-    result = session(shell, "empty\n", bin_disk(empty=""))
-    assert "sh: not a program: empty\n" in result.console
+    result = session(shell, "/notes\nhello\n", bin_disk(notes="li a0, 4\n", empty=""))
+    assert "$ /notes\nsh: not a program: /notes\n$ hello\nhello from" in result.console
+    result = session(shell, "/empty\n/bin\n", bin_disk(empty=""))
+    assert "sh: not a program: /empty\n" in result.console
+    assert "sh: not a program: /bin\n" in result.console  # nor is a directory
+
+
+def test_a_word_without_a_slash_is_looked_for_in_bin(shell):
+    result = session(shell, "notes\n/bin/hello\n", bin_disk(notes="li a0, 4\n"))
+    assert "$ notes\nsh: no such program: notes\n" in result.console
+    assert "$ /bin/hello\nhello from" in result.console
 
 
 def test_ls_lists_the_programs_on_the_disk(shell):
-    result = session(shell, "ls\nfail\n")
+    result = session(shell, "ls bin\nfail\n")
     assert "sh: exit 3\n" in result.console
     assert [line.split()[1] for line in result.console.splitlines()[2:5]] == [
         "fail",
