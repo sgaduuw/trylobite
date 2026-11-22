@@ -177,7 +177,34 @@
                                           # number, E_NOSLOT, E_NOPROG, E_NOMEM,
                                           # E_NOPROC
         .equ  FOR_SELF, -1                # spawnw, kill: the caller is the parent
-        # 16 to 22 were the kernel's file calls: files are the file server's now
+        # 16 to 19 were the kernel's file calls: files are the file server's now
+
+# Descriptors (README, Descriptors). Each process has NDESC of them, 0 to
+# NDESC - 1, in its record: each names a server and a handle that server
+# gave out, or nothing. read and write on a descriptor are calls to its
+# server, IO_READ or IO_WRITE with the handle in a3, the buffer in a4 and
+# the count in a5; they return the reply's first word, and leave a1 to a5
+# as a call does. A child starts with copies of its parent's descriptors,
+# so 0, 1 and 2 (standard input, output and error) pass down; the shell
+# points them at the console. The kernel checks nothing but the number:
+# the server judges the handle, and the caller, as for any call.
+        .equ  SYS_READ,  20               # read(fd, buffer, n): the server's
+                                          # answer; E_BADF (nothing there)
+        .equ  SYS_WRITE, 21               # write(fd, buffer, n): likewise
+        .equ  SYS_DESC,  22               # desc(fd, server, handle): make fd name
+                                          # handle at server, or nothing with
+                                          # server NO_DESC: 0; E_BADF (no such fd)
+        .equ  NO_DESC,   -1               # desc: close the descriptor
+        .equ  NDESC,      9               # descriptors per process
+        .equ  STDIN,      0
+        .equ  STDOUT,     1
+        .equ  STDERR,     2
+        .equ  IO_READ,   -1               # descriptor calls: read(handle, buffer,
+                                          # n), at least 1 and at most n trytes,
+                                          # waiting for one; 0 at the end
+        .equ  IO_WRITE,  -2               # write(handle, buffer, n): how many
+                                          # Negative, so that every server's own
+                                          # operations, from 0, stay as they are
 
 # Messages for servers (README, Messages). A message is four words, a2 to
 # a5 as sent; a server answers each call with a reply of four words.
@@ -336,6 +363,8 @@
                                           # kills it, or to nobody with
                                           # NO_FOREGROUND: 0, E_INVAL. The server
                                           # takes it back when the process ends
+        .equ  CONSOLE_HANDLE, 0           # the console, for IO_READ and IO_WRITE
+                                          # (descriptor calls; E_BADF for another)
 
         .equ  E_NOCALL,  -1               # no system call with that number
         .equ  E_FULL,    -1               # send: the receiver's mailbox is full
@@ -449,7 +478,10 @@
                                           # at 162, 165 and 168): 1 for each process
                                           # that has ended since receive last told it
         .equ  PCB_TURN,   171             # receive: the caller it took last
-        .equ  PCB_SIZE,   174
+        .equ  PCB_DESCS,  174             # NDESC descriptors, two words each: the
+                                          # server plus 1 (0 for none) and the handle
+        .equ  DESC,         6             # trytes per descriptor
+        .equ  PCB_SIZE,   PCB_DESCS + NDESC * DESC
         .assert PCB_NOTES + NPROC <= PCB_TURN - 1, "PCB_NOTES runs into PCB_TURN's trytes"
         .assert PCB_IRQS + NSRC <= 125, "PCB_IRQS runs into PCB_RETRY's word"
         .equ  PAGES_PER_PROCESS, 4

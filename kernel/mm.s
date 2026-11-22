@@ -157,6 +157,7 @@ spawn_page:
         blt   t0, t1, 3b
         sw    a2, PCB_PARENT(s1)
         sw    s6, PCB_FILE(s1)         # a program file may not drive a device
+        call  desc_inherit             # its parent's descriptors (desc.s)
 
         call  alloc_page
         sw    a0, PCB_ROOTPG(s1)

@@ -26,6 +26,7 @@
         .include "../kernel/harts.s"
         .include "../kernel/devices.s"
         .include "../kernel/ipc.s"
+        .include "../kernel/desc.s"
         .include "../kernel/names.s"
 
         .include "../kernel/data.s"

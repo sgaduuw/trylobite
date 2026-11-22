@@ -7,7 +7,10 @@
 # directly, and SYS_PUTC and SYS_PUTS with them: that is its log.
 #
 # A console call is a SYS_CALL with CN_GETC, CN_WRITE or CN_FOREGROUND in
-# a2 and the arguments in a3 and a4 (include/layout.s).
+# a2 and the arguments in a3 and a4 (include/layout.s). It also answers
+# descriptor calls, IO_READ and IO_WRITE, on its one handle,
+# CONSOLE_HANDLE: the shell points standard input, output and error there
+# (SYS_DESC), so programs reach it with SYS_READ and SYS_WRITE.
 #
 # Input passes through a buffer of the server's, so that Ctrl-C can be
 # seen while nobody reads: the server reads the console only while a
@@ -32,7 +35,10 @@
 
         .equ  CN_REGS, V_DEVICE + PAGE * (SRC_CONSOLE - 1)  # its registers
         .equ  CN_MAX, 81               # code points held for readers
-        .equ  CN_CHUNK, 243            # trytes a write copies in at a time
+        .equ  CN_CHUNK, 243            # trytes a write copies in, or a read
+                                       # gives, at a time
+        .equ  CN_GETTER, 1             # cn_readers: waiting in getc,
+        .equ  CN_READER, 2             # or in a descriptor's read
 
 cn_main:
         li    a0, SYS_DRIVE
@@ -61,6 +67,10 @@ cn_wait:
         beq   a1, t0, cn_write
         li    t0, CN_FOREGROUND
         beq   a1, t0, cn_fground
+        li    t0, IO_READ
+        beq   a1, t0, cn_ioread
+        li    t0, IO_WRITE
+        beq   a1, t0, cn_iowrite
 cn_inval:
         li    a2, E_INVAL
 
@@ -89,13 +99,46 @@ cn_notice:
 
 # getc(): hold the call until there is a code point for it.
 cn_getc:
-        li    t0, 3
+        li    t0, CN_GETTER
+        j     cn_hold
+
+# A descriptor's read(handle, buffer, n): hold the call until there is
+# input for it, then give it what the buffer holds, up to n code points,
+# one to a tryte. 0 at the end of input, or at once for n 0.
+cn_ioread:
+        bnez  a2, cn_badf              # the console's one handle
+        bltz  a4, cn_inval
+        bnez  a4, 1f
+        li    a2, 0
+        j     cn_answer
+1:      li    t0, 3
         mul   t0, s0, t0
-        la    t1, cn_readers
+        la    t1, cn_rbufs
         add   t1, t1, t0
-        li    t0, 1
-        sw    t0, 0(t1)
+        sw    a3, 0(t1)
+        la    t1, cn_rns
+        add   t1, t1, t0
+        sw    a4, 0(t1)
+        li    t0, CN_READER
+
+# cn_hold: keep process s0's call, of kind t0, until there is input.
+cn_hold:
+        li    t1, 3
+        mul   t1, s0, t1
+        la    t2, cn_readers
+        add   t2, t2, t1
+        sw    t0, 0(t2)
         j     cn_serve
+
+# A descriptor's write(handle, buffer, n): as CN_WRITE.
+cn_iowrite:
+        bnez  a2, cn_badf
+        mv    a2, a3
+        mv    a3, a4
+        j     cn_write
+cn_badf:
+        li    a2, E_BADF
+        j     cn_answer
 
 # write(buffer, n): copy the caller's trytes in, a chunk at a time, and
 # print them. A fault partway leaves what came before it printed.
@@ -186,8 +229,9 @@ cn_serve:
         la    t0, cn_readers
         li    t1, NPROC
 1:      lw    t2, 0(t0)
-        add   s5, s5, t2
-        addi  t0, t0, 3
+        beqz  t2, 2f
+        addi  s5, s5, 1
+2:      addi  t0, t0, 3
         addi  t1, t1, -1
         bnez  t1, 1b
 
@@ -226,20 +270,23 @@ cn_drain:
         li    t0, 1                    # closed, or any other negative
         sw    t0, cn_closed
 
-# cn_give: give each reader, in process order, a code point from the
-# buffer while it has any; once it is empty and the console closed,
-# GETC_NONE. A reader that has gone meanwhile gives its code point back.
+# cn_give: give each reader, in process order, input from the buffer
+# while it has any: getc one code point, read up to its n. Once the
+# buffer is empty and the console closed, getc gets GETC_NONE and read 0.
+# A reader that has gone meanwhile gives what it took back.
 cn_give:
         li    s6, 0                    # s6: the process
 1:      li    t0, 3
         mul   s7, s6, t0
         la    t0, cn_readers
         add   s7, s7, t0               # s7: its entry
-        lw    t0, 0(s7)
-        beqz  t0, 4f
-        li    s8, 0                    # s8: 1 if a code point was taken
+        lw    s3, 0(s7)                # s3: its kind of call
+        beqz  s3, 4f
+        li    s8, 0                    # s8: how many code points it took
         lw    t0, cn_count
         beqz  t0, 2f
+        li    t1, CN_READER
+        beq   s3, t1, 5f
         call  cn_pop
         mv    a2, a0
         li    s8, 1
@@ -247,20 +294,66 @@ cn_give:
 2:      lw    t0, cn_closed
         beqz  t0, 4f                   # nothing for this one yet
         li    a2, GETC_NONE
+        li    t1, CN_READER
+        bne   s3, t1, 3f
+        li    a2, 0                    # read's end of input
 3:      sw    zero, 0(s7)
         li    a0, SYS_REPLY
         mv    a1, s6
         sys
         bgez  a0, 4f
-        beqz  s8, 4f
+6:      beqz  s8, 4f                   # it has gone: put back what it took
         call  cn_unpop
+        addi  s8, s8, -1
+        j     6b
 4:      addi  s6, s6, 1
         li    t0, NPROC
         blt   s6, t0, 1b
+        j     cn_arm
 
-# Let the console interrupt while someone wants its input (a reader
-# waits, or a foreground process could be sent Ctrl-C), the buffer has
-# room and the console is open. Each interrupt masks it again.
+# A read: up to n code points into cn_in, then out to its buffer.
+5:      la    t0, cn_readers
+        sub   t1, s7, t0               # t1: its entries' offset
+        la    t0, cn_rns
+        add   t0, t0, t1
+        lw    s4, 0(t0)                # s4: n, or as much as cn_in holds
+        li    t0, CN_CHUNK
+        ble   s4, t0, 9f
+        mv    s4, t0
+9:
+        la    t0, cn_rbufs
+        add   t0, t0, t1
+        lw    s2, 0(t0)                # s2: its buffer
+7:      lw    t0, cn_count
+        beqz  t0, 8f
+        beq   s8, s4, 8f
+        call  cn_pop
+        la    t0, cn_in
+        add   t0, t0, s8
+        st    a0, 0(t0)
+        addi  s8, s8, 1
+        j     7b
+8:      li    a0, SYS_COPYOUT
+        mv    a1, s6
+        la    a2, cn_in
+        mv    a3, s2
+        mv    a4, s8
+        sys
+        mv    a2, s8
+        beqz  a0, 3b
+        sw    zero, 0(s7)              # a buffer it does not have
+        li    a0, SYS_REPLY
+        mv    a1, s6
+        li    a2, E_FAULT
+        sys
+        j     6b
+        li    t0, NPROC
+        blt   s6, t0, 1b
+
+# cn_arm: let the console interrupt while someone wants its input (a
+# reader waits, or a foreground process could be sent Ctrl-C), the
+# buffer has room and the console is open. Each interrupt masks it again.
+cn_arm:
         lw    t0, cn_closed
         bnez  t0, cn_wait
         lw    t0, cn_count
@@ -354,8 +447,12 @@ cn_fgfor: .word 0                      # and the one that named it
 cn_head: .word 0                       # the buffer's oldest code point
 cn_count: .word 0                      # how many it holds
 cn_closed: .word 0                     # 1 once the console said it is closed
-cn_readers: .words NPROC               # 1 for each process waiting in getc
+cn_readers: .words NPROC               # each process's waiting call: CN_GETTER,
+                                       # CN_READER, or 0 for none;
+cn_rbufs: .words NPROC                 # a read's buffer
+cn_rns: .words NPROC                   # and how much it wants
 cn_buf: .words CN_MAX                  # console input, a ring
 cn_out: .zero CN_CHUNK                 # what a write prints
+cn_in:  .zero CN_CHUNK                 # what a read gives
 cn_name: .string "console"
         .nocompress

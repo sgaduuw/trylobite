@@ -125,6 +125,12 @@ pipe.
   process that named it (`kill(pid, for)`, drivers only). The kernel's
   own messages, `SYS_PUTC` and `SYS_PUTS`, still go straight to the
   console's output, as its log; tests print with them.
+- **Descriptors route, servers decide** (`kernel/desc.s`). A descriptor
+  is (server, handle) in the process record; `SYS_READ`/`SYS_WRITE`
+  become a `SYS_CALL` with `IO_READ`/`IO_WRITE` from the rewritten saved
+  registers, and children copy their parent's table at spawn. The kernel
+  never checks a handle: a server that answers descriptor calls must.
+  Descriptor operations are negative so a server's own stay from 0.
 - **A server asleep in `receive` runs it again when woken**
   (`PCB_RETRY`, `kernel/ipc.s`), so `receive` must change nothing
   before it finds work. Arguments are read from the saved registers,

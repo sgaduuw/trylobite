@@ -846,3 +846,39 @@ typed ahead waits in the device for whoever comes to read it.
   each string the shell prints. Typing was never the hot path: a short
   session (hello, spin stopped with Ctrl-C, hello, exit) takes about 20%
   more steps than with the kernel's console (857,000 to 1,033,000).
+
+### 2026-11-22 · Descriptors, and 0, 1 and 2 on the console
+
+Programs had to look the console server up and speak its protocol to
+print. Now each process has `NDESC` (9) descriptors in its record, each a
+server and a handle; `read(fd, buf, n)` and `write(fd, buf, n)` are calls
+to that server with `IO_READ`/`IO_WRITE`, and `desc(fd, server, handle)`
+sets one. The shell points 0 to 2 at the console server, and children
+inherit them, so `bin/hello` is one `write(STDOUT, ...)`.
+
+- **The kernel routes, the servers decide.** A descriptor is not a
+  capability the kernel checks: any process may point one anywhere with
+  `desc`, and the call reaches the server as the process's own, which
+  judges handle and caller as it would any call. That keeps the kernel
+  out of each server's notion of an open object, as QNX's connections
+  and Plan 9's channels do. Chosen over a console-only convention (fds
+  0 to 2 mean "call the console"), which would need reworking for
+  redirection.
+- **Rewriting the call.** `read` and `write` rewrite the saved `a1`..`a5`
+  into a call (server; op, handle, buffer, n) and jump to `sys_call`, so
+  they block, fail and return exactly as a call does, `a1`..`a5`
+  included. No second path through the IPC code.
+- **Descriptor operations are negative** (`IO_READ` −1, `IO_WRITE` −2),
+  so every server's own operation numbers, from 0, stay as they are.
+- **Children copy the whole table** at spawn (`spawnw` included: the
+  parent there is the file server's client, not the file server), as
+  POSIX does. Closing (`desc(fd, NO_DESC)`) only clears the caller's
+  entry and tells no server: the console keeps nothing per handle.
+  A server that does (files) will need a close and a dup it is told of.
+- **A console read gives what is there**, at least one code point and
+  at most n, one to a tryte, with the same lazy policy as `getc`: raw
+  mode, since the shell does its own echo and editing. A code point too
+  big for a tryte needs `getc`.
+- **Files keep the file server's numbers for now.** Moving them into the
+  table needs the file server to hand out handles per open, close and
+  dup notices, and inheritance of a handle the server keys by process.
