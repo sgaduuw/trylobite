@@ -32,11 +32,18 @@ sys_call:
 8:      li    a0, E_SELF
         j     sys_return
 
-# receive(): a notice first, else the next caller after the last one
-# taken, else sleep until rouse wakes it.
+# receive(): a notice first, an interrupt's before an ending's, else the
+# next caller after the last one taken, else sleep until rouse wakes it.
 sys_receive:
         li    t0, 1
         sw    t0, PCB_SERVES(s0)
+        li    t3, 1                    # t3: a source it may drive
+0:      add   t2, s0, t3
+        lt    t0, PCB_IRQS - 1(t2)
+        bnez  t0, 7f
+        addi  t3, t3, 1
+        li    t1, NSRC
+        ble   t3, t1, 0b
         li    t3, 0                    # t3: a process number
 1:      add   t2, s0, t3
         lt    t0, PCB_NOTES(t2)
@@ -71,7 +78,11 @@ sys_receive:
 2:      li    t0, 0                    # a notice: process t3 ended
         st    t0, PCB_NOTES(t2)
         li    t0, NOTE_ENDED
-        sw    t0, PCB_A1(s0)
+        j     8f
+7:      li    t0, 0                    # a notice: source t3 interrupted
+        st    t0, PCB_IRQS - 1(t2)
+        li    t0, NOTE_IRQ
+8:      sw    t0, PCB_A1(s0)
         sw    t3, PCB_A2(s0)
         li    a0, FROM_KERNEL
         j     sys_return
@@ -277,13 +288,46 @@ copy_mem:
         add   t4, t4, a3
         sub   t5, t5, a3
         beqz  s7, 2b
-5:      lt    t0, 0(a2)
+        addi  t0, a2, 1                # Both at a word's first tryte (its
+        li    t1, 3                    # centre a multiple of 3): nine
+        div   t2, t0, t1               # words at a time while that many
+        mul   t2, t2, t1               # are left, then trytes one by one,
+        bne   t2, t0, 5f               # since a disk block copied whole
+        addi  t0, a0, 1                # from window to window is most of
+        div   t2, t0, t1               # what servers copy.
+        mul   t2, t2, t1
+        bne   t2, t0, 5f
+        li    t1, 27
+0:      blt   a3, t1, 5f
+        lw    t0, 1(a2)
+        sw    t0, 1(a0)
+        lw    t0, 4(a2)
+        sw    t0, 4(a0)
+        lw    t0, 7(a2)
+        sw    t0, 7(a0)
+        lw    t0, 10(a2)
+        sw    t0, 10(a0)
+        lw    t0, 13(a2)
+        sw    t0, 13(a0)
+        lw    t0, 16(a2)
+        sw    t0, 16(a0)
+        lw    t0, 19(a2)
+        sw    t0, 19(a0)
+        lw    t0, 22(a2)
+        sw    t0, 22(a0)
+        lw    t0, 25(a2)
+        sw    t0, 25(a0)
+        addi  a2, a2, 27
+        addi  a0, a0, 27
+        addi  a3, a3, -27
+        j     0b
+5:      beqz  a3, 2b
+        lt    t0, 0(a2)
         st    t0, 0(a0)
         addi  a2, a2, 1
         addi  a0, a0, 1
         addi  a3, a3, -1
-        bnez  a3, 5b
-        j     2b
+        j     5b
 6:      bnez  s7, 7f
         li    s7, 1
         j     1b

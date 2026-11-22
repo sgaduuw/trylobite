@@ -59,9 +59,8 @@ find_child:
 
 # kill_pid: mark process a0 killed, if it has not ended; on_kill ends it
 # the next time the kernel would run it (ktrap, resume). One blocked in
-# recv, wait or getc is made ready for that, since nothing else would
-# wake it; one in the disk queue keeps its place, because the disk may be
-# writing into its block window. Clobbers a0 and t0..t3.
+# any system call (recv, wait, getc, call, receive, lookup) is made
+# ready for that, since nothing else would wake it. Clobbers a0 and t0..t3.
 kill_pid:
         li    t0, PCB_SIZE
         mul   t0, a0, t0
@@ -74,8 +73,6 @@ kill_pid:
         li    t2, 1
         sw    t2, PCB_KILLED(t0)
         bgtz  t1, 9f                   # ready or running: it goes when next run
-        li    t2, ST_DISK
-        beq   t1, t2, 9f               # disk_irq readies it
         li    t2, ST_READY
         sw    t2, PCB_STATE(t0)
         j     wake_one                 # returns to our caller
@@ -91,6 +88,7 @@ bury:
         mv    t4, a0                   # t4: its number
         call  ipc_ended                # servers learn of it (ipc.s)
         call  srv_ended                # its names go (names.s)
+        call  drv_ended                # and its devices (devices.s)
         lw    t0, foreground
         bne   t0, t4, 0f
         li    t0, NO_FOREGROUND        # the console goes back to nobody

@@ -11,9 +11,10 @@
 # call. Each process's descriptors and current directory are kept here,
 # and dropped when the kernel says the process has ended.
 #
-# Blocks come through the server's block windows, NWIN of them, used as
-# a cache: the least recently used goes when another block is needed.
-# The server assumes nothing else writes the disk while it runs. A call
+# Blocks come through the server's block windows, NWIN of them, which
+# the disk server ("disk", DISK_PROTOCOL) reads blocks into and writes
+# them from, a call each. The windows are used as a cache: the least
+# recently used goes when another block is needed. The server assumes nothing else writes the disk while it runs. A call
 # needs at most six blocks at once (block 0, the inode table, a
 # directory, an indirect block, a data block or a new directory's), so
 # none it holds is evicted under it.
@@ -32,10 +33,19 @@
         .compress
         .gp   USER_GP
 
-# Ready: say so by registering. A second file server finds the name
-# taken, and leaves with why.
+# Find the disk server, waiting for it to start; one with another
+# protocol counts as no disk. Then say it is ready by registering. A
+# second file server finds the name taken, and leaves with why.
 fs_main:
-        li    a0, SYS_REGISTER
+        li    a0, SYS_LOOKUP
+        la    a1, fs_diskname
+        li    a2, LOOKUP_WAIT
+        sys
+        bltz  a0, 1f
+        li    t0, DISK_PROTOCOL
+        bne   a1, t0, 1f
+        sw    a0, fs_disk
+1:      li    a0, SYS_REGISTER
         la    a1, fs_srvname
         li    a2, FS_PROTOCOL
         sys
@@ -1216,7 +1226,7 @@ fs_bdirty:
         ret
 
 # fs_flush: write every changed window back to its block. A block the
-# disk refuses makes the reply E_IO. Clobbers a0..a2, t0..t3.
+# disk server refuses makes the reply E_IO. Clobbers a0..a4, t0..t3.
 fs_flush:
         li    t3, 0                    # t3: the window
 1:      li    t0, 3
@@ -1228,10 +1238,15 @@ fs_flush:
         sw    zero, 0(t1)
         la    t1, fs_wblk
         add   t1, t1, t0
-        lw    a1, 0(t1)
-        addi  a1, a1, -1
-        mv    a2, t3
-        li    a0, SYS_BWRITE
+        lw    a3, 0(t1)
+        addi  a3, a3, -1
+        li    t0, PAGE
+        mul   a4, t3, t0
+        li    t0, V_BLOCK
+        add   a4, a4, t0
+        li    a2, DK_WRITE
+        lw    a1, fs_disk
+        li    a0, SYS_CALL
         sys
         beqz  a0, 2f
         li    t0, E_IO
@@ -1296,8 +1311,9 @@ fs_fdget:
 
 # fs_bget: a0 = the centre of a window holding block a0, read into the
 # least recently used window if no window has it. Replies E_IO when the
-# disk refuses it (E_NOFS in fs_enter), or E_NOMEM when the kernel has no
-# page for a new window. Clobbers a0..a3 and t0..t6.
+# disk server refuses it or is not there (E_NOFS in fs_enter), or
+# E_NOMEM when the kernel has no page for a new window. Clobbers a0..a4
+# and t0..t6.
 fs_bget:
         lw    t3, fs_clock
         addi  t3, t3, 1
@@ -1325,11 +1341,20 @@ fs_bget:
         la    t0, fs_wblk
         add   t1, t1, t0
         sw    zero, 0(t1)              # holds nothing, unless the read works
-        mv    a2, t4
+        mv    a1, t4
         mv    t4, t1
         mv    t5, a0
-        mv    a1, a0
-        li    a0, SYS_BREAD
+        li    a0, SYS_WINDOW           # made on first use
+        sys
+        bnez  a0, 8f
+        li    t0, PAGE
+        mul   a4, a1, t0
+        li    t0, V_BLOCK
+        add   a4, a4, t0
+        mv    a3, t5
+        li    a2, DK_READ
+        lw    a1, fs_disk
+        li    a0, SYS_CALL
         sys
         bnez  a0, 8f
         addi  t5, t5, 1
@@ -1586,6 +1611,9 @@ fs_ops: .word fs_open, fs_close, fs_read, fs_lseek, fs_readdir, fs_stat, fs_spaw
         .word fs_write, fs_unlink, fs_mkdir, fs_rmdir, fs_chdir, fs_getcwd
         .assert FS_GETCWD == FS_NOPS - 1, "fs_ops must list every FS_ operation"
 
+        .equ  FS_NODISK, -1            # fs_disk with no disk server: no process
+                                       # has the number, so a call is E_NOPROC
+fs_disk: .word FS_NODISK               # the disk server
 fs_caller: .word 0                     # who made the call
 fs_a1:  .word 0                        # the call's arguments
 fs_a2:  .word 0
@@ -1608,6 +1636,7 @@ fs_cwd: .words NPROC                   # each one's current directory, 0 the roo
 fs_zeros: .zero FS_ZEROS
 fs_name: .zero NAME_MAX + 1
 fs_srvname: .string "fs"             # what it registers as
+fs_diskname: .string "disk"           # whom it reads and writes blocks with
 fs_dot: .string "."
 fs_dotdot: .string ".."
 fs_noname: .string ""

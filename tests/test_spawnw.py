@@ -1,15 +1,20 @@
 """spawnw: start a program from a file. The caller reads the file's first
-block into its block window and the kernel copies the image after
+block into its block window, from the disk server, and the kernel copies the image after
 EXEC_MAGIC into a fresh page at V_USER (include/layout.s). tools/fs.py
 makes the program files, from images assembled to run at V_USER."""
 
 import pytest
 
-from tests.kernel import _assemble, exit_with, new_disk, run, wait_for
+from tests.kernel import _assemble, exit_with, new_disk, wait_for
+from tests.kernel import run as run_kernel
 from tools import fs
 from tools.fs import Filesystem, FsError, program_file
 
 E_NOPROG = -2  # include/layout.s
+
+
+def run(*args, **kwargs):
+    return run_kernel(*args, disk_server=True, **kwargs)
 
 
 def program(body: str) -> bytes:
@@ -42,11 +47,15 @@ def disk_with(**files: list[int] | str):
 
 def start_from(block: int, window: int = 0, parent: str = "FOR_SELF") -> str:
     """Read block into the window, spawnw, and exit with the child's code,
-    or with spawnw's failure."""
+    or with spawnw's failure. The disk server is process 1."""
     return f"""
-        li    a0, SYS_BREAD
-        li    a1, {block}
-        li    a2, {window}
+        li    a0, SYS_WINDOW
+        li    a1, {window}
+        sys
+        CALL_DISK
+        li    a2, DK_READ
+        li    a3, {block}
+        li    a4, V_BLOCK + PAGE * {window}
         sys
         li    a0, SYS_SPAWNW
         li    a1, {window}
@@ -75,7 +84,7 @@ def test_a_program_file_runs_from_the_window():
     disk, first = disk_with(greet=program_file(GREET))
     result = run(start_from(first["greet"]), disk=disk)
     assert "hello from the disk\n" in result.console
-    assert result.code_of(1) == 42  # the child
+    assert result.code_of(2) == 42  # the child
     assert result.code_of(0) == 42  # and its parent, which waited for it
 
 
@@ -99,7 +108,7 @@ last:   .word 77
 """
     disk, first = disk_with(top=program_file(program(body)))
     result = run(start_from(first["top"]), disk=disk)
-    assert result.code_of(1) == 77 + -2  # E_RANGE
+    assert result.code_of(2) == 77 + -2  # E_RANGE
 
 
 def test_text_is_not_a_program():

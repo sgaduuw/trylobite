@@ -6,7 +6,7 @@ the harness builds the server in and init starts it first."""
 import re
 
 from tests import kernel
-from tests.kernel import _assemble, exit_with, find_fs, new_disk, wait_for
+from tests.kernel import _assemble, exit_with, find_servers, new_disk, wait_for
 from tools import fs
 from tools.fs import PAGE, Filesystem, program_file
 
@@ -369,11 +369,11 @@ def test_without_a_filesystem_there_are_no_files():
 
 def test_descriptors_go_with_their_process():
     # Each child opens every descriptor and exits with them open. The
-    # fifth gets process number 2 again, and finds them all free: the
+    # fourth gets process number 3 again, and finds them all free: the
     # server closed the first one's when the kernel said it had ended.
     child = report(*[open_("f")] * L["NFD"], data=string("f", "f"))
     init = f"""
-        li    s2, 5
+        li    s2, 4
 1:      li    a0, SYS_SPAWN
         li    a1, 1
         sys
@@ -385,17 +385,18 @@ def test_descriptors_go_with_their_process():
         {exit_with("s1")}
 """
     result = run(init, child, disk=disk(f="x"))
-    assert result.code_of(0) == 2
-    assert said(result) == list(range(L["NFD"])) * 5
+    assert result.code_of(0) == 3
+    assert said(result) == list(range(L["NFD"])) * 4
 
 
 def test_a_server_without_pages_for_its_windows_says_so():
-    # The build has 4 programs, so pages 10 to 19 are free; init and the
-    # server take 4 each, leaving 2 windows, and an open needs three
-    # blocks: block 0, the inodes and the root directory.
+    # The build has 5 programs, so pages 11 to 25 are free; init and the
+    # two servers take 4 each, the disk server a window more, leaving 2
+    # windows, and an open needs three blocks: block 0, the inodes and the
+    # root directory.
     program = report(open_("f"), data=string("f", "f"))
-    assert said(run(program, ram_pages=19, disk=disk(f="x"))) == [L["E_NOMEM"]]
-    assert said(run(program, ram_pages=20, disk=disk(f="x"))) == [0]
+    assert said(run(program, ram_pages=25, disk=disk(f="x"))) == [L["E_NOMEM"]]
+    assert said(run(program, ram_pages=26, disk=disk(f="x"))) == [0]
 
 
 def reader(path: str, p: str = "r") -> str:
@@ -459,7 +460,7 @@ def test_two_processes_read_files_at_once():
         max_steps=20_000_000,
     )
     sums = sum(map(ord, a)), sum(map(ord, b))
-    assert sorted(result.code_of(p) for p in (2, 3)) == sorted(sums)
+    assert sorted(result.code_of(p) for p in (3, 4)) == sorted(sums)
     assert result.code_of(0) == sum(sums)
 
 
@@ -470,7 +471,7 @@ def disk_program(body: str) -> list[int]:
         .include "include/layout.s"
         .section disk, V_USER, V_USER
         .gp   USER_GP
-{find_fs(body, 0)}
+{find_servers(body, 0)}
 """,
     )
     return program_file(image.path.read_bytes())
@@ -508,7 +509,7 @@ msg:    .string "hello from a file\\n"
     result = run(program, disk=on)
     assert "hello from a file\n" in result.console
     assert said(result) == [
-        2,  # the child: process 1 is the file server
+        3,  # the child: processes 1 and 2 are the servers
         42,
         L["E_NOEXEC"],
         L["E_NOEXEC"],

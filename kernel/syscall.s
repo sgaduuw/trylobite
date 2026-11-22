@@ -31,12 +31,6 @@ syscall_again:                         # resume runs a call again (ipc.s)
         beq   a0, t0, sys_getc
         li    t0, SYS_WAIT
         beq   a0, t0, sys_wait
-        li    t0, SYS_BREAD
-        li    a3, BLOCK_READ
-        beq   a0, t0, sys_block
-        li    t0, SYS_BWRITE
-        li    a3, BLOCK_WRITE
-        beq   a0, t0, sys_block
         li    t0, SYS_KILL
         beq   a0, t0, sys_kill
         li    t0, SYS_FOREGROUND
@@ -57,6 +51,14 @@ syscall_again:                         # resume runs a call again (ipc.s)
         beq   a0, t0, sys_register
         li    t0, SYS_LOOKUP
         beq   a0, t0, sys_lookup
+        li    t0, SYS_WINDOW
+        beq   a0, t0, sys_window
+        li    t0, SYS_DRIVE
+        beq   a0, t0, sys_drive
+        li    t0, SYS_ARM
+        beq   a0, t0, sys_arm
+        li    t0, SYS_PHYS
+        beq   a0, t0, sys_phys
         li    a0, E_NOCALL
 
 sys_return:                            # a0: the result

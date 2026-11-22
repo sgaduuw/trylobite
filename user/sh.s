@@ -1,10 +1,11 @@
 # Program 0 of shell.s: a shell. It reads a line, runs the program its
 # first word names, waits for it, and says how it ended if not with code
 # 0. Some words are built in: exit, and ls, cat, write, rm, mkdir, rmdir,
-# cd and pwd, which use the filesystem on the disk (docs/filesystem.md) through the file server,
-# which the shell starts first, as init, and finds by its name. A word that is neither built in nor a program in the kernel
-# image names a program file: a path if it has a slash, else a file in
-# /bin. It stops at the end of input. Programs take no arguments yet.
+# cd and pwd, which use the filesystem on the disk (docs/filesystem.md)
+# through the file server. The shell starts it first, as init, after the
+# disk server it needs, and finds it by its name. A word that is neither
+# built in nor a program in the kernel image names a program file: a
+# path if it has a slash, else a file in /bin. It stops at the end of input. Programs take no arguments yet.
 
         .compress
         .section prog0, P_PROG0 * PAGE, V_USER
@@ -17,7 +18,11 @@
         .equ  SH_NOFS, -1              # sh_fs with no file server: no process
                                        # has the number, so a call is E_NOPROC
 
-sh:     li    a0, SYS_SPAWN            # the file server
+sh:     li    a0, SYS_SPAWN            # the disk server, which the
+        li    a1, SH_DISKD             # file server waits for
+        sys
+        bltz  a0, prompt               # none: no file server either
+        li    a0, SYS_SPAWN            # the file server
         li    a1, SH_FSD
         sys
         bltz  a0, prompt               # none: sh_fs stays SH_NOFS

@@ -125,38 +125,49 @@ def exit_with(register: str) -> str:
     return f"mv a1, {register}\n        {EXIT}"
 
 
-# init's first lines when the build has the file server: it starts it,
-# as program 3.
-START_FS = """
+# The servers a build can add, from program 3 on: the disk server, and
+# the file server, which needs it. init's first lines start them, so the
+# disk server is process 1 and the file server process 2.
+SERVERS = {"disk": "user/diskd.s", "fs": "user/fsd.s"}
+
+
+def start(program: int) -> str:
+    return f"""
         li    a0, SYS_SPAWN
-        li    a1, 3
+        li    a1, {program}
         sys
 """
 
-# A line of its own, CALL_FS, starts a file call in a test program: build
-# expands it to a lookup of the file server's name, waiting for it to
-# register, then a0 = SYS_CALL and a1 = the server, so that a2 onwards
-# follow as for any call. Each program gets its own copy of the name,
-# since all programs share one symbol table.
-CALL_FS = re.compile(r"^( *(?:\w+: *)?)CALL_FS$", re.M)  # a label may lead
+
+# A line of its own, CALL_FS or CALL_DISK, starts a call to that server
+# in a test program: build expands it to a lookup of the server's name,
+# waiting for it to register, then a0 = SYS_CALL and a1 = the server, so
+# that a2 onwards follow as for any call. Each program gets its own copy
+# of the name, since all programs share one symbol table.
+CALLS = {
+    name: re.compile(rf"^( *(?:\w+: *)?)CALL_{name.upper()}$", re.M)  # a label may lead
+    for name in SERVERS
+}
 
 
-def find_fs(program: str, n: int) -> str:
-    """program with each CALL_FS expanded, and its name string, labelled
-    find_fs_n, added at its end."""
-    if not CALL_FS.search(program):
-        return program
-    label = f"find_fs_{n}"
+def find_servers(program: str, n: int) -> str:
+    """program with each CALL_FS and CALL_DISK expanded, and the name
+    strings, labelled find_fs_n and find_disk_n, added at its end."""
     pad = " " * 8
-    expanded = CALL_FS.sub(
-        lambda m: (
-            f"{m.group(1)}li    a0, SYS_LOOKUP\n{pad}la    a1, {label}\n"
-            f"{pad}li    a2, LOOKUP_WAIT\n{pad}sys\n{pad}mv    a1, a0\n"
-            f"{pad}li    a0, SYS_CALL"
-        ),
-        program,
-    )
-    return f'{expanded}\n{label}: .string "fs"\n'
+    for name, pattern in CALLS.items():
+        if not pattern.search(program):
+            continue
+        label = f"find_{name}_{n}"
+        program = pattern.sub(
+            lambda m, label=label: (
+                f"{m.group(1)}li    a0, SYS_LOOKUP\n{pad}la    a1, {label}\n"
+                f"{pad}li    a2, LOOKUP_WAIT\n{pad}sys\n{pad}mv    a1, a0\n"
+                f"{pad}li    a0, SYS_CALL"
+            ),
+            program,
+        )
+        program = f'{program}\n{label}: .string "{name}"\n'
+    return program
 
 
 def build(
@@ -165,20 +176,25 @@ def build(
     prog2: str = DONE,
     ram_pages: int = RAM_PAGES,
     files: bool = False,
+    disk_server: bool = False,
 ) -> Image:
     """The kernel with init as program 0 and prog1, prog2 to spawn; with
-    files, also the file server (user/fsd.s), which init starts first."""
-    init, prog1, prog2 = (find_fs(p, n) for n, p in enumerate((init, prog1, prog2)))
+    disk_server, also the disk server (user/diskd.s), and with files the
+    file server (user/fsd.s) after it, which init starts first."""
+    init, prog1, prog2 = (
+        find_servers(p, n) for n, p in enumerate((init, prog1, prog2))
+    )
+    servers = [*(["disk"] if files or disk_server else []), *(["fs"] if files else [])]
     server = ""
-    if files:
-        init = START_FS + init
-        server = """
-        .section prog3, P_PROG3 * PAGE, V_USER
-        .include "user/fsd.s"
+    for k, name in enumerate(servers, 3):
+        server += f"""
+        .section prog{k}, P_PROG{k} * PAGE, V_USER
+        .include "{SERVERS[name]}"
 """
+    init = "".join(start(k) for k in range(3, 3 + len(servers))) + init
     source = f"""
         .equ  RAM_PAGES, {ram_pages}
-        .equ  NPROG, {4 if files else 3}
+        .equ  NPROG, {3 + len(servers)}
         .include "include/kernel.s"
         .section prog0, P_PROG0 * PAGE, V_USER
 {init}
@@ -391,6 +407,7 @@ def run(
     input: str | None = None,
     disk: tuple[Path, int] | None = None,
     files: bool = False,
+    disk_server: bool = False,
 ) -> Run:
-    image = build(init, prog1, prog2, ram_pages, files)
+    image = build(init, prog1, prog2, ram_pages, files, disk_server)
     return run_image(image, ram_pages, max_steps, harts, plug, unplug, input, disk)

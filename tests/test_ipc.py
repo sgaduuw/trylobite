@@ -7,7 +7,7 @@ import re
 from tests.kernel import EXIT, exit_with, new_disk, run, wait_for
 from tests.test_files import PUTN, said
 
-E_NOPROC, E_SELF, E_FAULT, E_NOBLOCK = -2, -3, -12, -2  # include/layout.s
+E_NOPROC, E_SELF, E_FAULT, E_INVAL = -2, -3, -12, -10  # include/layout.s
 
 
 def spawn(program: int, into: str) -> str:
@@ -349,40 +349,44 @@ def test_a_killed_caller_cannot_be_replied_to():
     assert result.code_of(0) == E_NOPROC * 10 + 2
 
 
+def window(k: int | str) -> str:
+    return f"li a0, SYS_WINDOW\n        li a1, {k}\n        sys"
+
+
+def disk_call(op: str, block: int, buffer: str) -> str:
+    """A call to the disk server: op on block, through buffer."""
+    return f"""
+        CALL_DISK
+        li    a2, {op}
+        li    a3, {block}
+        li    a4, {buffer}
+        sys"""
+
+
 def test_block_windows_hold_a_block_each():
-    # Blocks 1 and 2 read into windows 0 and 2, block 1 written back from
-    # window 2; then window 9, which there is not.
+    # Windows 0 and 2 made, blocks 1 and 2 read into them, block 1 written
+    # back from window 2; then window 9, which there cannot be, and a
+    # read into window 1, which there is not.
     program = f"""
         .gp   USER_GP
-        li    a0, SYS_BREAD
-        li    a1, 1
-        li    a2, 0
-        sys
+        {window(0)}
+        {window(2)}
+        {disk_call("DK_READ", 1, "V_BLOCK")}
         li    t0, V_BLOCK
         li    t1, 11
         sw    t1, 0(t0)
-        li    a0, SYS_BREAD
-        li    a1, 2
-        li    a2, 2
-        sys
+        {disk_call("DK_READ", 2, "V_BLOCK + 2 * PAGE")}
         li    t0, V_BLOCK + 2 * PAGE
         li    t1, 22
         sw    t1, 0(t0)
-        li    a0, SYS_BWRITE
-        li    a1, 1
-        li    a2, 2
-        sys
-        li    a0, SYS_BREAD            # block 1 again: now 22
-        li    a1, 1
-        li    a2, 0
-        sys
-        li    t0, V_BLOCK
+        {disk_call("DK_WRITE", 1, "V_BLOCK + 2 * PAGE")}
+        {disk_call("DK_READ", 1, "V_BLOCK")}
+        li    t0, V_BLOCK              # block 1 again: now 22
         lw    a0, 0(t0)
         call  putn
-        li    a0, SYS_BREAD
-        li    a1, 1
-        li    a2, NWIN
-        sys
+        {window("NWIN")}
+        call  putn
+        {disk_call("DK_READ", 1, "V_BLOCK + PAGE")}
         call  putn
         li    a0, SYS_PUTS             # the window between is not there
         li    a1, V_BLOCK + PAGE
@@ -392,19 +396,19 @@ def test_block_windows_hold_a_block_each():
         {EXIT}
 {PUTN}
 """
-    result = run(program, disk=(new_disk(), 4))
-    assert said(result) == [22, E_NOBLOCK, -2]
+    result = run(program, disk=(new_disk(), 4), disk_server=True)
+    assert said(result) == [22, E_INVAL, E_FAULT, -2]
 
 
 def test_block_windows_are_freed_with_their_process():
-    # Each child takes every window, 13 pages with its own four; with 30
-    # pages only one fits at a time, so the second needs the first's back.
+    # Each child takes every window, 13 pages with its own four; with 35
+    # pages (30 after the disk server's 5) only one fits at a time, so the
+    # second needs the first's back.
     child = """
         li    s1, NWIN
 1:      addi  s1, s1, -1
-        li    a0, SYS_BREAD
-        li    a1, 0
-        mv    a2, s1
+        li    a0, SYS_WINDOW
+        mv    a1, s1
         sys
         bnez  a0, 9f
         bnez  s1, 1b
@@ -423,6 +427,6 @@ def test_block_windows_are_freed_with_their_process():
         li    s1, 0
 9:      {exit_with("s1")}
 """
-    result = run(init, child, ram_pages=30, disk=(new_disk(), 1))
+    result = run(init, child, ram_pages=35, disk_server=True)
     assert result.code_of(0) == 0
     assert [c for p, c in result.exits() if p != 0] == [0, 0, 0]

@@ -156,6 +156,7 @@ spawn_page:
         addi  t0, t0, 3
         blt   t0, t1, 3b
         sw    a2, PCB_PARENT(s1)
+        sw    s6, PCB_FILE(s1)         # a program file may not drive a device
 
         call  alloc_page
         sw    a0, PCB_ROOTPG(s1)
@@ -244,6 +245,39 @@ spawn_page:
 7:      lw    ra, 0(sp)
         addi  sp, sp, 3
         ret
+
+# window(k): give the caller block window a1, a zeroed page at V_BLOCK +
+# PAGE * a1, unless it has one there already.
+sys_window:
+        bltz  a1, 7f
+        li    t0, NWIN
+        bge   a1, t0, 7f
+        li    t0, 3
+        mul   s1, a1, t0
+        add   s1, s1, s0               # s1: its PCB_WINS entry, less PCB_WINS
+        lw    t0, PCB_WINS(s1)
+        bnez  t0, 6f
+        lw    t0, free_count
+        beqz  t0, 8f
+        call  alloc_page
+        sw    a0, PCB_WINS(s1)
+        li    t1, PAGE                 # leaf entry k + 1: the window
+        mul   t2, a0, t1
+        li    t1, USER_FLAGS
+        add   t2, t2, t1
+        lw    a0, PCB_LEAFPG(s0)
+        call  kva
+        lw    t0, PCB_A1(s0)
+        li    t1, 3
+        mul   t0, t0, t1
+        add   a0, a0, t0
+        sw    t2, 3(a0)
+6:      li    a0, 0
+        j     sys_return
+7:      li    a0, E_INVAL
+        j     sys_return
+8:      li    a0, E_NOMEM
+        j     sys_return
 
 # release: end the process in s0, return its pages, and bury it (wait.s).
 # Its saved a0 and a1 say how it ended. Does not return.

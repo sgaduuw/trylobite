@@ -1,10 +1,13 @@
-# Device interrupts, on hart 0 under the kernel lock. Every source is
-# routed to hart 0 (the controller's reset value), and enabled only while
-# something wants it.
+# Device interrupts, on hart 0 under the kernel lock, and the drivers
+# that take them. Every source is routed to hart 0 (the controller's
+# reset value), and enabled only while something wants it: the console
+# while the kernel wants input (input.s), any other source while its
+# driver has armed it.
 
         .compress
-# device_irqs: serve every device source that wants attention. Clobbers
-# a0, a1, s1, s2 and t0..t4.
+# device_irqs: serve every device source that wants attention: the
+# console here, others by telling their driver. Clobbers a0, a1, s1, s2
+# and t0..t4.
 device_irqs:
         addi  sp, sp, -3
         sw    ra, 0(sp)
@@ -14,9 +17,8 @@ device_irqs:
         li    t1, SRC_CONSOLE
         bne   s2, t1, 2f
         call  console_irq
-2:      li    t1, SRC_DISK
-        bne   s2, t1, 3f
-        call  disk_irq
+        j     3f
+2:      call  drv_irq
 3:      li    t0, V_IRQ
         sw    s2, IRQ_COMPLETE(t0)
         j     1b
@@ -24,120 +26,147 @@ device_irqs:
         addi  sp, sp, 3
         ret
 
-# --- the disk ------------------------------------------------------------------
-# One command at a time, each a process's: a bread or bwrite, or a block
-# the cache lacks (kernel/cache.s), held in its PCB_DBLOCK, PCB_DPAGE and
-# PCB_DCMD. A process asking while another's command is in flight waits
-# as ST_DISK until that one finishes; disk_irq then starts the next, in
-# table order after the one that finished.
+# --- drivers -------------------------------------------------------------------
+# A device other than the console belongs to the process that drives it
+# (drivers, a record per source, 0 for none): its registers are mapped
+# into that process, and the kernel only passes its interrupts on. The
+# driver arms a source when it expects an interrupt; the interrupt masks
+# it again, and receive hands the driver a NOTE_IRQ notice. irq_armed
+# counts the armed sources, so that pick waits for them instead of
+# calling a client stuck while its server waits on the device.
 
-# bread(block, window), bwrite(block, window): move one block between the
-# disk and one of the caller's block windows, window k a page of its own
-# at V_BLOCK + PAGE * k made on first use. a1 = the block, a2 = the
-# window, a3 = BLOCK_READ or BLOCK_WRITE.
-sys_block:
-        bltz  a1, 8f
-        li    t0, V_DISK
-        lw    t0, DISK_BLOCKS(t0)
-        bge   a1, t0, 8f               # past the end, or no disk at all
-        bltz  a2, 8f
-        li    t0, NWIN
-        bge   a2, t0, 8f
-        li    t0, 3
-        mul   s1, a2, t0
-        add   s1, s1, s0               # s1: its PCB_WINS entry, less PCB_WINS
-        lw    t0, PCB_WINS(s1)
-        bnez  t0, 1f
-        lw    t0, free_count
-        beqz  t0, 9f
-        mv    s2, a3                   # alloc_page clobbers every t
-        call  alloc_page
-        sw    a0, PCB_WINS(s1)
-        li    t1, PAGE                 # leaf entry k + 1: the window
-        mul   t2, a0, t1
-        li    t1, USER_FLAGS
-        add   t2, t2, t1
+# drive(source): make the caller source a1's driver, and map the
+# device's registers at V_DEVICE + PAGE * (a1 - 1).
+sys_drive:
+        li    t0, SRC_DISK             # the console stays the kernel's
+        bne   a1, t0, 7f
+        lw    t0, PCB_FILE(s0)
+        bnez  t0, 8f
+        call  drv_slot
+        lw    t1, 0(t0)
+        beq   t1, s0, 6f               # its own already
+        bnez  t1, 9f
+        sw    s0, 0(t0)
         lw    a0, PCB_LEAFPG(s0)
         call  kva
-        lw    t0, PCB_A2(s0)
-        li    t1, 3
-        mul   t0, t0, t1
+        li    t0, 3                    # leaf entry NWIN + a1
+        mul   t0, a1, t0
         add   a0, a0, t0
-        sw    t2, 3(a0)
-        lw    a1, PCB_A1(s0)
-        mv    a3, s2
-1:      sw    a1, PCB_DBLOCK(s0)
-        sw    a3, PCB_DCMD(s0)
-        lw    t0, PCB_WINS(s1)
-        sw    t0, PCB_DPAGE(s0)
-        j     disk_queue
-8:      li    a0, E_NOBLOCK
+        li    t1, P_DISK * PAGE + PTE_LEAF + PTE_R + PTE_W + PTE_U + PTE_A + PTE_D
+        sw    t1, 3 * NWIN(a0)
+6:      li    a0, 0
         j     sys_return
-9:      li    a0, E_NOMEM
+7:      li    a0, E_INVAL
+        j     sys_return
+8:      li    a0, E_PERM
+        j     sys_return
+9:      li    a0, E_BUSY
         j     sys_return
 
-# disk_queue: the process in s0 has its command in PCB_D*: wait for it,
-# starting it now if the disk is free. Does not return.
-disk_queue:
-        li    t0, ST_DISK
-        sw    t0, PCB_STATE(s0)
-        lw    t0, disk_user
-        bnez  t0, 1f                   # busy: disk_irq starts it later
-        mv    s1, s0
-        call  disk_start
-1:      j     schedule
-
-# disk_start: give the disk the command of the waiting process in s1.
-# Clobbers t0, t1.
-disk_start:
-        sw    s1, disk_user
-        lw    t1, PCB_DPAGE(s1)
-        la    t0, disk_list
-        sw    t1, 0(t0)
-        li    t1, KOFF
-        add   t1, t0, t1               # the list's physical address
-        li    t0, V_DISK
-        sw    t1, DISK_LIST(t0)
-        lw    t1, PCB_DBLOCK(s1)
-        sw    t1, DISK_BLOCK(t0)
+# arm(source): let source a1, which the caller drives, interrupt once.
+sys_arm:
+        blez  a1, 8f                   # drv_slot needs a source that is one
+        li    t0, NSRC
+        bgt   a1, t0, 8f
+        call  drv_slot
+        lw    t1, 0(t0)
+        bne   t1, s0, 8f
+        li    t0, 9
+        mul   t0, a1, t0
+        li    t1, V_IRQ
+        add   t0, t0, t1
+        lw    t1, IRQ_ENABLE(t0)
+        bnez  t1, 1f                   # armed already
         li    t1, 1
-        sw    t1, DISK_COUNT(t0)
-        lw    t1, PCB_DCMD(s1)
-        sw    t1, DISK_COMMAND(t0)
+        sw    t1, IRQ_ENABLE(t0)
+        lw    t1, irq_armed
+        addi  t1, t1, 1
+        sw    t1, irq_armed
+1:      li    a0, 0
+        j     sys_return
+8:      li    a0, E_PERM
+        j     sys_return
+
+# phys(address): the physical address of the caller's address a1, which
+# only a driver needs: to give a device memory to move to or from.
+sys_phys:
+        la    t0, drivers
+        li    t1, NSRC
+1:      lw    t2, 0(t0)
+        beq   t2, s0, 2f
+        addi  t0, t0, 3
+        addi  t1, t1, -1
+        bnez  t1, 1b
+        li    a0, E_PERM
+        j     sys_return
+2:      mv    a0, s0
+        call  uva
+        beqz  a0, 8f
+        li    t0, DMAP
+        sub   a0, a0, t0
+        j     sys_return
+8:      li    a0, E_FAULT
+        j     sys_return
+
+# drv_slot: t0 = the address of source a1's entry in drivers; a1 is 1 to
+# NSRC. Clobbers t1.
+drv_slot:
+        li    t0, 3
+        mul   t0, a1, t0
+        la    t1, drivers - 3
+        add   t0, t0, t1
         ret
 
-# disk_irq: the command in flight has finished. Tell its process how it
-# went, and start the next waiting one. Clobbers a0, s1 and t0..t5.
-disk_irq:
+# drv_irq: source s2 has interrupted. Mask it, and tell its driver: wake
+# it if it sleeps in receive. A source nobody drives is only masked.
+# Clobbers a1, s1 and t0..t3.
+drv_irq:
         addi  sp, sp, -3
         sw    ra, 0(sp)
-        li    t0, V_DISK
-        lw    t1, DISK_STATUS(t0)
-        sw    zero, DISK_ACK(t0)
-        lw    s1, disk_user
-        beqz  s1, 9f                   # nothing was asked of it
-        sw    zero, disk_user
-        li    a0, 0
-        li    t0, BLOCK_FAILED
-        bne   t1, t0, 1f
-        li    a0, E_IO
-1:      sw    a0, PCB_A0(s1)
-        li    t0, ST_READY
-        sw    t0, PCB_STATE(s1)
-        call  wake_one
-        la    t3, procs + NPROC * PCB_SIZE
-        li    t4, NPROC
-2:      addi  s1, s1, PCB_SIZE         # the next waiting process, s1's turn last
-        blt   s1, t3, 3f
-        la    s1, procs
-3:      lw    t0, PCB_STATE(s1)
-        li    t1, ST_DISK
-        bne   t0, t1, 4f
-        call  disk_start
-        j     9f
-4:      addi  t4, t4, -1
-        bnez  t4, 2b
+        li    t0, 9
+        mul   t0, s2, t0
+        li    t1, V_IRQ
+        add   t0, t0, t1
+        li    t1, 0
+        sw    t1, IRQ_ENABLE(t0)
+        lw    t1, irq_armed
+        addi  t1, t1, -1
+        sw    t1, irq_armed
+        mv    a1, s2
+        call  drv_slot
+        lw    s1, 0(t0)
+        beqz  s1, 9f
+        add   t0, s1, s2
+        li    t1, 1
+        st    t1, PCB_IRQS - 1(t0)
+        call  rouse
 9:      lw    ra, 0(sp)
         addi  sp, sp, 3
+        ret
+
+# drv_ended: the process in s0 has ended (bury): it drives nothing now,
+# and what it armed is masked. Its mapping went with its page tables.
+# Clobbers t0..t3.
+drv_ended:
+        la    t0, drivers
+        li    t1, 1                    # t1: the source
+1:      lw    t2, 0(t0)
+        bne   t2, s0, 2f
+        sw    zero, 0(t0)
+        li    t2, 9
+        mul   t2, t1, t2
+        li    t3, V_IRQ
+        add   t2, t2, t3
+        lw    t3, IRQ_ENABLE(t2)
+        beqz  t3, 2f
+        li    t3, 0
+        sw    t3, IRQ_ENABLE(t2)
+        lw    t3, irq_armed
+        addi  t3, t3, -1
+        sw    t3, irq_armed
+2:      addi  t0, t0, 3
+        addi  t1, t1, 1
+        li    t2, NSRC
+        ble   t1, t2, 1b
         ret
         .nocompress
