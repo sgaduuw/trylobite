@@ -5,6 +5,13 @@ your first change; [`CONTEXT.md`](CONTEXT.md) records why things are the
 way they are, and gets a new entry when you make a decision of the same
 weight.
 
+[`docs/kernel.md`](docs/kernel.md) is the reference: the memory map,
+every system call, each server and its protocol, and the shell.
+[`docs/filesystem.md`](docs/filesystem.md) is the disk format. A change
+to any of those updates the document in the same pull request; the
+README is the front page and only needs a change when what it shows
+(its sessions, the list of servers) stops being true.
+
 ## What this is
 
 A microkernel in detrytus assembly. The machine, its specification
@@ -22,7 +29,12 @@ uv run pytest
 uv run ruff check tests tools
 uv run ruff format --check tests tools
 detrytus run demo.s --ram-pages 40
+tools/fs.py new disk.img 20 bin/*.s
+printf 'hello\nls bin\necho a b | upper\nexit\n' | detrytus run shell.s --ram-pages 81 --input - --disk disk.img
 ```
+
+`demo.s` is the multi-hart demo (init starts ping and pong); `shell.s`
+is the shell build, which CI also runs with a disk made by `tools/fs.py`.
 
 The `detrytus` command is detrytus' Rust tool, installed with cargo at
 the commit `detrytus.rev` pins. Move the pin by writing a newer commit
@@ -89,12 +101,21 @@ pipe.
   `include/layout.s`: each top-level file (demo, shell, tests) states the
   machine it targets and how many programs it adds. Program images sit
   in pages from `P_PROG0`, and the free pages start after the last.
+- **Program 0 is init.** The kernel starts it and nothing else. In
+  `demo.s` it is `user/init.s`; in `shell.s` the shell is init, and
+  starts the servers itself (console, pipe, disk, file, in that order),
+  finding each with `lookup`, so the programs it runs start at process
+  5. Tests build their own init with `run(init, ...)`, which starts the
+  servers they ask for first (`tests/kernel.py`, `SERVERS`).
 - **A new program goes in `bin/`, on the disk**, unless another program
   spawns it by number (ping and pong) or the kernel starts it (init,
   sh). A disk program is assembled on its own, including
   `include/layout.s` and loading where it runs, at `V_USER`
   (docs/filesystem.md, Program files); `include/layout.s` must
-  therefore assemble without `NPROG` or `RAM_PAGES`.
+  therefore assemble without `NPROG` or `RAM_PAGES`. It starts with
+  `a0` = argc and `a1` = `V_ARGV`, a list of string addresses ended by
+  a 0 word, the command first (`spawnw`; `bin/echo.s` is the smallest
+  example), and with descriptors 0, 1 and 2 inherited from its parent.
 - **Servers are found by name** (`kernel/names.s`): a server calls
   `register` once it is ready, and a client calls `lookup`, with
   `LOOKUP_WAIT` when it may start before its server, and checks the
@@ -139,8 +160,7 @@ pipe.
   is not copied to children: the shell marks the pipe ends it keeps, or
   a pipe's reader would never see the end.
 - **Pipes are the pipe server's**, `user/piped.s` (labels `pp_`; tests
-  pass `pipes=True` and write `CALL_PIPE`). Shell children now start
-  after five processes (sh and four servers).
+  pass `pipes=True` and write `CALL_PIPE`).
 - **A server asleep in `receive` runs it again when woken**
   (`PCB_RETRY`, `kernel/ipc.s`), so `receive` must change nothing
   before it finds work. Arguments are read from the saved registers,
@@ -163,8 +183,12 @@ pipe.
 ## Tests
 
 Tests build the kernel with purpose-made user programs
-(`tests/kernel.py`: `run(prog0, prog1)`) and read the kernel's console
-output. When you change the kernel, add a test that fails without your
+(`tests/kernel.py`: `run(init, prog1, prog2)`, with `files`,
+`disk_server`, `console` and `pipes` to add those servers, and `disk`
+and `input` for the machine) and read the kernel's console output.
+Shell tests build `shell.s` itself, on a disk of `bin/` programs from `bin_disk`. The
+whole suite takes about three minutes; while fixing, run the files you
+touched. When you change the kernel, add a test that fails without your
 change, and see it fail: break the code it guards, run it, restore.
 
 ## Git
