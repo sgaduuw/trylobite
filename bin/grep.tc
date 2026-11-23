@@ -1,0 +1,110 @@
+// grep [-v] TEXT [FILE]...: say each line of the files, or of standard
+// input when none is named, that holds TEXT, or with -v each line that
+// does not, on standard output, as Unix's grep does for a fixed string
+// (grep -F): there are no patterns. With two files or more, each line
+// starts with its file's name and a colon. A line longer than GR_LINE
+// code points is taken a GR_LINE at a time. Exit with 0 if a line was
+// said, 1 if none was, and 2 if a file cannot be opened (said on
+// standard error) or output fails. A filter too: ls bin | grep e.
+
+import "../include/layout.s";
+import "../lib/start.s";
+import "../lib/io.tc";
+
+const int GR_MAX = 243;                // trytes read at a time
+const int GR_LINE = 729;               // the longest line looked at whole
+
+bool invert;                           // -v
+tryte *text;                           // what to look for
+int text_n;
+tryte *name;                           // what lines start with, or 0
+bool found;                            // a line was said
+bool failed;                           // anything failed
+tryte buf[GR_MAX];
+tryte line[GR_LINE];
+
+void out(tryte *s, int n) {
+    if (n > 0 && !put(STDOUT, s, n)) failed = true;
+}
+
+// Whether the n trytes in line hold the text.
+bool holds(int n) {
+    for (int at = 0; at + text_n <= n; at++) {
+        int i = 0;
+        while (i < text_n && line[at + i] == text[i]) i++;
+        if (i == text_n) return true;
+    }
+    return false;
+}
+
+// Say the n trytes in line, as a line, if holding the text is not what
+// -v asks for.
+void look(int n) {
+    if (holds(n) == invert) return;
+    found = true;
+    if (name != 0) {
+        out(name, length(name));
+        out(":", 1);
+    }
+    out(line, n);
+    out("\n", 1);
+}
+
+// Look at each line descriptor fd reads, to its end.
+void file(int fd) {
+    int n = 0;                         // trytes in line
+    int got;
+    while ((got = read(fd, buf, GR_MAX)) > 0) {
+        for (int i = 0; i < got; i++) {
+            if (buf[i] != '\n') {
+                line[n++] = buf[i];
+                if (n < GR_LINE) continue;
+            }
+            look(n);                   // a line, or as much as line holds
+            n = 0;
+        }
+    }
+    if (n > 0) look(n);                // a last line with no newline
+}
+
+int usage() {
+    puts(STDERR, "usage: grep [-v] TEXT [FILE]...\n");
+    return 2;
+}
+
+int main(int argc, tryte **argv) {
+    int i = 1;
+    invert = false;
+    failed = false;
+    found = false;
+    if (i < argc && argv[i][0] == '-') {
+        tryte *flag = argv[i];
+        if (flag[1] != 'v' || flag[2] != 0) return usage();
+        invert = true;
+        i++;
+    }
+    if (i >= argc) return usage();
+    text = argv[i++];
+    text_n = length(text);
+    if (i == argc) {
+        file(STDIN);
+    } else {
+        bool named = argc - i > 1;     // two files or more
+        for (; i < argc; i++) {
+            int fd = open(argv[i]);
+            if (fd < 0) {
+                puts(STDERR, "grep: ");
+                puts(STDERR, argv[i]);
+                puts(STDERR, ": cannot open\n");
+                failed = true;
+                continue;
+            }
+            if (named) name = argv[i];
+            file(fd);
+            close(fd);
+        }
+    }
+    if (failed) return 2;
+    if (found) return 0;
+    return 1;
+}

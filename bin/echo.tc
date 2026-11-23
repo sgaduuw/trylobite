@@ -4,18 +4,13 @@
 
 import "../include/layout.s";
 import "../lib/start.s";
+import "../lib/io.tc";
 
 int failed;
 
 // Write n trytes from buf to standard output, noting a failure.
 void out(tryte *buf, int n) {
-    if (sys(SYS_WRITE, STDOUT, buf, n) < 0) failed = 1;
-}
-
-int length(tryte *s) {
-    int n = 0;
-    while (s[n] != 0) n++;
-    return n;
+    if (!put(STDOUT, buf, n)) failed = 1;
 }
 
 int main(int argc, tryte **argv) {
