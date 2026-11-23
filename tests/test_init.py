@@ -166,6 +166,64 @@ def test_what_needs_a_server_that_ends_is_started_again_with_it():
     ]
 
 
+def test_a_server_that_ends_before_it_registers_is_started_again():
+    # The disk server exits before it registers: init does not wait for
+    # the name forever but starts it again, three times, then gives up on
+    # it and on the file server, which needs it, and starts the shell.
+    image = build_with(
+        {"INIT_DISKD": 9},
+        "li    a0, SYS_EXIT\n        li    a1, 3\n        sys",
+    )
+    result = run_image(image, input="ls\n", disk=bin_disk())
+    assert result.exit_code == 0, result.console
+    console = result.console
+    assert "deadlock" not in console
+    assert console.count(" exited with code 3\n") == 4  # the first start and
+    # three more
+    assert trouble(console) == ["init: disk ended, starting it again"] * 3 + [
+        "init: disk ended too often, giving up on it",
+        "init: no server named fs",
+    ]
+    assert "$ ls\nsh: .: no filesystem on the disk\n" in console
+
+
+def test_a_server_that_ends_once_before_it_registers_comes_up():
+    # The pipe server's first start (process 2) exits before it registers;
+    # the second, process 3, registers, and the rest comes up after it.
+    image = build_with(
+        {"INIT_PIPED": 9},
+        """
+        li    a0, SYS_GETPID
+        sys
+        li    t0, 2
+        bne   a0, t0, 1f
+        li    a0, SYS_EXIT
+        li    a1, 3
+        sys
+1:      li    a0, SYS_REGISTER
+        la    a1, 3f
+        li    a2, PIPE_PROTOCOL
+        sys
+2:      li    a0, SYS_RECEIVE
+        sys
+        j     2b
+3:      .string "pipe"
+""",
+    )
+    result = run_image(image, input="ls\n", disk=bin_disk())
+    assert result.exit_code == 0, result.console
+    said = [line for line in result.console.splitlines() if line.startswith("init:")]
+    assert said == [
+        "init: started console, process 1",
+        "init: pipe ended, starting it again",
+        "init: started pipe, process 3",
+        "init: started disk, process 4",
+        "init: started fs, process 5",
+        "init: starting sh",
+    ]
+    assert "$ ls\nbin/\n" in result.console
+
+
 def test_a_shell_that_faults_is_started_again_until_init_gives_up():
     image = build_with({"INIT_SH": 9}, "lw    t0, 0(zero)  # nothing is there")
     result = run_image(image, disk=bin_disk())

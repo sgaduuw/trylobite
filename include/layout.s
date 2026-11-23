@@ -273,14 +273,20 @@
                                           # name), E_NAMETOOLONG, E_FAULT. Again
                                           # with a name it has, a process changes
                                           # its version
-        .equ  SYS_LOOKUP, 29              # lookup(name, how): a0 = the server's
-                                          # process number, a1 = its version; or
-                                          # E_NOENT (with LOOKUP_NOW, nobody has
-                                          # the name), E_INVAL, E_NAMETOOLONG,
-                                          # E_FAULT. With LOOKUP_WAIT it sleeps
-                                          # until a server registers the name
+        .equ  SYS_LOOKUP, 29              # lookup(name, how, pid): a0 = the
+                                          # server's process number, a1 = its
+                                          # version; or E_NOENT (with LOOKUP_NOW,
+                                          # nobody has the name), E_NOPROC (with
+                                          # LOOKUP_WHILE, process pid ended, or
+                                          # never was, first), E_INVAL,
+                                          # E_NAMETOOLONG, E_FAULT. With
+                                          # LOOKUP_WAIT it sleeps until a server
+                                          # registers the name; with LOOKUP_WHILE,
+                                          # only while process pid lives (init,
+                                          # for a server it started)
         .equ  LOOKUP_NOW, 0
         .equ  LOOKUP_WAIT, 1
+        .equ  LOOKUP_WHILE, 2
         .equ  SRV_NAME_MAX, 8             # code points in a name; one is left for 0
         .equ  NSRV, 9                     # names the kernel keeps, a record each:
         .equ  SRV,          15            # a record of SRV trytes,
@@ -633,7 +639,7 @@
         .equ  ST_REPLY,  -8               # PCB_PEER has received its call: waits
                                           # for the reply
         .equ  ST_RECEIVE, -9              # blocked in SYS_RECEIVE
-        .equ  ST_LOOKUP, -10              # blocked in SYS_LOOKUP with LOOKUP_WAIT
+        .equ  ST_LOOKUP, -10              # blocked in SYS_LOOKUP, waiting
         .equ  ST_SLEEP,  -11              # blocked in SYS_SLEEP, until its saved a1
         .equ  NO_FOREGROUND, -1           # CN_FOREGROUND: the console is nobody's
         .equ  NO_PARENT, -1               # PCB_PARENT of init and of orphans:

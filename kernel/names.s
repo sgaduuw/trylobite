@@ -55,11 +55,15 @@ sys_register:
 8:      li    a0, E_INVAL
         j     sys_return
 
-# lookup(name, how): sleeping in it, a process is woken by every
-# register, and runs it again (PCB_RETRY), so it changes nothing before
-# it finds the name.
+# lookup(name, how, pid): sleeping in it, a process is woken by every
+# register and every process that ends, and runs it again (PCB_RETRY),
+# so it changes nothing before it finds the name. With LOOKUP_WHILE it
+# stops waiting once process pid has ended, or if it never was: init
+# waits so for a server it has just started, which may end before it
+# registers.
 sys_lookup:
         mv    s3, a2                   # s3: how
+        lw    s4, PCB_A3(s0)           # s4: pid (a retry reloads a0..a2 only)
         call  srv_key_in
         bltz  a0, sys_return
         call  srv_find
@@ -69,8 +73,22 @@ sys_lookup:
         lw    a0, SRV_PID(s2)
         j     sys_return
 1:      li    t0, LOOKUP_WAIT
+        beq   s3, t0, 3f
+        li    t0, LOOKUP_WHILE
         bne   s3, t0, 2f
-        li    t0, ST_LOOKUP
+        li    a0, E_NOPROC             # is pid still there?
+        bltz  s4, sys_return
+        li    t0, NPROC
+        bge   s4, t0, sys_return
+        li    t0, PCB_SIZE
+        mul   t0, s4, t0
+        la    t1, procs
+        add   t0, t0, t1
+        lw    t0, PCB_STATE(t0)
+        beqz  t0, sys_return           # gone, or a free slot
+        li    t1, ST_ZOMBIE
+        beq   t0, t1, sys_return       # ended, not yet waited for
+3:      li    t0, ST_LOOKUP
         sw    t0, PCB_STATE(s0)
         j     schedule
 2:      li    a0, E_NOENT
@@ -142,8 +160,8 @@ srv_find:
         li    s2, 0
         ret
 
-# srv_wake: a name came or changed: every process asleep in lookup looks
-# again. Clobbers s1, t0..t3.
+# srv_wake: a name came or changed, or a process ended: every process
+# asleep in lookup looks again. Clobbers s1, t0..t3.
 srv_wake:
         addi  sp, sp, -3
         sw    ra, 0(sp)
@@ -163,7 +181,9 @@ srv_wake:
         addi  sp, sp, 3
         ret
 
-# srv_ended: process t4 has ended (bury): its names go. Clobbers t0, t1.
+# srv_ended: process t4 has ended (bury): its names go, and whoever
+# waits in lookup looks again, as one may wait only while it lives.
+# Clobbers s1, t0..t3.
 srv_ended:
         la    t1, names
 1:      lw    t0, SRV_PID(t1)
@@ -172,5 +192,5 @@ srv_ended:
 2:      addi  t1, t1, SRV
         la    t0, names + NSRV * SRV
         blt   t1, t0, 1b
-        ret
+        j     srv_wake                 # returns to our caller
         .nocompress

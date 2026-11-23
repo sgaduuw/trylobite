@@ -15,11 +15,12 @@ def register(name: str, version: int | str) -> str:
         sys"""
 
 
-def lookup(name: str, how: str = "LOOKUP_NOW") -> str:
+def lookup(name: str, how: str = "LOOKUP_NOW", pid: str = "zero") -> str:
     return f"""
         li    a0, SYS_LOOKUP
         la    a1, {name}
         li    a2, {how}
+        mv    a3, {pid}
         sys"""
 
 
@@ -151,3 +152,55 @@ def test_a_second_file_server_finds_the_name_taken_and_leaves():
         "mv a0, s2",
     )
     assert said(run_files(program)) == [3, L["WAIT_EXITED"], L["E_EXIST"]]
+
+
+# A child that lets its parent's lookup start waiting, then exits without
+# registering anything.
+QUITTER = """
+        .gp   USER_GP
+        li    s1, 20
+1:      li    a0, SYS_YIELD
+        sys
+        addi  s1, s1, -1
+        bnez  s1, 1b
+        li    a0, SYS_EXIT
+        li    a1, 0
+        sys
+"""
+
+
+def test_a_lookup_while_a_process_lives_ends_with_it():
+    # The child ends without registering: the wait ends with E_NOPROC, and
+    # the child is still there to wait for.
+    init = report(
+        "li a0, SYS_SPAWN\n        li a1, 1\n        sys\n        mv s1, a0",
+        lookup("srv", "LOOKUP_WHILE", "s1"),
+        "li a0, SYS_WAIT\n        mv a1, s1\n        sys",
+        lookup("srv", "LOOKUP_WHILE", "s1"),  # ended already
+        data=strings(srv="srv"),
+    )
+    assert said(run(init, QUITTER)) == [
+        1,
+        L["E_NOPROC"],
+        L["WAIT_EXITED"],
+        L["E_NOPROC"],
+    ]
+
+
+def test_a_lookup_while_a_process_lives_finds_its_name():
+    init = report(
+        "li a0, SYS_SPAWN\n        li a1, 1\n        sys\n        mv s1, a0",
+        lookup("srv", "LOOKUP_WHILE", "s1") + "\n" + VERSION,
+        data=strings(srv="srv"),
+    )
+    assert said(run(init, SERVER)) == [1, 7]
+
+
+def test_a_lookup_while_no_process_lives_fails_at_once():
+    init = report(
+        "li s1, 13" + lookup("srv", "LOOKUP_WHILE", "s1"),  # never started
+        "li s1, -1" + lookup("srv", "LOOKUP_WHILE", "s1"),
+        "li s1, NPROC" + lookup("srv", "LOOKUP_WHILE", "s1"),
+        data=strings(srv="srv"),
+    )
+    assert said(run(init)) == [L["E_NOPROC"]] * 3

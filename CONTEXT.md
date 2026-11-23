@@ -1186,3 +1186,23 @@ point to.
   (length, write to standard error, joining a directory and a name),
   since a disk program is assembled on its own and the tools have no
   linker yet.
+
+### 2026-11-23 · a server that ends before it registers
+
+- **The wait ends in the kernel, with `LOOKUP_WHILE`.** Init used
+  `LOOKUP_WAIT` for each server it started, so one that ended before
+  registering left init asleep for good, and the kernel halted with a
+  deadlock. `lookup(name, LOOKUP_WHILE, pid)` waits only while `pid`
+  lives and then fails with `E_NOPROC`. The alternatives were worse:
+  init polling `LOOKUP_NOW` busy-waits, and waking every `LOOKUP_WAIT`
+  sleeper with a failure when any child ends would change the call for
+  clients such as the file server, which wait for a name with no
+  process of their own to watch.
+- **Every process that ends wakes the lookups**, as every register does,
+  and each looks again; a `LOOKUP_WAIT` one just sleeps again. Ends are
+  rare enough that tracking which sleeper watches which process is not
+  worth a field in each record.
+- **Ending before registering is ending.** Init reaps the server and
+  counts a start against `INIT_RETRIES`, as for one that ends later, so
+  a server that dies at once is tried four times and then given up on,
+  with what needs it, instead of being given up on the first time.
