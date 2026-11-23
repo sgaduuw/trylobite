@@ -1,0 +1,28 @@
+// echo: say the arguments after the command on standard output, a space
+// between each and a newline after, as Unix's echo does; exit with 0, or
+// with 1 if output fails. The first program written in Trice.
+
+import "../include/layout.s";
+import "../lib/start.s";
+
+int failed;
+
+// Write n trytes from buf to standard output, noting a failure.
+void out(tryte *buf, int n) {
+    if (sys(SYS_WRITE, STDOUT, buf, n) < 0) failed = 1;
+}
+
+int length(tryte *s) {
+    int n = 0;
+    while (s[n] != 0) n++;
+    return n;
+}
+
+int main(int argc, tryte **argv) {
+    for (int i = 1; i < argc; i++) {
+        if (i > 1) out(" ", 1);
+        out(argv[i], length(argv[i]));
+    }
+    out("\n", 1);
+    return failed;
+}

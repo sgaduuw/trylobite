@@ -403,7 +403,7 @@ line's first program first), and at the prompt drops the line typed so
 far.
 
 ```bash
-tools/fs.py new disk.img 100 notes.txt bin/*.s
+tools/fs.py new disk.img 100 notes.txt bin/*.s bin/*.tc
 tools/fs.py mkdir disk.img docs
 tools/fs.py put disk.img README.md docs
 printf 'ls\nls bin\ncat docs/README.md\nwrite docs/motd hello\nhello > docs/hi\n' > session.txt

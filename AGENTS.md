@@ -29,7 +29,7 @@ uv run pytest
 uv run ruff check tests tools
 uv run ruff format --check tests tools
 detrytus run demo.s --ram-pages 40
-tools/fs.py new disk.img 40 bin/*.s
+tools/fs.py new disk.img 40 bin/*.s bin/*.tc
 printf 'hello\nls bin\necho a b | upper\nexit\n' | detrytus run shell.s --ram-pages 81 --input - --disk disk.img
 ```
 
@@ -113,12 +113,16 @@ pipe.
   starts the servers they ask for first (`tests/kernel.py`, `SERVERS`).
 - **A new program goes in `bin/`, on the disk**, unless another program
   spawns it by number (ping, pong, the servers and sh) or the kernel
-  starts it (init). A disk program is assembled on its own, including
+  starts it (init). It may be assembly (`.s`) or Trice (`.tc`, detrytus
+  `docs/trice.md`), compiled with `detrytus tc`: a Trice program imports
+  `include/layout.s` and then `lib/start.s`, which places it at `V_USER`
+  and calls `main(argc, argv)` (`bin/echo.tc` is the example). A disk
+  program is assembled on its own, including
   `include/layout.s` and loading where it runs, at `V_USER`
   (docs/filesystem.md, Program files); `include/layout.s` must
   therefore assemble without `NPROG` or `RAM_PAGES`. It starts with
   `a0` = argc and `a1` = `V_ARGV`, a list of string addresses ended by
-  a 0 word, the command first (`spawnw`; `bin/echo.s` is the smallest
+  a 0 word, the command first (`spawnw`; `bin/echo.tc` is the smallest
   example), and with descriptors 0, 1 and 2 inherited from its parent.
   Make it behave as its Unix namesake, in a small way: operands as
   arguments, standard input when a filter is given no file, complaints

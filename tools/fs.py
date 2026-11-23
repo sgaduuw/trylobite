@@ -11,10 +11,11 @@
 A file is text, each code point one tryte between 1 and 9,841, or a
 program: `put` given an image assembled by `detrytus asm` (a .dti file)
 stores it as a program file in /bin, where the shell finds it, and
-given a .s file assembles it first (with $DETRYTUS, or detrytus on the
-PATH). Paths start at the root, with or without a leading slash. The
-image is a detrytus disk file, two bytes per tryte, so `detrytus run
---disk IMAGE` attaches it. The format's numbers are read from
+given a .s file assembles it first, or a Trice .tc file compiles it
+first (with $DETRYTUS, or detrytus on the PATH). Paths start at the
+root, with or without a leading slash. The image is a detrytus disk
+file, two bytes per tryte, so `detrytus run --disk IMAGE` attaches it.
+The format's numbers are read from
 include/layout.s, which the kernel and programs share.
 """
 
@@ -725,14 +726,18 @@ class Filesystem:
 
 
 def assemble(source: Path) -> bytes:
-    """The image detrytus asm makes of a program's source."""
+    """The image detrytus makes of a program's source: `detrytus asm` for
+    assembly, `detrytus tc` for Trice (.tc)."""
     binary = os.environ.get("DETRYTUS") or shutil.which("detrytus")
     if binary is None:
         raise FsError("no detrytus command to assemble with: set DETRYTUS")
     with tempfile.TemporaryDirectory() as work:
         out = Path(work) / "program.dti"
+        command = "tc" if source.suffix == ".tc" else "asm"
         done = subprocess.run(
-            [binary, "asm", str(source), "-o", str(out)], capture_output=True, text=True
+            [binary, command, str(source), "-o", str(out)],
+            capture_output=True,
+            text=True,
         )
         if done.returncode != 0:
             raise FsError(done.stderr.strip())
@@ -740,12 +745,12 @@ def assemble(source: Path) -> bytes:
 
 
 def put(fs: Filesystem, file: Path, path: str | None = None) -> str:
-    """Add a host file: an assembled image, or a .s file assembled here,
+    """Add a host file: an assembled image, or a .s or .tc file built here,
     as a program, anything else as text. A program is named after its file
-    without .dti or .s and goes in /bin, made if missing; text keeps its
+    without .dti, .s or .tc and goes in /bin, made if missing; text keeps its
     file's name and goes in /. A path puts it there instead, or in that
     directory if one is there. Returns where it went."""
-    data = assemble(file) if file.suffix == ".s" else file.read_bytes()
+    data = assemble(file) if file.suffix in (".s", ".tc") else file.read_bytes()
     program = data[:4] == DTI_MAGIC
     name = file.stem if program else file.name
     if path is None:

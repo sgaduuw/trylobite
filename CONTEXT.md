@@ -1206,3 +1206,22 @@ point to.
   counts a start against `INIT_RETRIES`, as for one that ends later, so
   a server that dies at once is tried four times and then given up on,
   with what needs it, instead of being given up on the first time.
+
+### 2026-11-23 · The first program in Trice
+
+- **`bin/echo` is Trice now** (`bin/echo.tc`), compiled by detrytus'
+  `detrytus tc` (detrytus `docs/trice.md`): the first milestone of the
+  compiler's design, chosen because the echo tests already pin its
+  behaviour down, so they pass unchanged.
+- **Start code is the OS's, not the compiler's.** `lib/start.s` opens
+  the program's section at `V_USER`, says `gp` holds `USER_GP`, and
+  turns spawnw's start (a0 = argc, a1 = argv) into `main(argc, argv)`,
+  exiting with its result. A program imports `include/layout.s` and
+  then it; the compiler knows no system call, and `sys(...)` is the
+  only way out. There is no libc: helpers live in the programs, as for
+  assembly ones, until a few are shared through `lib/`.
+- **Size.** The compiled echo is about 80 words against the
+  hand-written 21. The compiler's later register allocation is what
+  shrinks it; a program still has the upper half of its page.
+- **Building.** `tools/fs.py` and `bin_disk` compile `.tc` files as
+  they assemble `.s` ones, so `bin/*.s bin/*.tc` is the disk's set.

@@ -101,7 +101,7 @@ and a note, and give the shell a session to read:
 
 ```bash
 printf 'Ternary computers count in trits.\n' > notes.txt
-tools/fs.py new disk.img 100 notes.txt bin/*.s
+tools/fs.py new disk.img 100 notes.txt bin/*.s bin/*.tc
 printf 'ls\ncat notes.txt\nfail\necho "one   arg" two\nhello | upper | wc\ncat notes.txt | upper > shout\ncat shout\nmkdir docs\ncd docs\npwd\nexit\n' > session.txt
 detrytus run shell.s --ram-pages 81 --input session.txt --disk disk.img
 ```
