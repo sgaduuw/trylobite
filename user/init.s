@@ -16,7 +16,8 @@
 #
 # A server that cannot start, or does not register the protocol version
 # init expects, is said on the kernel's log and left down, and so is
-# every row that needs it. Each server init starts is said with its
+# every row that needs it. One that ends before it registers is started
+# again, as one that ends later is. Each server init starts is said with its
 # process number once it has registered, and the shell before it starts,
 # since the shell prints at once: the end of the boot report.
 
@@ -127,7 +128,9 @@ init_shend:
 
 # init_start: start each row from row a0 on that is down, not given up
 # on, and has what it needs up, waiting for it to register. A row that
-# cannot be started is said and given up on. Clobbers s0..s5.
+# cannot be started is said and given up on; one that ends before it
+# registers counts a start, as if it had ended later, and is started
+# again until init gives up on it. Clobbers s0..s5.
 init_start:
         addi  sp, sp, -3
         sw    ra, 0(sp)
@@ -161,10 +164,13 @@ init_start:
         sys
         bltz  a0, 3f
         mv    s3, a0                   # s3: its process
-        li    a0, SYS_LOOKUP           # wait until it is ready
+        li    a0, SYS_LOOKUP           # wait until it is ready, or ends
         lw    a1, ROW_NAME(s0)
-        li    a2, LOOKUP_WAIT
+        li    a2, LOOKUP_WHILE
+        mv    a3, s3
         sys
+        li    t0, E_NOPROC
+        beq   a0, t0, 6f
         bltz  a0, 3f
         lw    t0, ROW_VERSION(s0)
         bne   a1, t0, 3f               # calls to it would be misread
@@ -177,6 +183,20 @@ init_start:
         mv    a4, a0
         call  init_say
         j     4f
+6:      li    a0, SYS_WAIT           # it ended before it registered:
+        mv    a1, s3                   # reap it, and start it again as
+        sys                            # if it had ended later
+        lw    t0, 0(s2)
+        addi  t0, t0, 1
+        sw    t0, 0(s2)
+        la    a2, init_again
+        li    t1, INIT_RETRIES
+        ble   t0, t1, 7f
+        la    a2, init_giveup
+7:      lw    a1, ROW_NAME(s0)
+        li    a3, 0
+        call  init_say
+        j     1b                       # the same row again
 3:      li    t0, INIT_RETRIES + 1     # no use trying again
         sw    t0, 0(s2)
 5:      la    a1, init_noserver
