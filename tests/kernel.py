@@ -381,10 +381,9 @@ def bin_disk(blocks: int = 32, **texts: str) -> tuple[Path, int]:
     from tools.fs import Filesystem, assemble, program_file
 
     if not _BIN:
-        for source in sorted((ROOT / "bin").glob("*.s")):
-            image = assemble_file(source)
-            _BIN[source.stem] = program_file(image.path.read_bytes())
-        for source in sorted((ROOT / "bin").glob("*.tc")):
+        bin_ = ROOT / "bin"
+        for source in sorted([*bin_.glob("*.s"), *bin_.glob("*.tc")]):
+            # Trice (.tc) and assembly alike, in name order, as ls lists them.
             _BIN[source.stem] = program_file(assemble(source))
     made = Filesystem.new(blocks)
     made.mkdir("bin")
