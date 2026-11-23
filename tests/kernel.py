@@ -378,12 +378,14 @@ _BIN: dict[str, list[int]] = {}
 def bin_disk(blocks: int = 32, **texts: str) -> tuple[Path, int]:
     """A new disk holding a filesystem with every program of bin/ in /bin,
     as the shell expects, and these text files in /: (path, blocks)."""
-    from tools.fs import Filesystem, program_file
+    from tools.fs import Filesystem, assemble, program_file
 
     if not _BIN:
         for source in sorted((ROOT / "bin").glob("*.s")):
             image = assemble_file(source)
             _BIN[source.stem] = program_file(image.path.read_bytes())
+        for source in sorted((ROOT / "bin").glob("*.tc")):
+            _BIN[source.stem] = program_file(assemble(source))
     made = Filesystem.new(blocks)
     made.mkdir("bin")
     for name, trytes in _BIN.items():

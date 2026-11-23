@@ -319,7 +319,7 @@ $ wc notes more
 ## The host tool
 
 ```bash
-tools/fs.py new disk.img 100 notes.txt bin/*.s   # programs go in /bin
+tools/fs.py new disk.img 100 notes.txt bin/*.s bin/*.tc   # programs go in /bin
 tools/fs.py ls disk.img
 tools/fs.py ls disk.img bin
 tools/fs.py mkdir disk.img docs
