@@ -116,7 +116,8 @@ pipe.
   starts it (init). It may be assembly (`.s`) or Trice (`.tc`, detrytus
   `docs/trice.md`), compiled with `detrytus tc`: a Trice program imports
   `include/layout.s` and then `lib/start.s`, which places it at `V_USER`
-  and calls `main(argc, argv)` (`bin/echo.tc` is the example). A disk
+  and calls `main(argc, argv)` (`bin/echo.tc` is the example), and
+  usually `lib/io.tc`, the helpers Trice programs share. A disk
   program is assembled on its own, including
   `include/layout.s` and loading where it runs, at `V_USER`
   (docs/filesystem.md, Program files); `include/layout.s` must
@@ -127,8 +128,10 @@ pipe.
   Make it behave as its Unix namesake, in a small way: operands as
   arguments, standard input when a filter is given no file, complaints
   on standard error as `NAME: what: why`, and exit 1 when anything
-  failed (`bin/cp.s` is a full example). Each disk program repeats the
-  few helpers it needs: there is no library to link. `bin_disk` in
+  failed (`bin/cp.s` is a full example, `bin/wc.tc` one in Trice). An
+  assembly program repeats the few helpers it needs: there is no
+  library to link. A Trice program imports them from `lib/io.tc` and
+  is compiled whole with them. `bin_disk` in
   `tests/kernel.py` makes room for every program; a test that writes
   much asks for more blocks.
 - **Servers are found by name** (`kernel/names.s`): a server calls

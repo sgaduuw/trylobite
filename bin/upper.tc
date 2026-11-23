@@ -1,0 +1,22 @@
+// upper: copy standard input to standard output with a to z made A to Z,
+// until the input ends; exit with 0, or with 1 if output fails. A filter,
+// for the end of a pipe: hello | upper.
+
+import "../include/layout.s";
+import "../lib/start.s";
+import "../lib/io.tc";
+
+const int UP_MAX = 243;                // trytes read at a time
+
+tryte buf[UP_MAX];
+
+int main() {
+    int n;
+    while ((n = read(STDIN, buf, UP_MAX)) > 0) {
+        for (int i = 0; i < n; i++) {
+            if (buf[i] >= 'a' && buf[i] <= 'z') buf[i] += 'A' - 'a';
+        }
+        if (!put(STDOUT, buf, n)) return 1;
+    }
+    return 0;
+}

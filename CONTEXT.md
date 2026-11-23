@@ -1225,3 +1225,23 @@ point to.
   shrinks it; a program still has the upper half of its page.
 - **Building.** `tools/fs.py` and `bin_disk` compile `.tc` files as
   they assemble `.s` ones, so `bin/*.s bin/*.tc` is the disk's set.
+
+### 2026-11-23 · Porting tools to Trice
+
+- **wc, grep, head and upper are Trice now**, with echo: ports chosen
+  because their tests already pin their behaviour, so they pass
+  unchanged, and because they show which compiler features real
+  programs need first.
+- **Shared helpers, not a libc.** `lib/io.tc` holds what the programs
+  repeated in assembly (length, put, read, open, close, decimal), and
+  `lib/fs.s` the file server lookup, in assembly because `lookup`
+  answers in two registers and `sys(...)` gives only `a0`. A program
+  imports what it uses; the compiler builds the whole program.
+- **A fresh `bool` is unknown.** `lib/io.tc` first wrote `bool
+  fs_known;` and tested `!fs_known`, which is unknown and so never
+  true: the flag needs `= false`. The language works as designed, but
+  it is the first trap the third truth value set.
+- **What the ports asked of the compiler**: dropping functions nothing
+  calls (upper carries all of `lib/io.tc`), and smaller code in
+  general (wc is 1,618 trytes against 659 hand-written). Structs,
+  array initialisers and long argument lists were not needed yet.

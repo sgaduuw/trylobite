@@ -1,0 +1,58 @@
+// What the programs of bin/ share: writing, opening files and saying
+// numbers. A program imports include/layout.s and lib/start.s first,
+// then this file.
+
+import "../include/layout.s";
+import "fs.s";
+
+extern int fs_server();
+
+// The length of the string at s.
+int length(tryte *s) {
+    int n = 0;
+    while (s[n] != 0) n++;
+    return n;
+}
+
+// Write n trytes from buf to descriptor fd: false if that fails.
+bool put(int fd, tryte *buf, int n) {
+    return sys(SYS_WRITE, fd, buf, n) >= 0;
+}
+
+// Write the string s to descriptor fd: false if that fails.
+bool puts(int fd, tryte *s) {
+    return put(fd, s, length(s));
+}
+
+// Read up to n trytes into buf from descriptor fd: how many, 0 at the
+// end, or a negative error.
+int read(int fd, tryte *buf, int n) {
+    return sys(SYS_READ, fd, buf, n);
+}
+
+bool fs_known = false;           // a fresh bool would be unknown
+int fs;
+
+// Open the file name for reading: a descriptor, or a negative error.
+int open(tryte *name) {
+    if (!fs_known) {
+        fs = fs_server();
+        fs_known = true;
+    }
+    return sys(SYS_CALL, fs, FS_OPEN, name, O_RDONLY);
+}
+
+void close(int fd) {
+    sys(SYS_CLOSE, fd);
+}
+
+// Put n, which is not negative, at to in decimal: how many digits.
+int decimal(int n, tryte *to) {
+    int digits = 1;
+    for (int m = n / 10; m != 0; m = m / 10) digits++;
+    for (int i = digits - 1; i >= 0; i--) {
+        to[i] = '0' + n % 10;
+        n = n / 10;
+    }
+    return digits;
+}
