@@ -29,7 +29,7 @@ uv run pytest
 uv run ruff check tests tools
 uv run ruff format --check tests tools
 detrytus run demo.s --ram-pages 40
-tools/fs.py new disk.img 27 bin/*.s
+tools/fs.py new disk.img 40 bin/*.s
 printf 'hello\nls bin\necho a b | upper\nexit\n' | detrytus run shell.s --ram-pages 81 --input - --disk disk.img
 ```
 
