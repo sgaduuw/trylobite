@@ -1258,7 +1258,7 @@ point to.
   languages (a Rust target is planned) will need, and the linker now
   leaves out the library functions a program does not call, the cost
   the 2026-11-23 ports noted.
-- **Size**: linked programs are 5 to 23% larger than whole ones (echo
+- **Size**: linked programs are 6 to 23% larger than whole ones (echo
   189 trytes against 154, wc 1,005 against 901, grep 1,776 against
   1,663), because calls between functions are finished by the linker
   and so are not put in compressed bundles. Relaxation in the linker
