@@ -1272,3 +1272,7 @@ point to.
   instead of one gp-relative instruction. spawnw sets gp for every
   process, so library code linked into any program can use it. Linked
   wc drops from 1,005 to 978 trytes.
+- **With detrytus' relaxation** (detrytus#53, #54; pinned 2026-11-24),
+  linked programs are close to whole ones and sometimes smaller: echo
+  147 trytes (154 whole), upper 360 (375), wc 933 (901), grep 1,689
+  (1,663), head 864 (851).
