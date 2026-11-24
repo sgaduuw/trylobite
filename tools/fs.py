@@ -11,8 +11,9 @@
 A file is text, each code point one tryte between 1 and 9,841, or a
 program: `put` given an image assembled by `detrytus asm` (a .dti file)
 stores it as a program file in /bin, where the shell finds it, and
-given a .s file assembles it first, or a Trice .tc file compiles it
-first (with $DETRYTUS, or detrytus on the PATH). Paths start at the
+given a .s file assembles it first, or a Trice .tc file builds it
+first, linked with the .tc files it imports (with $DETRYTUS, or
+detrytus on the PATH). Paths start at the
 root, with or without a leading slash. The image is a detrytus disk
 file, two bytes per tryte, so `detrytus run --disk IMAGE` attaches it.
 The format's numbers are read from
@@ -725,17 +726,42 @@ class Filesystem:
 # --- the command line --------------------------------------------------------------
 
 
+_IMPORT = re.compile(r'^\s*import\s+"([^"]+\.tc)"\s*;', re.MULTILINE)
+
+
+def libraries(source: Path) -> list[Path]:
+    """The Trice files a .tc file imports, and theirs, in the order they
+    are first imported: what its program is linked with."""
+    found: list[Path] = []
+    pending = [source]
+    while pending:
+        file = pending.pop(0)
+        for name in _IMPORT.findall(file.read_text()):
+            library = (file.parent / name).resolve()
+            if library != source.resolve() and library not in found:
+                found.append(library)
+                pending.append(library)
+    return found
+
+
 def assemble(source: Path) -> bytes:
     """The image detrytus makes of a program's source: `detrytus asm` for
-    assembly, `detrytus tc` for Trice (.tc)."""
+    assembly, and for Trice (.tc) `detrytus link` of the program with the
+    Trice files it imports, each compiled on its own (detrytus
+    docs/linker.md), so the program carries only the library functions it
+    calls."""
     binary = os.environ.get("DETRYTUS") or shutil.which("detrytus")
     if binary is None:
         raise FsError("no detrytus command to assemble with: set DETRYTUS")
     with tempfile.TemporaryDirectory() as work:
         out = Path(work) / "program.dti"
-        command = "tc" if source.suffix == ".tc" else "asm"
+        if source.suffix == ".tc":
+            # The program first: it imports lib/start.s, which places it.
+            command = ["link", str(source), *map(str, libraries(source))]
+        else:
+            command = ["asm", str(source)]
         done = subprocess.run(
-            [binary, command, str(source), "-o", str(out)],
+            [binary, *command, "-o", str(out)],
             capture_output=True,
             text=True,
         )
