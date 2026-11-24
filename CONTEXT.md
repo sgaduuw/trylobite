@@ -1245,3 +1245,21 @@ point to.
   calls (upper carries all of `lib/io.tc`), and smaller code in
   general (wc is 1,618 trytes against 659 hand-written). Structs,
   array initialisers and long argument lists were not needed yet.
+
+### 2026-11-24 · Trice programs are linked
+
+- **`tools/fs.py` links a `.tc` program** with the Trice files it
+  imports, found by following `import "....tc"` lines, each compiled
+  on its own (`detrytus link bin/wc.tc lib/io.tc`), instead of
+  compiling the program whole. The program comes first, since it
+  imports `lib/start.s`, which places it at `V_USER`. Assembly
+  programs are unchanged, and `bin_disk` uses the same function.
+- **Why**: a library compiled once, as programs written in other
+  languages (a Rust target is planned) will need, and the linker now
+  leaves out the library functions a program does not call, the cost
+  the 2026-11-23 ports noted.
+- **Size**: linked programs are 6 to 23% larger than whole ones (echo
+  189 trytes against 154, wc 1,005 against 901, grep 1,776 against
+  1,663), because calls between functions are finished by the linker
+  and so are not put in compressed bundles. Relaxation in the linker
+  would win that back; every program still fits its page.

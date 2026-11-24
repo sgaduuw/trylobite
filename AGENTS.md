@@ -114,7 +114,7 @@ pipe.
 - **A new program goes in `bin/`, on the disk**, unless another program
   spawns it by number (ping, pong, the servers and sh) or the kernel
   starts it (init). It may be assembly (`.s`) or Trice (`.tc`, detrytus
-  `docs/trice.md`), compiled with `detrytus tc`: a Trice program imports
+  `docs/trice.md`), built with `detrytus link`: a Trice program imports
   `include/layout.s` and then `lib/start.s`, which places it at `V_USER`
   and calls `main(argc, argv)` (`bin/echo.tc` is the example), and
   usually `lib/io.tc`, the helpers Trice programs share. A disk
@@ -130,8 +130,10 @@ pipe.
   on standard error as `NAME: what: why`, and exit 1 when anything
   failed (`bin/cp.s` is a full example, `bin/wc.tc` one in Trice). An
   assembly program repeats the few helpers it needs: there is no
-  library to link. A Trice program imports them from `lib/io.tc` and
-  is compiled whole with them. `bin_disk` in
+  library to link. A Trice program imports them from `lib/io.tc`, and
+  `tools/fs.py` links it with every `.tc` file it imports, each
+  compiled on its own, so it carries only the helpers it calls
+  (detrytus `docs/linker.md`). `bin_disk` in
   `tests/kernel.py` makes room for every program; a test that writes
   much asks for more blocks.
 - **Servers are found by name** (`kernel/names.s`): a server calls
