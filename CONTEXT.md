@@ -1263,3 +1263,12 @@ point to.
   1,663), because calls between functions are finished by the linker
   and so are not put in compressed bundles. Relaxation in the linker
   would win that back; every program still fits its page.
+
+### 2026-11-24 · lib/io.tc knows gp
+
+- **`lib/gp.s` holds `.gp USER_GP`**, imported by `lib/io.tc`. Compiled
+  on its own, the library did not see the `.gp` in `lib/start.s`, so
+  every global it touched took a two-word `la` (`auipc` + `addi`)
+  instead of one gp-relative instruction. spawnw sets gp for every
+  process, so library code linked into any program can use it. Linked
+  wc drops from 1,005 to 978 trytes.

@@ -3,6 +3,7 @@
 // then this file.
 
 import "../include/layout.s";
+import "gp.s";
 import "fs.s";
 
 extern int fs_server();
