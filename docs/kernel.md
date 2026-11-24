@@ -63,7 +63,10 @@ registers mapped past them, at `V_DEVICE`.
 ## System calls
 
 `sys` with the call number in `a0` and arguments from `a1` on (as many
-as the call takes); the result comes back in `a0`.
+as the call takes); the result comes back in `a0`. A call changes only
+`a0` to `a5` (some answer in `a1` and on as well); every other register
+is as it was, since the trap entry saves them all. Trice relies on this
+(detrytus `docs/trice.md` 8).
 
 | Number | Call | Result |
 |--------|------|--------|
