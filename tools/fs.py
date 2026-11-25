@@ -12,7 +12,8 @@ A file is text, each code point one tryte between 1 and 9,841, or a
 program: `put` given an image assembled by `detrytus asm` (a .dti file)
 stores it as a program file in /bin, where the shell finds it, and
 given a .s file assembles it first, or a Trice .tc file builds it
-first, linked with the .tc files it imports (with $DETRYTUS, or
+first, linked with the .tc files it imports, or a Rust .rs file builds
+it with cargo and `detrytus ll` (docs/rust.md) (with $DETRYTUS, or
 detrytus on the PATH). Paths start at the
 root, with or without a leading slash. The image is a detrytus disk
 file, two bytes per tryte, so `detrytus run --disk IMAGE` attaches it.
@@ -744,12 +745,79 @@ def libraries(source: Path) -> list[Path]:
     return found
 
 
+ROOT = Path(__file__).resolve().parent.parent
+RUST_TARGET = "riscv32imac-unknown-none-elf"
+_CARGO_TOML = """\
+[package]
+name = "{name}"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+path = "{source}"
+crate-type = ["staticlib"]
+
+[profile.release]
+opt-level = "s"
+panic = "abort"
+codegen-units = 1
+"""
+
+
+def rust_ir(source: Path) -> list[Path]:
+    """The LLVM IR rustc writes for a Rust program and for core, built
+    from source with it (detrytus docs/rust.md): the program's module
+    first. Builds share a target directory, so core is built once."""
+    cargo = shutil.which("cargo")
+    if cargo is None:
+        raise FsError("no cargo to build Rust with")
+    work = Path(tempfile.gettempdir()) / f"trylobite-rust-{os.getuid()}"
+    name = re.sub(r"\W", "_", source.stem).lower()
+    project = work / name
+    project.mkdir(parents=True, exist_ok=True)
+    (project / "Cargo.toml").write_text(
+        _CARGO_TOML.format(name=name, source=source.resolve())
+    )
+    target = work / "target"
+    deps = target / RUST_TARGET / "release" / "deps"
+    env = {
+        **os.environ,
+        "RUSTC_BOOTSTRAP": "1",
+        "RUSTFLAGS": "--emit=llvm-ir,link -Zunstable-options -Cpanic=immediate-abort",
+        "CARGO_TARGET_DIR": str(target),
+    }
+    target_args = ["--release", "--target", RUST_TARGET]
+    # Cleaned first, so its IR is written afresh: a build cargo thinks is
+    # up to date writes none.
+    clean = ["clean", "--quiet", "-p", name]
+    build = ["build", "--quiet", "-Zbuild-std=core"]
+    for command in (clean, build):
+        done = subprocess.run(
+            [cargo, *command, *target_args],
+            cwd=project,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        if done.returncode != 0:
+            raise FsError(done.stderr.strip())
+
+    def newest(pattern: str) -> list[Path]:
+        return sorted(deps.glob(pattern), key=lambda p: p.stat().st_mtime)
+
+    program = newest(f"{name}-*.ll")
+    core = newest("core-*.ll")
+    if not program or not core:
+        raise FsError(f"cargo left no LLVM IR for {source}")
+    return [program[-1], core[-1]]
+
+
 def assemble(source: Path) -> bytes:
     """The image detrytus makes of a program's source: `detrytus asm` for
-    assembly, and for Trice (.tc) `detrytus link` of the program with the
-    Trice files it imports, each compiled on its own (detrytus
-    docs/linker.md), so the program carries only the library functions it
-    calls."""
+    assembly, `detrytus ll` of rustc's IR for Rust (.rs), and for Trice
+    (.tc) `detrytus link` of the program with the Trice files it imports,
+    each compiled on its own (detrytus docs/linker.md), so the program
+    carries only the library functions it calls."""
     binary = os.environ.get("DETRYTUS") or shutil.which("detrytus")
     if binary is None:
         raise FsError("no detrytus command to assemble with: set DETRYTUS")
@@ -758,6 +826,11 @@ def assemble(source: Path) -> bytes:
         if source.suffix == ".tc":
             # The program first: it imports lib/start.s, which places it.
             command = ["link", str(source), *map(str, libraries(source))]
+        elif source.suffix == ".rs":
+            includes = [LAYOUT, ROOT / "lib" / "rust" / "start.s"]
+            command = ["ll", *map(str, rust_ir(source))]
+            for include in includes:
+                command += ["--include", str(include)]
         else:
             command = ["asm", str(source)]
         done = subprocess.run(
@@ -771,12 +844,12 @@ def assemble(source: Path) -> bytes:
 
 
 def put(fs: Filesystem, file: Path, path: str | None = None) -> str:
-    """Add a host file: an assembled image, or a .s or .tc file built here,
-    as a program, anything else as text. A program is named after its file
-    without .dti, .s or .tc and goes in /bin, made if missing; text keeps its
+    """Add a host file: an assembled image, or a .s, .tc or .rs file built
+    here, as a program, anything else as text. A program is named after its
+    file without .dti, .s, .tc or .rs and goes in /bin, made if missing; text keeps its
     file's name and goes in /. A path puts it there instead, or in that
     directory if one is there. Returns where it went."""
-    data = assemble(file) if file.suffix in (".s", ".tc") else file.read_bytes()
+    data = assemble(file) if file.suffix in (".s", ".tc", ".rs") else file.read_bytes()
     program = data[:4] == DTI_MAGIC
     name = file.stem if program else file.name
     if path is None:
