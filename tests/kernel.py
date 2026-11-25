@@ -383,9 +383,12 @@ def new_disk() -> Path:
 _BIN: dict[str, list[int]] = {}
 
 
-def bin_disk(blocks: int = 40, **texts: str) -> tuple[Path, int]:
+def bin_disk(
+    blocks: int = 40, programs: tuple[Path, ...] = (), **texts: str
+) -> tuple[Path, int]:
     """A new disk holding a filesystem with every program of bin/ in /bin,
-    as the shell expects, and these text files in /: (path, blocks)."""
+    as the shell expects, and these text files in /: (path, blocks). Each
+    source in programs is built and goes in /bin too."""
     from tools.fs import Filesystem, assemble, program_file
 
     if not _BIN:
@@ -399,6 +402,8 @@ def bin_disk(blocks: int = 40, **texts: str) -> tuple[Path, int]:
     made.mkdir("bin")
     for name, trytes in _BIN.items():
         made.write_trytes(f"bin/{name}", trytes)
+    for source in programs:
+        made.write_trytes(f"bin/{source.stem}", program_file(assemble(source)))
     for name, text in texts.items():
         made.write(name, text)
     path = new_disk()

@@ -402,8 +402,22 @@ start from the clock. There is no TIME-WAIT: a connection is forgotten
 once both ends have closed, so a late copy of the other end's FIN
 gets a reset.
 
-`bin/ping ADDRESS [COUNT]`, `bin/ifconfig [ADDRESS/PREFIX [GATEWAY]]`
-and `bin/nc` are its tools in the shell. `nc ADDRESS PORT` connects,
+Names come from a name server, whose address the IP server keeps for
+programs but never asks itself: `IP_NAMESERVER` with an address sets
+it (0 for none) and with `NS_KEEP` only reads it; either way the answer
+is the one it was, 10.0.0.3 at boot, where detrytus's `--net user`
+plays one. `lib/dns.tc` is the resolver, a stub as on Unix: `resolve`
+binds a free UDP port, sends one query for the name's A records with
+recursion desired, and waits 200,000 ticks for the answer, three times
+before `E_TIMEDOUT`; it gives up to as many addresses as asked for, or
+`E_NOENT` for a name that does not exist or has none. `host_address`
+takes a.b.c.d as it stands and resolves anything else, which is how
+the tools take names.
+
+`bin/ping HOST [COUNT]`, `bin/ifconfig [ADDRESS/PREFIX [GATEWAY]]`
+(`ifconfig nameserver ADDRESS` sets the name server), `bin/host NAME
+[SERVER]` and `bin/nc` are its tools in the shell; a HOST is an address
+or a name. `nc HOST PORT` connects,
 sends its standard input, shuts down writing and prints what comes
 back until the other end closes; `nc -l PORT` accepts one connection
 and prints what it sends; `-u` before either does the same with UDP
@@ -419,7 +433,8 @@ another address with `ifconfig`, and run both with `--live` so that
 their clocks keep to real time. `--net user` reaches the host's
 network through a gateway detrytus plays at 10.0.0.1, the default
 gateway, which translates to the host's sockets and stands for the
-host itself (detrytus `docs/platform.md`). The tests start the servers with
+host itself, and answers names at 10.0.0.3 from the host's resolver
+(detrytus `docs/platform.md`). The tests start the servers with
 `run(..., net=True, link="loop")`, or `ip=True` for both.
 
 ## Files

@@ -1,0 +1,54 @@
+// host NAME [SERVER]: say the IPv4 addresses of the host NAME, one line
+// each, as
+//
+//   example.org has address 93.184.215.14
+//
+// asking the IP server's name server (IP_NAMESERVER), or the one at
+// address SERVER, as Unix's host does. Exit with 0, 1 if the name has no
+// address or the lookup failed, and 2 for bad arguments or no IP server.
+
+import "../include/layout.s";
+import "../lib/start.s";
+import "../lib/io.tc";
+import "../lib/ip.tc";
+import "../lib/dns.tc";
+
+const int MOST = 8;              // addresses said at most
+
+tryte line[300];
+int at;
+
+void say(tryte *s) {
+    for (int i = 0; s[i] != 0; i++) line[at++] = s[i];
+}
+
+int main(int argc, tryte **argv) {
+    int server = 0;
+    if (argc == 3) server = address(argv[2]);
+    if (argc < 2 || argc > 3 || server == NOT_AN_ADDRESS) {
+        puts(STDERR, "usage: host NAME [SERVER]\n");
+        return 2;
+    }
+    int ip = ip_server();
+    if (ip < 0) {
+        puts(STDERR, "host: no IP server\n");
+        return 2;
+    }
+    int found[MOST];
+    int n;
+    if (argc == 3) n = resolve_at(ip, server, argv[1], found, MOST);
+    else n = resolve(ip, argv[1], found, MOST);
+    if (n < 0) {
+        unresolved(STDERR, "host", argv[1], n);
+        return 1;
+    }
+    for (int i = 0; i < n; i++) {
+        at = 0;
+        say(argv[1]);
+        say(" has address ");
+        at += put_address(found[i], line + at);
+        say("\n");
+        put(STDOUT, line, at);
+    }
+    return 0;
+}

@@ -1,13 +1,15 @@
-// ping ADDRESS [COUNT]: send COUNT echo requests (3 if not given) to the
-// IPv4 address a.b.c.d through the IP server, one after another, and say
-// for each how many ticks its reply took, or that none came in time, as
-// Unix's ping -c does. Exit with 0 if any reply came, 1 if none did or
-// the network failed, and 2 for bad arguments or no IP server.
+// ping HOST [COUNT]: send COUNT echo requests (3 if not given) to HOST,
+// an IPv4 address a.b.c.d or a name to resolve (lib/dns.tc), through the
+// IP server, one after another, and say for each how many ticks its reply
+// took, or that none came in time, as Unix's ping -c does. Exit with 0 if
+// any reply came, 1 if none did, the name has no address or the network
+// failed, and 2 for bad arguments or no IP server.
 
 import "../include/layout.s";
 import "../lib/start.s";
 import "../lib/io.tc";
 import "../lib/ip.tc";
+import "../lib/dns.tc";
 
 const int WAIT = 100000;         // ticks to wait for each reply
 const int NOT_A_NUMBER = -1;
@@ -41,18 +43,21 @@ void flush(int fd) {
 }
 
 int main(int argc, tryte **argv) {
-    int to = NOT_AN_ADDRESS;
     int count = 3;
-    if (argc >= 2) to = address(argv[1]);
     if (argc == 3) count = number(argv[2]);
-    if (argc < 2 || argc > 3 || to == NOT_AN_ADDRESS || count < 1) {
-        puts(STDERR, "usage: ping ADDRESS [COUNT]\n");
+    if (argc < 2 || argc > 3 || count < 1) {
+        puts(STDERR, "usage: ping HOST [COUNT]\n");
         return 2;
     }
     int ip = ip_server();
     if (ip < 0) {
         puts(STDERR, "ping: no IP server\n");
         return 2;
+    }
+    int to = host_address(ip, argv[1]);
+    if (to < 0) {
+        unresolved(STDERR, "ping", argv[1], to);
+        return 1;
     }
     int replies = 0;
     for (int seq = 1; seq <= count; seq++) {

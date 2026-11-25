@@ -118,8 +118,9 @@ pipe.
   `include/layout.s` and then `lib/start.s`, which places it at `V_USER`
   and calls `main(argc, argv)` (`bin/echo.tc` is the example), and
   usually `lib/io.tc`, the helpers Trice programs share (and
-  `lib/ip.tc` for the network ones). A library's assembly helpers must
-  be `.global` for a program to call them, and a library may not share
+  `lib/ip.tc` for the network ones, `lib/dns.tc` for names). A
+  library's assembly helpers must be `.global` for a program to call
+  them, and a library may not share
   its stem with the assembly it imports (`ip.tc` beside `ip.s` makes
   the linker include itself). A disk
   program is assembled on its own, including

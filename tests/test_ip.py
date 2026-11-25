@@ -19,10 +19,11 @@ def run(*args, link="loop", **kwargs):
 
 
 def ip_call(op: str, *words: int | str) -> str:
-    regs = "".join(
-        f"\n        {'la' if str(w).isidentifier() else 'li'}    a{3 + i}, {w}"
-        for i, w in enumerate(words)
-    )
+    def load(w: int | str) -> str:
+        # A label's address, or a number or constant (in capitals) itself.
+        return "la" if str(w).isidentifier() and not str(w).isupper() else "li"
+
+    regs = "".join(f"\n        {load(w)}    a{3 + i}, {w}" for i, w in enumerate(words))
     return f"""
         CALL_IP
         li    a2, {op}{regs}
@@ -124,14 +125,20 @@ def test_ping_in_the_shell_says_each_reply():
         r"no reply from 10\.0\.0\.9: seq 1\n"
         r"sh: exit 1\n"
         r"\$ ping 10\.0\.0\n"
-        r"usage: ping ADDRESS \[COUNT\]\n"
-        r"sh: exit 2\n"
+        r"ping: 10\.0\.0: not a host name\n"
+        r"sh: exit 1\n"
         r"\$ ping 10\.0\.0\.2 x\n"
-        r"usage: ping ADDRESS \[COUNT\]\n"
+        r"usage: ping HOST \[COUNT\]\n"
         r"sh: exit 2\n"
         r"\$ \n",
         out,
     ), out
+
+
+IFCONFIG_USAGE = (
+    r"usage: ifconfig \[ADDRESS/PREFIX \[GATEWAY\]\], "
+    r"or ifconfig nameserver ADDRESS\n"
+)
 
 
 def test_ifconfig_says_and_sets_the_address():
@@ -139,7 +146,9 @@ def test_ifconfig_says_and_sets_the_address():
         assemble_file(ROOT / "shell.s"),
         input="ifconfig\nifconfig 192.168.1.7/16\nifconfig\n"
         "ifconfig 192.168.1.7/16 0.0.0.0\nifconfig\nping 192.168.1.7 1\n"
-        "ifconfig 10.0.0.3/33\nifconfig 0.0.0.0/8\n",
+        "ifconfig 10.0.0.3/33\nifconfig 0.0.0.0/8\n"
+        "ifconfig nameserver 0.0.0.0\nifconfig\nifconfig nameserver 9.9.9.9\n"
+        "ifconfig\nifconfig nameserver x\n",
         disk=bin_disk(),
         link="loop",
         max_steps=10_000_000,
@@ -147,15 +156,20 @@ def test_ifconfig_says_and_sets_the_address():
     assert result.exit_code == 0, result.console
     out = re.sub(r"trylobite: [^\n]*\n", "", result.after_boot)
     assert re.fullmatch(
-        r"\$ ifconfig\ninet 10\.0\.0\.2/24 gateway 10\.0\.0\.1\n"
+        r"\$ ifconfig\ninet 10\.0\.0\.2/24 gateway 10\.0\.0\.1 nameserver 10\.0\.0\.3\n"
         r"\$ ifconfig 192\.168\.1\.7/16\n"
-        r"\$ ifconfig\ninet 192\.168\.1\.7/16 gateway 10\.0\.0\.1\n"
+        r"\$ ifconfig\n"
+        r"inet 192\.168\.1\.7/16 gateway 10\.0\.0\.1 nameserver 10\.0\.0\.3\n"
         r"\$ ifconfig 192\.168\.1\.7/16 0\.0\.0\.0\n"
-        r"\$ ifconfig\ninet 192\.168\.1\.7/16 gateway none\n"
+        r"\$ ifconfig\ninet 192\.168\.1\.7/16 gateway none nameserver 10\.0\.0\.3\n"
         r"\$ ping 192\.168\.1\.7 1\nreply from 192\.168\.1\.7: seq 1, \d+ ticks\n"
-        r"\$ ifconfig 10\.0\.0\.3/33\nusage: ifconfig \[ADDRESS/PREFIX \[GATEWAY\]\]\n"
-        r"sh: exit 2\n"
+        r"\$ ifconfig 10\.0\.0\.3/33\n" + IFCONFIG_USAGE + r"sh: exit 2\n"
         r"\$ ifconfig 0\.0\.0\.0/8\nifconfig: the IP server refused\nsh: exit 1\n"
+        r"\$ ifconfig nameserver 0\.0\.0\.0\n"
+        r"\$ ifconfig\ninet 192\.168\.1\.7/16 gateway none nameserver none\n"
+        r"\$ ifconfig nameserver 9\.9\.9\.9\n"
+        r"\$ ifconfig\ninet 192\.168\.1\.7/16 gateway none nameserver 9\.9\.9\.9\n"
+        r"\$ ifconfig nameserver x\n" + IFCONFIG_USAGE + r"sh: exit 2\n"
         r"\$ \n",
         out,
     ), out
@@ -336,7 +350,7 @@ def test_nc_sends_to_the_echo_service_and_prints_what_comes_back():
     )
     assert result.exit_code == 0, result.console
     out = re.sub(r"trylobite: [^\n]*\n", "", result.after_boot)
-    usage = "usage: nc [-u] ADDRESS PORT, or nc [-u] -l PORT\nsh: exit 2\n"
+    usage = "usage: nc [-u] HOST PORT, or nc [-u] -l PORT\nsh: exit 2\n"
     assert out == (
         "$ echo hello udp | nc -u 10.0.0.2 7\nhello udp\n"
         f"$ nc -u 10.0.0.2\n{usage}"
@@ -594,6 +608,73 @@ def test_nc_talks_tcp_to_the_echo_service():
     assert "\n".join(lines[6:]) == (
         "$ echo x | nc 10.0.0.2 9000\nnc: connection refused\nsh: exit 1\n"
         "$ echo x | nc 10.0.0.9 7\nnc: no answer\nsh: exit 1\n"
-        "$ nc 10.0.0.2\nusage: nc [-u] ADDRESS PORT, or nc [-u] -l PORT\n"
+        "$ nc 10.0.0.2\nusage: nc [-u] HOST PORT, or nc [-u] -l PORT\n"
         "sh: exit 2\n$ \n"
     ), out
+
+
+# --- names -------------------------------------------------------------------
+
+DNSD = ROOT / "tests" / "dnsd.tc"  # a name server with a fixed table
+
+
+def test_names_resolve_through_the_name_server():
+    # dnsd serves on the machine's own address while the program after it
+    # in the pipe resolves; dnsd ARGS feeds that program ARGS.
+    result = run_image(
+        assemble_file(ROOT / "shell.s"),
+        input="dnsd | host example.test 10.0.0.2\n"
+        "dnsd | host nx.test 10.0.0.2\n"
+        "host ours.test\n"
+        "ifconfig nameserver 10.0.0.2\n"
+        "dnsd | host ours.test\n"
+        "dnsd | ping ours.test 1\n"
+        "dnsd over tcp | nc ours.test 7\n"
+        "host ours.test\n"
+        "host bad..name\nhost\n",
+        disk=bin_disk(programs=(DNSD,)),
+        link="loop",
+        max_steps=60_000_000,
+    )
+    assert result.exit_code == 0, result.console
+    out = re.sub(r"trylobite: [^\n]*\n", "", result.after_boot)
+    assert re.fullmatch(
+        r"\$ dnsd \| host example\.test 10\.0\.0\.2\n"
+        r"example\.test has address 192\.0\.2\.7\n"
+        r"example\.test has address 192\.0\.2\.8\n"
+        r"\$ dnsd \| host nx\.test 10\.0\.0\.2\n"
+        r"host: nx\.test: no such host\nsh: exit 1\n"
+        # Nothing answers for 10.0.0.3, the name server until set, on a loop.
+        r"\$ host ours\.test\n"
+        r"host: ours\.test: the name server did not answer\nsh: exit 1\n"
+        r"\$ ifconfig nameserver 10\.0\.0\.2\n"
+        r"\$ dnsd \| host ours\.test\n"
+        r"ours\.test has address 10\.0\.0\.2\n"
+        r"\$ dnsd \| ping ours\.test 1\n"
+        r"reply from ours\.test: seq 1, \d+ ticks\n"
+        r"\$ dnsd over tcp \| nc ours\.test 7\n"
+        r"over tcp\n"
+        # With no name server running, the questions go unanswered.
+        r"\$ host ours\.test\n"
+        r"host: ours\.test: the name server did not answer\nsh: exit 1\n"
+        r"\$ host bad\.\.name\nhost: bad\.\.name: not a host name\nsh: exit 1\n"
+        r"\$ host\nusage: host NAME \[SERVER\]\nsh: exit 2\n"
+        r"\$ \n",
+        out,
+    ), out
+
+
+def test_the_name_server_setting_is_kept_and_checked():
+    result = run(
+        report(
+            ip_call("IP_NAMESERVER", "NS_KEEP"),
+            ip_call("IP_NAMESERVER", 0),
+            ip_call("IP_NAMESERVER", 5),
+            ip_call("IP_NAMESERVER", "NS_KEEP"),
+            ip_call("IP_NAMESERVER", 1 << 32),
+            ip_call("IP_NAMESERVER", "NS_KEEP"),
+        )
+    )
+    assert said(result) == [(10 << 24) + 3, (10 << 24) + 3, 0, 5, -10, 5], (
+        result.console
+    )

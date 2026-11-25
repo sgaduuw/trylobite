@@ -1,12 +1,12 @@
-// nc ADDRESS PORT: open a TCP connection to port PORT at ADDRESS
-// (a.b.c.d), send it everything standard input gives, then print what
-// comes back until the other end closes. nc -l PORT: wait for one
-// connection to port PORT and print what it sends until it closes. One
-// direction at a time, as there is no waiting on two descriptors at
+// nc HOST PORT: open a TCP connection to port PORT at HOST (an address
+// a.b.c.d, or a name to resolve), send it everything standard input
+// gives, then print what comes back until the other end closes. nc -l
+// PORT: wait for one connection to port PORT and print what it sends
+// until it closes. One direction at a time, as there is no waiting on two descriptors at
 // once: a peer that answers before it has read everything may wait for
 // nc as nc waits for it.
 //
-// nc -u ADDRESS PORT: send what standard input gives, each read as one
+// nc -u HOST PORT: send what standard input gives, each read as one
 // UDP datagram, and after each print what comes back within a moment.
 // nc -u -l PORT: print what each datagram to port PORT carries, until
 // killed (Ctrl-C) or output fails.
@@ -18,6 +18,7 @@ import "../include/layout.s";
 import "../lib/start.s";
 import "../lib/io.tc";
 import "../lib/ip.tc";
+import "../lib/dns.tc";
 
 const int WAIT = 200000;         // ticks to wait for what comes back
 const int DGRAM = 1478;          // the address and port, and 1,472 octets
@@ -45,7 +46,7 @@ int port_of(tryte *s) {
 }
 
 int usage() {
-    puts(STDERR, "usage: nc [-u] ADDRESS PORT, or nc [-u] -l PORT\n");
+    puts(STDERR, "usage: nc [-u] HOST PORT, or nc [-u] -l PORT\n");
     return 2;
 }
 
@@ -140,13 +141,18 @@ int main(int argc, tryte **argv) {
     if (udp) a++;
     if (argc != a + 2) return usage();
     bool listening = same(argv[a], "-l");
-    int to = listening ? 0 : address(argv[a]);
     int port = port_of(argv[a + 1]);
-    if (to == NOT_AN_ADDRESS || port == NOT_AN_ADDRESS) return usage();
+    if (port == NOT_AN_ADDRESS) return usage();
     int ip = ip_server();
     if (ip < 0) {
         puts(STDERR, "nc: no IP server\n");
         return 2;
+    }
+    int to = 0;
+    if (!listening) to = host_address(ip, argv[a]);
+    if (to < 0) {
+        unresolved(STDERR, "nc", argv[a], to);
+        return 1;
     }
     if (udp && listening) return listen(ip, port);
     if (udp) return talk(ip, to, port);

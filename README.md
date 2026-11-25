@@ -271,7 +271,8 @@ own address.
 `--net user` puts the machine behind a gateway that detrytus plays at
 10.0.0.1, the machine's default gateway, translating its traffic to
 the host's own sockets: no root, no TAP device. 10.0.0.1 is also the
-host, so a server on the host's 127.0.0.1 answers there:
+host, so a server on the host's 127.0.0.1 answers there, and a name
+server at 10.0.0.3 answers names from the host's resolver:
 
 ```bash
 detrytus run shell.s --ram-pages 81 --disk disk.img --net user
@@ -284,20 +285,22 @@ $ echo hello host | nc 10.0.0.1 9009
 HELLO HOST
 $ cat get | nc 10.0.0.1 8080 | head -n 1
 HTTP/1.0 200 OK
+$ host localhost
+localhost has address 127.0.0.1
 ```
 
 (Here the host runs a TCP server that answers in capitals on port
 9009 and a web server on 8080, and `get` is a file holding an HTTP
 request.) Other addresses are reached the same way; a ping past the
 gateway needs a host that allows unprivileged ping sockets, or root.
-There is no DNS yet, so they are given as numbers.
+`ping`, `nc` and `host` take a name wherever they take an address.
 
 The programs on the disk are `hello`, `fail` (exits with 3), `spin`
 (loops for ever, for Ctrl-C), `echo`, `upper` (standard input to output
 in capitals) and `wc` (lines, words and code points), system tools
 as on Unix: `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`,
 `sleep` and `df` (docs/kernel.md, System tools), and `ping`,
-`ifconfig` and `nc` for the network. `rhello`, `recho`,
+`ifconfig`, `host` and `nc` for the network. `rhello`, `recho`,
 `rfact` (a table of factorials up to 34!, with `println!` and 128-bit
 integers) and `rmandel` (the Mandelbrot set in characters, in `f32`
 floating point on detrytus's binary coprocessor) are written in Rust, translated from rustc's LLVM IR by `detrytus ll`
@@ -387,7 +390,7 @@ emulator, so trylobite has never run on hardware.
 | `kernel/data.s` | the process table, buffers, messages |
 | `kernel/pagetables.s` | the boot address space and the kernel's shared leaf table |
 | `user/` | programs built into the kernel image: `demo-init`, `ping` and `pong` for the demo; `init`, `sh`, `pingpong` and the servers `fsd`, `diskd`, `consd`, `piped`, `netd` and `ipd` for the shell |
-| `bin/` | programs for the disk, each assembled on its own: `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `cp`, `mv`, `touch`, the system tools `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`, and `ping`, `ifconfig` and `nc` for the network; and in Rust, `rhello`, `recho`, `rfact` and `rmandel` |
+| `bin/` | programs for the disk, each assembled on its own: `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `cp`, `mv`, `touch`, the system tools `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`, and `ping`, `ifconfig`, `host` and `nc` for the network; and in Rust, `rhello`, `recho`, `rfact` and `rmandel` |
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
 | `shell.s` | an 81-page machine starting the shell and its servers |
 | `docs/` | the kernel and the filesystem, described |

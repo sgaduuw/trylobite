@@ -1493,3 +1493,25 @@ The IP server carries TCP, and `bin/nc` uses it by default.
   service whole; that found the two retransmission bugs fixed before
   it went in (a SYN+ACK sent again after the handshake was
   answered with a SYN, and probes counting as tries).
+
+### 2026-11-25 · Names: a resolver and `bin/host`
+
+Eelco wanted name resolution. detrytus's `--net user` now plays a
+name server at 10.0.0.3 that answers from the host's resolver.
+
+- **The name server is a setting of the IP server** (`IP_NAMESERVER`,
+  protocol 4), not a file such as `/etc/resolv.conf`: there is no
+  `/etc` yet, and `ifconfig` already shows and sets what the network
+  is. The IP server keeps the address and asks nothing itself.
+- **The resolver is a library, `lib/dns.tc`, linked into each program,**
+  as Unix's stub resolver is in libc: no server process, no cache. It
+  asks for A records only, over UDP, three tries of 200,000 ticks, and
+  reads any answer layout (compressed or written-out names, CNAMEs
+  before the addresses).
+- **Digits and dots alone are never a name** (`ping 10.0.0` is
+  `E_INVAL`, "not a host name"), since no top-level domain is numeric;
+  that keeps a mistyped address from becoming a query.
+- **The test name server (`tests/dnsd.tc`) runs in the machine:** on a
+  loopback link it serves on the machine's own address while the
+  program after it in a pipe resolves (`dnsd | host example.test`).
+  `bin_disk(programs=...)` puts test-only programs on the disk.
