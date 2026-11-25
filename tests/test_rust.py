@@ -30,3 +30,18 @@ def test_echo_in_rust_says_its_arguments(shell):
         "$ recho  one   two three \none two three\n$ recho\n\n"
         "$ recho a b | wc\n1 2 4\n$ \n"
     )
+
+
+def test_factorials_in_rust_with_println(shell):
+    out = said(shell, "rfact 5\nrfact\nrfact 21\n")
+    assert out.startswith(
+        "$ rfact 5\n"
+        " 1! =                   1\n"
+        " 2! =                   2\n"
+        " 3! =                   6\n"
+        " 4! =                  24\n"
+        " 5! =                 120\n"
+        "$ rfact\n"
+    )
+    assert "20! = 2432902008176640000\n" in out
+    assert out.endswith("$ rfact 21\nusage: rfact [N], N from 1 to 20\nsh: exit 1\n$ \n")

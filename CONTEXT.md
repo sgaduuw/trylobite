@@ -1303,3 +1303,13 @@ detrytus can now translate rustc's LLVM IR (`detrytus ll`, detrytus
 - Sizes: rhello 370 trytes with its runtime, recho 671 against 147 for
   the Trice echo; the cost is bytes kept faithfully as four trytes per
   `u32` and a wrap after arithmetic.
+
+### 2026-11-25 · println! in Rust programs
+
+detrytus can now translate `core::fmt` (64-bit integers, long calls,
+binary alignment: detrytus docs/rust.md), so `lib/rust/sys.rs` gives
+Rust programs `print!`, `println!` and `eprintln!`, writing through
+`core::fmt::Write` on a descriptor (`sys::Out`). `bin/rfact.rs` shows
+it with a table of factorials up to 20!, the largest that fits a u64.
+It is 5 715 trytes, against 668 for recho: formatting is the cost, and
+making Rust programs smaller is the next step.
