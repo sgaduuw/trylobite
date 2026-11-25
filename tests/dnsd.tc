@@ -1,0 +1,109 @@
+// A name server for the tests, on UDP port 53, which answers from a
+// fixed table rather than a real zone: a name starting with "nx" does
+// not exist, example.test has a CNAME, host.test, and that two
+// addresses, 192.0.2.7 and 192.0.2.8, given with names written out in
+// full rather than compressed, and every other name is 10.0.0.2, the
+// machine's own address. dnsd ARGS... prints its arguments first, as
+// echo does, so that a pipe can feed them to a program that resolves a
+// name while dnsd serves. It ends once no query has come for a while.
+
+import "../include/layout.s";
+import "../lib/start.s";
+import "../lib/io.tc";
+import "../lib/ip.tc";
+
+const int IDLE = 700000;         // ticks without a query before it ends
+const int SIZE = 600;
+
+tryte m[SIZE];
+int at;                          // where the answer is written to
+
+void octets(int n, int value) {
+    for (int shift = n - 1; shift >= 0; shift--) {
+        int v = value;
+        for (int k = 0; k < shift; k++) v = v / 256;
+        m[at++] = v % 256;
+    }
+}
+
+// host.test, in full: 4 h o s t 4 t e s t 0
+void host_test() {
+    m[at++] = 4;
+    m[at++] = 'h';
+    m[at++] = 'o';
+    m[at++] = 's';
+    m[at++] = 't';
+    m[at++] = 4;
+    m[at++] = 't';
+    m[at++] = 'e';
+    m[at++] = 's';
+    m[at++] = 't';
+    m[at++] = 0;
+}
+
+void record(int type, int len) {
+    octets(2, type);
+    octets(2, 1);                // IN
+    octets(4, 60);               // the time to live
+    octets(2, len);
+}
+
+bool named(tryte *q, tryte *name) {
+    // q: the question's first label, then the rest; name as label text
+    int i = 0;
+    int j = 0;
+    while (q[i] != 0) {
+        int len = q[i++];
+        if (j > 0) {
+            if (name[j] != '.') return false;
+            j++;
+        }
+        for (int k = 0; k < len; k++) {
+            if (name[j++] != q[i++]) return false;
+        }
+    }
+    return name[j] == 0;
+}
+
+int main(int argc, tryte **argv) {
+    int ip = ip_server();
+    if (ip < 0 || sys(SYS_CALL, ip, IP_BIND, 53) < 0) return 2;
+    for (int a = 1; a < argc; a++) {
+        if (a > 1) puts(STDOUT, " ");
+        puts(STDOUT, argv[a]);
+    }
+    if (argc > 1) puts(STDOUT, "\n");
+    close(STDOUT);
+    while (true) {
+        int got = sys(SYS_CALL, ip, IP_RECEIVE, m, SIZE, IDLE);
+        if (got < 0) return 0;
+        tryte *q = m + 6 + 12;   // the question
+        int end = 0;
+        while (q[end] != 0) end += q[end] + 1;
+        at = 6 + 12 + end + 1 + 4;
+        m[6 + 2] = 129;          // a response, recursion desired,
+        m[6 + 3] = 128;          // recursion available
+        if (q[0] >= 2 && q[1] == 'n' && q[2] == 'x') {
+            m[6 + 3] = 128 + 3;  // no such name
+            m[6 + 7] = 0;
+        } else if (named(q, "example.test")) {
+            m[6 + 7] = 3;
+            octets(2, 49152 + 12);   // example.test, a pointer to it,
+            record(5, 11);           // is host.test
+            host_test();
+            host_test();
+            record(1, 4);
+            octets(4, 3221225991);   // 192.0.2.7
+            host_test();
+            record(1, 4);
+            octets(4, 3221225992);   // 192.0.2.8
+        } else {
+            m[6 + 7] = 1;
+            octets(2, 49152 + 12);
+            record(1, 4);
+            octets(4, 167772162);    // 10.0.0.2
+        }
+        sys(SYS_CALL, ip, IP_SEND, m, at);
+    }
+    return 0;
+}

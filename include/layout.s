@@ -564,7 +564,7 @@
 # it has the IP_ operation in a2 and the arguments in a3 to a5; the
 # reply's first word is the result. An address is a word: a.b.c.d is
 # a * 2^24 + b * 2^16 + c * 2^8 + d.
-        .equ  IP_PROTOCOL, 3
+        .equ  IP_PROTOCOL, 4
         .equ  IP_PING,    0               # ping(address, seq, wait): send an ICMP
                                           # echo request numbered seq (0 to
                                           # 65535) and wait up to wait rounds
@@ -609,6 +609,13 @@
                                           # descriptor, a1 = the other end's address,
                                           # a2 its port; E_INVAL (not listening),
                                           # E_MFILE
+        .equ  IP_NAMESERVER, 9            # nameserver(address): the address of
+                                          # the name server that resolvers ask,
+                                          # 10.0.0.3 until set (0 for none), as
+                                          # it was; with address 0 or more, set
+                                          # it to that, and with NS_KEEP leave
+                                          # it: E_INVAL (2^32 or more)
+        .equ  NS_KEEP,   -1               # nameserver: only say what it is
 # A connection is a descriptor: IO_READ waits for data and gives 0 once
 # the other end has closed; IO_WRITE waits until all n octets are queued
 # to send. Either is E_RESET once the other end reset the connection, or

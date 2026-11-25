@@ -1,22 +1,30 @@
 // ifconfig [ADDRESS/PREFIX [GATEWAY]]: say the IP server's address, the
-// length of its network prefix and its gateway, as
+// length of its network prefix, its gateway and the name server that
+// resolvers ask, as
 //
-//   inet 10.0.0.2/24 gateway 10.0.0.1
+//   inet 10.0.0.2/24 gateway 10.0.0.1 nameserver 10.0.0.3
 //
-// or set them: the gateway stays as it was if none is given, and 0.0.0.0
-// means none. Exit with 0, 1 if the server refuses, and 2 for bad
-// arguments or no IP server.
+// or set the first three: the gateway stays as it was if none is given,
+// and 0.0.0.0 means none. ifconfig nameserver ADDRESS sets the name
+// server, 0.0.0.0 for none. Exit with 0, 1 if the server refuses, and 2
+// for bad arguments or no IP server.
 
 import "../include/layout.s";
 import "../lib/start.s";
 import "../lib/io.tc";
 import "../lib/ip.tc";
 
-tryte line[60];
+tryte line[80];
 int at;
 
 void say(tryte *s) {
     for (int i = 0; s[i] != 0; i++) line[at++] = s[i];
+}
+
+bool same(tryte *a, tryte *b) {
+    int i = 0;
+    while (a[i] == b[i] && a[i] != 0) i++;
+    return a[i] == b[i];
 }
 
 // The prefix length s writes, 0 to 32, or NOT_AN_ADDRESS.
@@ -32,7 +40,8 @@ int prefix(tryte *s) {
 }
 
 int usage() {
-    puts(STDERR, "usage: ifconfig [ADDRESS/PREFIX [GATEWAY]]\n");
+    puts(STDERR, "usage: ifconfig [ADDRESS/PREFIX [GATEWAY]], ");
+    puts(STDERR, "or ifconfig nameserver ADDRESS\n");
     return 2;
 }
 
@@ -42,6 +51,15 @@ int main(int argc, tryte **argv) {
     if (ip < 0) {
         puts(STDERR, "ifconfig: no IP server\n");
         return 2;
+    }
+    if (argc == 3 && same(argv[1], "nameserver")) {
+        int server = address(argv[2]);
+        if (server == NOT_AN_ADDRESS) return usage();
+        if (sys(SYS_CALL, ip, IP_NAMESERVER, server) < 0) {
+            puts(STDERR, "ifconfig: the IP server refused\n");
+            return 1;
+        }
+        return 0;
     }
     int now[3];                  // address, prefix length, gateway
     if (ip_query(ip, now) < 0) {
@@ -56,6 +74,10 @@ int main(int argc, tryte **argv) {
         say(" gateway ");
         if (now[2] == 0) say("none");
         else at += put_address(now[2], line + at);
+        say(" nameserver ");
+        int server = sys(SYS_CALL, ip, IP_NAMESERVER, NS_KEEP);
+        if (server <= 0) say("none");
+        else at += put_address(server, line + at);
         say("\n");
         put(STDOUT, line, at);
         return 0;

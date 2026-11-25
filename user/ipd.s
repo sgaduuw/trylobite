@@ -7,7 +7,8 @@
 # for its own address and keeps what ARP tells it in a small cache, it
 # answers pings, and IP_PING sends one for a client (include/layout.s).
 # Its address is 10.0.0.2/24 with gateway 10.0.0.1 until IP_CONFIG says
-# otherwise.
+# otherwise. It keeps the name server's address for resolvers
+# (IP_NAMESERVER, 10.0.0.3 until set) but asks it nothing itself.
 #
 # UDP: a process binds one port (IP_BIND), sends from it (IP_SEND) and
 # receives what comes to it (IP_RECEIVE). A datagram for a process with
@@ -50,6 +51,7 @@
         .equ  IPD_LIMIT, 4294967296    # 2^32: addresses are below it
         .equ  IPD_ADDR, 167772162      # 10.0.0.2
         .equ  IPD_GATEWAY, 167772161   # 10.0.0.1
+        .equ  IPD_NAMESERVER, 167772163 # 10.0.0.3
         .equ  IPD_PREFIX, 24
         .equ  IPD_TTL, 64
         .equ  IPD_DATA, 56             # octets of data a ping carries
@@ -266,6 +268,8 @@ ip_wait:
         beq   a1, t0, ip_listen
         li    t0, IP_ACCEPT
         beq   a1, t0, ip_accept
+        li    t0, IP_NAMESERVER
+        beq   a1, t0, ip_nameserver
         li    t0, IO_READ
         beq   a1, t0, ip_tread
         li    t0, IO_WRITE
@@ -295,6 +299,15 @@ ip_answer:
         mv    a2, a5
         sys
         j     ip_wait
+
+# ip_nameserver: nameserver(address a2) for process s0.
+ip_nameserver:
+        li    t0, IPD_LIMIT
+        bge   a2, t0, ip_answer        # E_INVAL
+        lw    a5, ip_dns               # the answer is the one it was,
+        bltz  a2, ip_answer            # and NS_KEEP keeps it
+        sw    a2, ip_dns
+        j     ip_answer
 
 ip_address:
         li    a0, SYS_REPLY
@@ -2741,6 +2754,7 @@ ip_maclo:   .word 0
 ip_addr:    .word IPD_ADDR             # ours,
 ip_prefix:  .word IPD_PREFIX           # how much of it names the network,
 ip_gateway: .word IPD_GATEWAY          # and the way off it (0 for none)
+ip_dns:     .word IPD_NAMESERVER       # the name server, for resolvers
 ip_ident:   .word 0                    # the next packet's identification
 ip_pinger:  .word IPD_NONE             # whose ping is under way
 ip_pstate:  .word 0                    # IPD_ARP or IPD_ECHO while one is

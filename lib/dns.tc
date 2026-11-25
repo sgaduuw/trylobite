@@ -1,0 +1,174 @@
+// Names to addresses: a stub resolver, which asks the name server the IP
+// server keeps (IP_NAMESERVER) for a name's IPv4 addresses, over UDP, as
+// Unix's resolver asks the one /etc/resolv.conf names. A program imports
+// include/layout.s, lib/start.s, lib/io.tc and lib/ip.tc first, then
+// this file.
+//
+// A query asks for one name's A records, recursion desired; the answer
+// may hold other records too, and only A records of class IN count.
+// Asking takes the caller's UDP port (IP_BIND), in place of any it had.
+
+import "../include/layout.s";
+import "ip.tc";
+
+const int DNS_PORT = 53;
+const int DNS_WAIT = 200000;     // ticks to wait for each answer,
+const int DNS_TRIES = 3;         // and how many times to ask
+const int DNS_SIZE = 518;        // the address and port, then the 512
+                                 // octets DNS over UDP carries
+const int DNS_NOT_OURS = -1;     // a datagram that answers something else
+
+tryte dns_ask[DNS_SIZE];         // the query, kept for asking again,
+tryte dns_got[DNS_SIZE];         // and what came back
+
+int dns_octets(tryte *m, int i) {
+    return m[i] * 256 + m[i + 1];
+}
+
+// Where the name at m[i] ends, in a message of n octets; E_IO if it
+// runs past the end. A name is labels up to an empty one, or up to a
+// pointer to the rest of it elsewhere.
+int dns_skip(tryte *m, int i, int n) {
+    while (i < n) {
+        int len = m[i];
+        if (len == 0) return i + 1;
+        if (len >= 192) return i + 2;
+        if (len >= 64) return E_IO;
+        i = i + 1 + len;
+    }
+    return E_IO;
+}
+
+// What the datagram in dns_got, got octets, says to the query in
+// dns_ask: the number of addresses it put in addrs (at most max), or
+// E_NOENT, E_IO; DNS_NOT_OURS if it is not the answer to it.
+int dns_answer(int got, int *addrs, int max) {
+    for (int i = 0; i < 6; i++) {
+        if (dns_got[i] != dns_ask[i]) return DNS_NOT_OURS;
+    }
+    tryte *m = dns_got + 6;
+    int n = got - 6;
+    if (n < 12 || m[0] != dns_ask[6] || m[1] != dns_ask[7] || m[2] < 128) {
+        return DNS_NOT_OURS;
+    }
+    int rcode = m[3] % 16;
+    if (rcode == 3) return E_NOENT;        // no such name
+    if (rcode != 0) return E_IO;           // the server failed
+    int i = 12;
+    for (int q = dns_octets(m, 4); q > 0; q--) {
+        i = dns_skip(m, i, n);
+        if (i < 0) return E_IO;
+        i += 4;                            // its type and class
+    }
+    int found = 0;
+    for (int a = dns_octets(m, 6); a > 0; a--) {
+        i = dns_skip(m, i, n);
+        if (i < 0 || i + 10 > n) return E_IO;
+        int type = dns_octets(m, i);
+        int cls = dns_octets(m, i + 2);
+        int len = dns_octets(m, i + 8);   // after the time to live
+        i += 10;
+        if (i + len > n) return E_IO;
+        if (type == 1 && cls == 1 && len == 4 && found < max) {
+            addrs[found++] =
+                ((m[i] * 256 + m[i + 1]) * 256 + m[i + 2]) * 256 + m[i + 3];
+        }
+        i += len;
+    }
+    if (found == 0) return E_NOENT;        // the name has no address
+    return found;
+}
+
+// Ask the name server at address server for name's IPv4 addresses, and
+// put up to max of them in addrs: how many (at least 1); E_NOENT if the
+// name has none, E_TIMEDOUT if the server never answered, E_INVAL for a
+// name DNS cannot carry, E_IO for a server that failed or an answer that
+// makes no sense, or what IP_BIND or IP_SEND failed with.
+int resolve_at(int ip, int server, tryte *name, int *addrs, int max) {
+    tryte *q = dns_ask + 6;
+    int n = 12;
+    int i = 0;
+    if (name[0] == 0) return E_INVAL;
+    while (name[i] != 0) {                 // each label, its length first
+        int len = 0;
+        while (name[i + len] != 0 && name[i + len] != '.') len++;
+        if (len == 0 || len > 63 || n + len > 12 + 253) return E_INVAL;
+        q[n++] = len;
+        for (int k = 0; k < len; k++) q[n++] = name[i + k];
+        i += len;
+        if (name[i] == '.') i++;           // a dot at the end is allowed
+    }
+    q[n++] = 0;                            // the root,
+    q[n++] = 0;                            // type A,
+    q[n++] = 1;
+    q[n++] = 0;                            // class IN
+    q[n++] = 1;
+    int port = sys(SYS_CALL, ip, IP_BIND, 0);
+    if (port < 0) return port;
+    int shift = 16777216;
+    for (int k = 0; k < 4; k++) {
+        dns_ask[k] = server / shift % 256;
+        shift = shift / 256;
+    }
+    dns_ask[4] = 0;
+    dns_ask[5] = DNS_PORT;
+    q[0] = port / 256;                     // the query's number: the port
+    q[1] = port % 256;                     // is as good as any
+    q[2] = 1;                              // a standard query, recursion
+    q[3] = 0;                              // desired,
+    q[4] = 0;                              // one question
+    q[5] = 1;
+    for (int k = 6; k < 12; k++) q[k] = 0;
+    for (int attempt = 0; attempt < DNS_TRIES; attempt++) {
+        int sent = sys(SYS_CALL, ip, IP_SEND, dns_ask, n + 6);
+        if (sent < 0) return sent;
+        int got = 0;
+        while (got != E_TIMEDOUT) {
+            got = sys(SYS_CALL, ip, IP_RECEIVE, dns_got, DNS_SIZE, DNS_WAIT);
+            if (got >= 0) {
+                int found = dns_answer(got, addrs, max);
+                if (found != DNS_NOT_OURS) return found;
+            } else if (got != E_TIMEDOUT && got != E_NOROOM) {
+                return got;
+            }
+        }
+    }
+    return E_TIMEDOUT;
+}
+
+// The same, from the IP server's name server; E_NOROUTE if it has none.
+int resolve(int ip, tryte *name, int *addrs, int max) {
+    int server = sys(SYS_CALL, ip, IP_NAMESERVER, NS_KEEP);
+    if (server < 0) return server;
+    if (server == 0) return E_NOROUTE;
+    return resolve_at(ip, server, name, addrs, max);
+}
+
+// The address s gives: a.b.c.d as it stands, else the first address of
+// the name s; or why there is none, as resolve says. Digits and dots
+// alone that make no address are no name either (E_INVAL): no top-level
+// domain is a number.
+int host_address(int ip, tryte *s) {
+    int a = address(s);
+    if (a != NOT_AN_ADDRESS) return a;
+    int i = 0;
+    while ((s[i] >= '0' && s[i] <= '9') || s[i] == '.') i++;
+    if (s[i] == 0) return E_INVAL;
+    int found[1];
+    int n = resolve(ip, s, found, 1);
+    if (n < 0) return n;
+    return found[0];
+}
+
+// Say on fd that prog could not resolve name, and why.
+void unresolved(int fd, tryte *prog, tryte *name, int why) {
+    puts(fd, prog);
+    puts(fd, ": ");
+    puts(fd, name);
+    if (why == E_NOENT) puts(fd, ": no such host\n");
+    else if (why == E_TIMEDOUT) puts(fd, ": the name server did not answer\n");
+    else if (why == E_NOROUTE) puts(fd, ": no name server\n");
+    else if (why == E_INVAL) puts(fd, ": not a host name\n");
+    else if (why == E_IO) puts(fd, ": the name server failed\n");
+    else puts(fd, ": the network failed\n");
+}
