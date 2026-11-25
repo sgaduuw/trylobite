@@ -336,11 +336,264 @@ def test_nc_sends_to_the_echo_service_and_prints_what_comes_back():
     )
     assert result.exit_code == 0, result.console
     out = re.sub(r"trylobite: [^\n]*\n", "", result.after_boot)
-    usage = "usage: nc -u ADDRESS PORT, or nc -u -l PORT\nsh: exit 2\n"
+    usage = "usage: nc [-u] ADDRESS PORT, or nc [-u] -l PORT\nsh: exit 2\n"
     assert out == (
         "$ echo hello udp | nc -u 10.0.0.2 7\nhello udp\n"
         f"$ nc -u 10.0.0.2\n{usage}"
-        "$ echo x | nc -u 10.0.0.9 7\nnc: no answer to ARP\nsh: exit 1\n"
+        "$ echo x | nc -u 10.0.0.9 7\nnc: no answer\nsh: exit 1\n"
         f"$ nc -u -l 0\n{usage}"
         "$ \n"
+    ), out
+
+
+# --- TCP ---------------------------------------------------------------------
+
+
+def io(call: str, fd: str, buffer: str = "rbuf", n: int | str = 1600) -> str:
+    """read or write on the descriptor in the register or word fd."""
+    load = f"mv    a1, {fd}" if fd.startswith("s") else f"lw    a1, {fd}"
+    return f"""
+        li    a0, {call}
+        {load}
+        la    a2, {buffer}
+        li    a3, {n}
+        sys"""
+
+
+def close(fd: str) -> str:
+    return f"""
+        li    a0, SYS_CLOSE
+        mv    a1, {fd}
+        sys"""
+
+
+def test_a_connection_to_its_own_port_carries_data_both_ways():
+    # One process listens, connects to itself and accepts: s1 is the
+    # connecting end, s2 the accepted one.
+    result = run(
+        report(
+            ip_call("IP_LISTEN", 9000),
+            ip_call("IP_CONNECT", OURS, 9000) + "\n        mv    s1, a0",
+            ip_call("IP_ACCEPT")
+            + "\n        mv    s2, a0\n        mv    s3, a1\n        mv    s4, a2",
+            "        mv    a0, s3",  # from our own address
+            "        mv    a0, s4",  # and the connecting end's port
+            io("SYS_WRITE", "s1", "hello", 5),
+            io("SYS_READ", "s2"),
+            tryte_at("rbuf", 4),
+            io("SYS_WRITE", "s2", "hello", 2),
+            io("SYS_READ", "s1"),
+            close("s1"),
+            io("SYS_READ", "s2"),  # the end
+            close("s2"),
+            data='hello: .ascii "hello"\n' + RBUF,
+        )
+    )
+    # Init has no standard input or output: the descriptors are 0 and 1.
+    assert said(result) == [
+        0,
+        0,
+        1,
+        OURS,
+        49152,
+        5,
+        5,
+        ord("o"),
+        2,
+        2,
+        0,
+        0,
+        0,
+    ], result.console
+    assert result.exit_code == 0
+
+
+def test_tcp_calls_refuse_what_cannot_be_done():
+    result = run(
+        report(
+            ip_call("IP_ACCEPT"),  # not listening
+            ip_call("IP_LISTEN", 65536),
+            ip_call("IP_LISTEN", -1),
+            ip_call("IP_CONNECT", 0, 80),
+            ip_call("IP_CONNECT", OURS, 0),
+            ip_call("IP_CONNECT", OURS, 9000),  # nobody listens
+            ip_call("IP_CONNECT", OURS + 7, 9000),  # nobody answers ARP
+            ip_call("IP_CONFIG", OURS, 24, 0),
+            ip_call("IP_CONNECT", 8 << 24, 80),  # no way there
+        )
+    )
+    assert said(result) == [
+        L["E_INVAL"],
+        L["E_INVAL"],
+        L["E_INVAL"],
+        L["E_INVAL"],
+        L["E_INVAL"],
+        L["E_REFUSED"],
+        L["E_TIMEDOUT"],
+        0,
+        L["E_NOROUTE"],
+    ], result.console
+
+
+def connect_retrying(port: int) -> str:
+    """Connect to our own port, again while it is refused: the listener
+    may not be listening yet. s1 = the descriptor."""
+    return f"""
+1:      {ip_call("IP_CONNECT", OURS, port)}
+        li    t0, E_REFUSED
+        beq   a0, t0, 1b
+        mv    s1, a0"""
+
+
+SENT = 5000  # octets: more than a buffer, so more than one segment
+
+
+def test_a_stream_longer_than_the_buffers_arrives_whole_and_in_order():
+    # Init connects to program 1 and sends SENT octets, octet i being
+    # i mod 251, then closes; the child reads to the end and exits with
+    # the sum of each octet times its position, or minus the count if
+    # not all came: a lost, repeated, reordered or damaged segment
+    # changes it.
+    child = f"""
+        .gp   USER_GP
+        {ip_call("IP_LISTEN", 9000)}
+        {ip_call("IP_ACCEPT")}
+        mv    s1, a0
+        li    s2, 0                    # s2: octets
+        li    s3, 0                    # s3: their sum, weighted by position
+1:      {io("SYS_READ", "s1", "rbuf", 700)}
+        blez  a0, 3f
+        la    t0, rbuf
+        add   t1, t0, a0
+2:      lt    t2, 0(t0)
+        addi  s2, s2, 1
+        mul   t2, t2, s2
+        add   s3, s3, t2
+        addi  t0, t0, 1
+        blt   t0, t1, 2b
+        j     1b
+3:      mv    a1, s3
+        li    t0, {SENT}
+        beq   s2, t0, 4f
+        sub   a1, zero, s2             # not all of it: minus what came
+4:      li    a0, SYS_EXIT
+        sys
+{RBUF}
+"""
+    init = f"""
+        .gp   USER_GP
+        la    t0, out                  # octet i is i mod 251
+        li    t1, 0
+1:      li    t2, 251
+        rem   t2, t1, t2
+        add   t3, t0, t1
+        st    t2, 0(t3)
+        addi  t1, t1, 1
+        li    t2, {SENT}
+        blt   t1, t2, 1b
+        li    a0, SYS_SPAWN
+        li    a1, 1
+        sys
+        mv    s5, a0
+        {connect_retrying(9000)}
+        {io("SYS_WRITE", "s1", "out", SENT)}
+        mv    s4, a0
+        {close("s1")}
+        li    a0, SYS_WAIT
+        mv    a1, s5
+        sys
+        mv    a1, s4
+        li    a0, SYS_EXIT
+        sys
+out:    .zero {SENT}
+"""
+    result = run(init, child)
+    assert result.code_of(0) == SENT, result.console
+    weighted = sum((i % 251) * (i + 1) for i in range(SENT))
+    assert result.code_of(3) == weighted, result.console
+
+
+def test_a_listener_that_ends_resets_what_it_did_not_accept():
+    # Program 1 listens and exits without accepting: the connection init
+    # made to it is reset, and init's read says so.
+    child = f"""
+        .gp   USER_GP
+        {ip_call("IP_LISTEN", 9000)}
+        li    s1, 30000                # time for init to connect
+1:      addi  s1, s1, -1
+        bnez  s1, 1b
+        li    a1, 0
+        li    a0, SYS_EXIT
+        sys
+"""
+    init = f"""
+        .gp   USER_GP
+        li    a0, SYS_SPAWN
+        li    a1, 1
+        sys
+        {connect_retrying(9000)}
+        {io("SYS_READ", "s1")}
+        mv    a1, a0
+        li    a0, SYS_EXIT
+        sys
+{RBUF}
+"""
+    result = run(init, child)
+    assert result.code_of(0) == L["E_RESET"], result.console
+
+
+def test_shutdown_ends_one_direction_and_leaves_the_other():
+    result = run(
+        report(
+            ip_call("IP_LISTEN", 9000),
+            ip_call("IP_CONNECT", OURS, 9000) + "\n        mv    s1, a0",
+            ip_call("IP_ACCEPT") + "\n        mv    s2, a0",
+            io("SYS_WRITE", "s1", "hello", 5),
+            """
+        li    a0, SYS_IOCALL
+        mv    a1, s1
+        li    a2, IO_SHUTDOWN
+        sys""",
+            io("SYS_WRITE", "s1", "hello", 5),  # no more writing
+            io("SYS_READ", "s2"),  # what was written,
+            io("SYS_READ", "s2"),  # then the end
+            io("SYS_WRITE", "s2", "hello", 3),  # the other way is open
+            io("SYS_READ", "s1"),
+            close("s2"),
+            io("SYS_READ", "s1"),  # and now ends
+            close("s1"),
+            data='hello: .ascii "hello"\n' + RBUF,
+        )
+    )
+    assert said(result) == [0, 0, 1, 5, 0, L["E_PIPE"], 5, 0, 3, 3, 0, 0, 0], (
+        result.console
+    )
+
+
+# A file of 3,000 octets: more than a segment, and more than a
+# connection's buffer.
+LONG = "".join(f"line {i:02} {'x' * 31}\n" for i in range(75))
+
+
+def test_nc_talks_tcp_to_the_echo_service():
+    result = run_image(
+        assemble_file(ROOT / "shell.s"),
+        input="echo hello tcp | nc 10.0.0.2 7\ncat t | nc 10.0.0.2 7 | wc\n"
+        "cat t | wc\necho x | nc 10.0.0.2 9000\n"
+        "echo x | nc 10.0.0.9 7\nnc 10.0.0.2\n",
+        disk=bin_disk(t=LONG),
+        link="loop",
+        max_steps=30_000_000,
+    )
+    assert result.exit_code == 0, result.console
+    out = re.sub(r"trylobite: [^\n]*\n", "", result.after_boot)
+    lines = out.split("\n")
+    assert lines[:2] == ["$ echo hello tcp | nc 10.0.0.2 7", "hello tcp"], out
+    # The whole file comes back, as long as it went.
+    assert lines[3] == lines[5] == "75 225 3000", out
+    assert "\n".join(lines[6:]) == (
+        "$ echo x | nc 10.0.0.2 9000\nnc: connection refused\nsh: exit 1\n"
+        "$ echo x | nc 10.0.0.9 7\nnc: no answer\nsh: exit 1\n"
+        "$ nc 10.0.0.2\nusage: nc [-u] ADDRESS PORT, or nc [-u] -l PORT\n"
+        "sh: exit 2\n$ \n"
     ), out

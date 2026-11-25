@@ -350,7 +350,7 @@ finished still stops. Without a link, sends and receives fail with
 `E_IO`.
 
 Above it, the **IP server** (`user/ipd.s`) registers as `ip`, protocol
-`IP_PROTOCOL`: the start of the TCP/IP stack. It speaks ARP and ICMP
+`IP_PROTOCOL`: the TCP/IP stack. It speaks ARP and ICMP
 echo over IPv4. It answers ARP requests for its address and keeps what
 ARP tells it in an eight-entry cache, and answers pings. `IP_PING`, an
 address, a sequence number and a time limit in ticks sends an echo
@@ -375,9 +375,41 @@ echo service. A port goes with its process. A send to a host whose
 Ethernet address is not known waits for ARP, one at a time, and fails
 with `E_TIMEDOUT` if nobody answers.
 
+And it carries TCP. A connection is a descriptor, given with `give`:
+`IP_CONNECT`, an address and a port, answers with one once the
+handshake is done, or with `E_REFUSED` (the other end reset it: nothing
+listens there), `E_TIMEDOUT` or `E_NOROUTE`. A process listens on one
+port with `IP_LISTEN` (0 stops), and `IP_ACCEPT` waits for a connection
+to it: the descriptor, then the other end's address and port. The
+handshake does not wait for accept: up to eight connections at once,
+in use or waiting to be accepted. `read` on a connection waits for
+data and gives 0 once the other end has closed; `write` waits until all
+of it is queued; either fails with `E_RESET` once the other end reset
+the connection, or `E_TIMEDOUT` once it stopped answering.
+`iocall(fd, IO_SHUTDOWN)` ends writing, so the other end reads to its
+end while this one still reads, and closing the last descriptor closes
+the connection once what was written has been delivered. A listener
+that ends resets what it had not accepted. A connection to port 7 that
+nobody listens on is the echo service.
+
+Each connection holds 1,460 octets each way, one segment (the MSS the
+server asks for), in two more block windows of the server's. One
+segment is in flight at a time: the next goes once the last is
+acknowledged, and it is sent again after 300,000 ticks without, six
+times before the connection gives up. A closed window is probed one
+octet at a time, and probing does not count as a try. Sequence numbers
+start from the clock. There is no TIME-WAIT: a connection is forgotten
+once both ends have closed, so a late copy of the other end's FIN
+gets a reset.
+
 `bin/ping ADDRESS [COUNT]`, `bin/ifconfig [ADDRESS/PREFIX [GATEWAY]]`
-and `bin/nc -u ADDRESS PORT` / `nc -u -l PORT` are its tools in the
-shell.
+and `bin/nc` are its tools in the shell. `nc ADDRESS PORT` connects,
+sends its standard input, shuts down writing and prints what comes
+back until the other end closes; `nc -l PORT` accepts one connection
+and prints what it sends; `-u` before either does the same with UDP
+datagrams. One direction at a time: there is no waiting on two
+descriptors at once, so a peer that sends a lot back before it has
+read everything waits for nc as nc waits for it.
 
 Run with `detrytus run --net loop` for a link that hands every frame
 back, where pinging the machine's own address runs the whole exchange,
