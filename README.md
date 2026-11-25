@@ -265,6 +265,32 @@ hello from B
 instead hands every frame straight back, so one machine can ping its
 own address.
 
+### Out to the host's network
+
+`--net user` puts the machine behind a gateway that detrytus plays at
+10.0.0.1, the machine's default gateway, translating its traffic to
+the host's own sockets: no root, no TAP device. 10.0.0.1 is also the
+host, so a server on the host's 127.0.0.1 answers there:
+
+```bash
+detrytus run shell.s --ram-pages 81 --disk disk.img --net user
+```
+
+```text
+$ ping 10.0.0.1 1
+reply from 10.0.0.1: seq 1, 13576 ticks
+$ echo hello host | nc 10.0.0.1 9009
+HELLO HOST
+$ cat get | nc 10.0.0.1 8080 | head -n 1
+HTTP/1.0 200 OK
+```
+
+(Here the host runs a TCP server that answers in capitals on port
+9009 and a web server on 8080, and `get` is a file holding an HTTP
+request.) Other addresses are reached the same way; a ping past the
+gateway needs a host that allows unprivileged ping sockets, or root.
+There is no DNS yet, so they are given as numbers.
+
 The programs on the disk are `hello`, `fail` (exits with 3), `spin`
 (loops for ever, for Ctrl-C), `echo`, `upper` (standard input to output
 in capitals) and `wc` (lines, words and code points), system tools
