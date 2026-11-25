@@ -1311,5 +1311,6 @@ binary alignment: detrytus docs/rust.md), so `lib/rust/sys.rs` gives
 Rust programs `print!`, `println!` and `eprintln!`, writing through
 `core::fmt::Write` on a descriptor (`sys::Out`). `bin/rfact.rs` shows
 it with a table of factorials up to 20!, the largest that fits a u64.
-It is 5 715 trytes, against 668 for recho: formatting is the cost, and
-making Rust programs smaller is the next step.
+It was 5 715 trytes, against 668 for recho: formatting is the cost.
+With detrytus's load and store helpers and the rest of its size work
+(detrytus docs/rust.md, Size) it is 3 960, recho 596 and rhello 367.
