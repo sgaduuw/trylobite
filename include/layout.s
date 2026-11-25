@@ -123,13 +123,15 @@
         .equ  SRC_CONSOLE, 1              # console input: pending while a read
                                           # would not give CONSOLE_EMPTY
         .equ  SRC_DISK, 2                 # block device: a command has finished
+        .equ  SRC_NET, 3                  # network device: a send or receive
+                                          # has finished
 
 # The block device (detrytus platform.md, The block device): registers at
 # DISK_* from the centre of its page, physical page P_DISK; its driver,
 # the disk server, reaches them at V_DEVICE + PAGE * (SRC_DISK - 1). A
 # block is one page.
         .equ  P_DISK, -14                 # the block device's physical page
-        .equ  NSRC, 2                     # device sources, 1 to NSRC
+        .equ  NSRC, 3                     # device sources, 1 to NSRC
         .equ  DISK_BLOCKS, -9             # how many blocks; 0 with no disk
         .equ  DISK_BLOCK, -6              # the first block to move
         .equ  DISK_COUNT, -3              # how many blocks
@@ -140,6 +142,36 @@
         .equ  BLOCK_READ, 1
         .equ  BLOCK_WRITE, -1
         .equ  BLOCK_FAILED, -1
+
+# The network device (detrytus platform.md, The network device):
+# registers at NET_* from the centre of its page, physical page P_NET;
+# its driver, the network server, reaches them at V_DEVICE + PAGE *
+# (SRC_NET - 1). A frame is octets, one per tryte, from the Ethernet
+# header on, FRAME_MIN to FRAME_MAX of them.
+        .equ  P_NET, -16                  # the network device's physical page
+        .equ  NET_KA, P_NET * PAGE + DMAP # its centre, for the kernel's boot
+                                          # report: the direct map
+        .equ  NET_LINK, -24               # +1 with a link, 0 without
+        .equ  NET_MAC_HI, -21             # the interface's address, 24 bits
+        .equ  NET_MAC_LO, -18             # ... a half
+        .equ  NET_DROPPED, -15            # frames dropped on arrival
+        .equ  NET_TX_ADDR, -12            # physical address of the frame to send
+        .equ  NET_TX_LEN, -9              # ... its length
+        .equ  NET_TX_COMMAND, -6          # NET_SEND sends it
+        .equ  NET_TX_STATUS, -3           # NET_BUSY, NET_DONE or NET_FAILED
+        .equ  NET_TX_ACK, 0               # any write ends the send's interrupt
+        .equ  NET_RX_ADDR, 3              # physical address of a receive buffer
+        .equ  NET_RX_SIZE, 6              # ... its size
+        .equ  NET_RX_COMMAND, 9           # NET_RECEIVE gives it to the device
+        .equ  NET_RX_STATUS, 12           # NET_BUSY until a frame is in it
+        .equ  NET_RX_LEN, 15              # the frame's length
+        .equ  NET_RX_ACK, 18              # any write ends the receive's interrupt
+        .equ  NET_SEND, 1
+        .equ  NET_RECEIVE, 1
+        .equ  NET_BUSY, 1
+        .equ  NET_FAILED, -1
+        .equ  FRAME_MIN, 14               # an Ethernet header
+        .equ  FRAME_MAX, 1514             # and 1,500 octets of payload
 
 # --- system calls: number in a0, arguments in a1, a2 and a3, result in a0 ---
 #
@@ -478,6 +510,26 @@
                                           # kills it, or to nobody with
                                           # NO_FOREGROUND: 0, E_INVAL. The server
                                           # takes it back when the process ends
+
+# Frames come from the network server, which registers as "net" with
+# protocol NET_PROTOCOL and drives SRC_NET. A network call is a call to
+# it with the NT_ operation in a2 and the arguments in a3 and a4; the
+# reply's first word is the result. A frame in the caller's memory is
+# octets, one per tryte, from the Ethernet header on.
+        .equ  NET_PROTOCOL, 1
+        .equ  NT_SEND,    0               # send(frame, n): put n octets on the
+                                          # wire, waiting until they have left: 0;
+                                          # E_INVAL (n outside FRAME_MIN to
+                                          # FRAME_MAX), E_FAULT, E_IO (no link, or
+                                          # an octet that is not one)
+        .equ  NT_RECEIVE, 1               # receive(buffer, size): the next frame
+                                          # to arrive, waiting for one: its length;
+                                          # E_INVAL (size below 1), E_FAULT,
+                                          # E_NOROOM (it was longer than size, and
+                                          # is gone), E_IO (no link)
+        .equ  NT_ADDRESS, 2               # address(): 0, then the interface's
+                                          # address in the reply's next two words,
+                                          # 24 bits each, high half first
         .equ  CN_OPEN,    3               # open(): give the caller a descriptor
                                           # for the console: its lowest free one,
                                           # E_MFILE
@@ -531,8 +583,8 @@
         .equ  E_BUSY,   -19               # unlink, rmdir: a process has it open,
                                           # or it is one's current directory;
                                           # drive: the source has a driver
-        .equ  E_NOROOM, -20               # getcwd: the buffer is too small (Unix's
-                                          # ERANGE; E_RANGE is puts')
+        .equ  E_NOROOM, -20               # getcwd, receive: the buffer is too small
+                                          # (Unix's ERANGE; E_RANGE is puts')
         .equ  E_PERM,   -21               # drive, arm, phys: not allowed
         .equ  E_PIPE,   -22               # pipe write: no read end is open
 

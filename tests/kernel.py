@@ -131,7 +131,8 @@ def exit_with(register: str) -> str:
 
 
 # The servers a build can add, from program 3 on: the disk server, the
-# file server, which needs it, the console server and the pipe server.
+# file server, which needs it, the console server, the pipe server and
+# the network server.
 # init's first lines start them in that order, so with files the disk
 # server is process 1 and the file server process 2.
 SERVERS = {
@@ -139,6 +140,7 @@ SERVERS = {
     "fs": "user/fsd.s",
     "console": "user/consd.s",
     "pipe": "user/piped.s",
+    "net": "user/netd.s",
 }
 
 
@@ -190,12 +192,14 @@ def build(
     disk_server: bool = False,
     console: bool = False,
     pipes: bool = False,
+    net: bool = False,
 ) -> Image:
     """The kernel with init as program 0 and prog1, prog2 to spawn; with
     disk_server, also the disk server (user/diskd.s), with files the
     file server (user/fsd.s) after it, and with console the console server
-    (user/consd.s), and with pipes the pipe server (user/piped.s), all of
-    which init starts first."""
+    (user/consd.s), with pipes the pipe server (user/piped.s), and with
+    net the network server (user/netd.s), all of which init starts
+    first."""
     init, prog1, prog2 = (
         find_servers(p, n) for n, p in enumerate((init, prog1, prog2))
     )
@@ -204,6 +208,7 @@ def build(
         *(["fs"] if files else []),
         *(["console"] if console else []),
         *(["pipe"] if pipes else []),
+        *(["net"] if net else []),
     ]
     server = ""
     for k, name in enumerate(servers, 3):
@@ -407,10 +412,12 @@ def run_image(
     unplug: list[tuple[int, int]] = (),
     input: str | None = None,
     disk: tuple[Path, int] | None = None,
+    link: str | None = None,
 ) -> Run:
-    """Run an image; input, if given, is what the console has to read, and
-    disk, if given, is (file, blocks) for its block device. The machine
-    has the RAM the build is for unless ram_pages says otherwise."""
+    """Run an image; input, if given, is what the console has to read,
+    disk, if given, is (file, blocks) for its block device, and link, if
+    given, is the network device's link, as detrytus --net takes it. The
+    machine has the RAM the build is for unless ram_pages says otherwise."""
     harts = HARTS if harts is None else harts
     ram_pages = image.symbols["RAM_PAGES"] if ram_pages is None else ram_pages
     hotplug = hotplug_options(plug, unplug)
@@ -428,6 +435,7 @@ def run_image(
         *hotplug,
         *inputs,
         *disks,
+        *(["--net", link] if link else []),
         str(image.path),
     )
     code: int | None = None
@@ -458,6 +466,12 @@ def run(
     disk_server: bool = False,
     console: bool = False,
     pipes: bool = False,
+    net: bool = False,
+    link: str | None = None,
 ) -> Run:
-    image = build(init, prog1, prog2, ram_pages, files, disk_server, console, pipes)
-    return run_image(image, ram_pages, max_steps, harts, plug, unplug, input, disk)
+    image = build(
+        init, prog1, prog2, ram_pages, files, disk_server, console, pipes, net
+    )
+    return run_image(
+        image, ram_pages, max_steps, harts, plug, unplug, input, disk, link
+    )

@@ -18,9 +18,10 @@ a disk of 100 blocks:
 trylobite: version 0.1.0, a microkernel for detrytus, the balanced-ternary machine
 trylobite: memory: 81 pages (1594323 trytes), 66 free
 trylobite: harts: 1
-trylobite: irq0: interrupt controller, 2 sources, at page -13
+trylobite: irq0: interrupt controller, 3 sources, at page -13
 trylobite: cons0: console, at page -1
 trylobite: disk0: block device, 100 blocks, at page -14
+trylobite: net0: network device, no link, at page -16
 trylobite: process table: 27 slots, 9 programs in the image
 trylobite: starting init
 ```
@@ -29,9 +30,12 @@ Memory is the RAM the build is for (`RAM_PAGES`), and free what is
 left after the kernel, the program images and the kernel's log (a page,
 System tools below), before init has any.
 Harts counts those present among the middle nine, which the kernel
-starts once init exists. The interrupt controller and the disk are read
-from the devices themselves (their `SOURCES` and `BLOCKS` registers,
-detrytus platform.md); a machine without `--disk` has `no disk`. Each
+starts once init exists. The interrupt controller, the disk and the
+network device are read from the devices themselves (their `SOURCES`,
+`BLOCKS`, `LINK` and `MAC_HI`/`MAC_LO` registers, detrytus
+platform.md); a machine without `--disk` has `no disk`, and one without
+`--net` has `no link`, where one with a link shows the interface's
+address (`02:00:00:00:00:01` unless `--mac` sets another). Each
 line starts `trylobite: `, as all the kernel's lines do, so a reader
 of the log can tell them from a program's. Init then says each server
 it starts (The shell, below).
@@ -302,6 +306,32 @@ or from the caller with `copyout` or `copyin`; it takes other calls
 while the disk works, and starts them in turn. Run with `detrytus run
 --disk FILE --disk-blocks N`; the file keeps what was written for the
 next run.
+
+## The network
+
+The network device (detrytus `docs/platform.md`, page −16) belongs to a
+process, the **network server** (`user/netd.s`), which drives source
+`SRC_NET` and registers as `net`, protocol `NET_PROTOCOL`. It moves
+Ethernet frames, octets one to a tryte from the header on, and nothing
+above them: ARP, IP and TCP are for a network stack to build on it. A
+call with `NT_SEND`, a frame and its length puts the frame on the wire
+and answers once it has left; with `NT_RECEIVE`, a buffer and its size,
+it answers with the length of the next frame to arrive, holding the call
+until there is one; `NT_ADDRESS` gives the interface's address, 24 bits
+in each of the reply's next two words. Frames pass through two block
+windows of the server's, by DMA, and are copied to and from the caller,
+as the disk server's blocks are. Sends wait their turn one per process,
+and so do readers; a frame that arrives while nobody reads waits in the
+server, and the device keeps nine more behind it. The server arms the
+device only while somebody waits on it, so a machine whose processes
+have all finished still stops. Without a link, sends and receives fail
+with `E_IO`.
+
+Run with `detrytus run --net loop` for a link that hands every frame
+back, or `--net udp:LOCAL,PEER` to carry frames over UDP to another
+machine (detrytus `README.md`). The tests start the server with
+`run(..., net=True, link="loop")`; `shell.s` does not start it yet,
+since nothing in it uses the network.
 
 ## Files
 
