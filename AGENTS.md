@@ -133,7 +133,13 @@ pipe.
   library to link. A Trice program imports them from `lib/io.tc`, and
   `tools/fs.py` links it with every `.tc` file it imports, each
   compiled on its own, so it carries only the helpers it calls
-  (detrytus `docs/linker.md`). `bin_disk` in
+  (detrytus `docs/linker.md`). A program may also be Rust (`.rs`,
+  `no_std`, detrytus `docs/rust.md`): it brings in `lib/rust/sys.rs`
+  with `#[path]` and defines `extern "C" fn main(argc, argv)`
+  (`bin/recho.rs`); `tools/fs.py` builds it with cargo (`-Zbuild-std`,
+  needing `rust-src` and the `riscv32imac-unknown-none-elf` target)
+  and `detrytus ll`, with `lib/rust/start.s` as its start code and
+  runtime. `bin_disk` in
   `tests/kernel.py` makes room for every program; a test that writes
   much asks for more blocks.
 - **Servers are found by name** (`kernel/names.s`): a server calls

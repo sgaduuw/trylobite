@@ -382,8 +382,10 @@ def bin_disk(blocks: int = 32, **texts: str) -> tuple[Path, int]:
 
     if not _BIN:
         bin_ = ROOT / "bin"
-        for source in sorted([*bin_.glob("*.s"), *bin_.glob("*.tc")]):
-            # Trice (.tc) and assembly alike, in name order, as ls lists them.
+        sources = [*bin_.glob("*.s"), *bin_.glob("*.tc"), *bin_.glob("*.rs")]
+        for source in sorted(sources):
+            # Assembly, Trice (.tc) and Rust (.rs) alike, in name order, as ls
+            # lists them.
             _BIN[source.stem] = program_file(assemble(source))
     made = Filesystem.new(blocks)
     made.mkdir("bin")

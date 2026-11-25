@@ -1276,3 +1276,30 @@ point to.
   linked programs are close to whole ones and sometimes smaller: echo
   147 trytes (154 whole), upper 360 (375), wc 933 (901), grep 1,689
   (1,663), head 864 (851).
+
+### 2026-11-24 · Programs in Rust
+
+detrytus can now translate rustc's LLVM IR (`detrytus ll`, detrytus
+`docs/rust.md`), so programs on the disk may be `no_std` Rust:
+`bin/rhello.rs` and `bin/recho.rs` are the first. Choices:
+
+- **A runtime in assembly, a module in Rust.** `lib/rust/start.s` is
+  the start code and what LLVM and the programs call: `memcpy` and its
+  kin, `strlen`, `abort`, and `write`, `read` and `exit` over the
+  system calls. `lib/rust/sys.rs`, brought in with `#[path]`, declares
+  them for Rust and wraps them, with the panic handler. No crate is
+  published or vendored.
+- **argv is copied.** spawnw's argument block is words, and Rust reads
+  an array of 4-byte pointers, so the start code lays one out on the
+  stack before calling `main`. The kernel is unchanged.
+- **Errors keep their meaning.** A system call's negative error comes
+  back as Rust's `isize`, held as its unsigned 32-bit value, so Rust
+  sees the same negative number; a panic exits with 101, as Rust's do.
+- **tools/fs.py builds with cargo.** One cargo project per program in
+  the temporary directory, sharing a target directory so core is built
+  once; `-Zbuild-std` and immediate-abort panics through
+  `RUSTC_BOOTSTRAP=1` on stable, at opt-level "s" (half the size of
+  "z" for recho). CI installs `rust-src` and the target.
+- Sizes: rhello 370 trytes with its runtime, recho 671 against 147 for
+  the Trice echo; the cost is bytes kept faithfully as four trytes per
+  `u32` and a wrap after arithmetic.
