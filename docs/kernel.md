@@ -42,7 +42,7 @@ Every address space has three regions, one per mid-table entry:
 | Region | Virtual pages | Contents |
 |--------|---------------|----------|
 | direct map | around −6561 | all of physical memory, kernel only: kernel virtual = physical − 3¹⁷ |
-| kernel | −7 to −2 | the hart controller (its slots, and this hart's own), power off, console, kernel code, kernel data and stack; page 0 unmapped |
+| kernel | −15, −7 to −2 | the binary floating point coprocessor, which every process may use; the hart controller (its slots, and this hart's own), power off, console, kernel code, kernel data and stack; page 0 unmapped |
 | process | 6561 (`V_USER`) | the process's code, data and stack |
 
 The first two regions are shared by every address space. A new process
@@ -51,6 +51,15 @@ into which `spawn` copies the program image loaded at boot, or
 `spawnw` a program file read from the disk. Block windows take up to
 nine more, as a process asks for them; a driver also has its device's
 registers mapped past them, at `V_DEVICE`.
+
+The binary floating point coprocessor (detrytus platform.md, page −15)
+is mapped for every process at its physical address, `V_FPU`, where
+`detrytus ll`'s code for Rust's `f32` and `f64` reaches it. Each hart
+has its own bank of operands and result, which is process state like
+the registers: `ktrap` saves the bank into the process record
+(`PCB_FPU`) on every trap, since the process may have been stopped
+between an operation and its result, and `resume` restores it unless
+the hart's bank is still that process's (`fpu_owner`).
 
 | Physical page | Contents |
 |---------------|----------|

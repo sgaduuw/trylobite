@@ -157,6 +157,14 @@ spawn_page:
         blt   t0, t1, 3b
         sw    a2, PCB_PARENT(s1)
         sw    s6, PCB_FILE(s1)         # a program file may not drive a device
+        la    t0, fpu_owner            # no hart's coprocessor bank is its yet:
+        li    t1, NHART                # it starts from its zeroed PCB_FPU, not
+5:      lw    t2, 0(t0)                # what the slot's last tenant left
+        bne   t2, s1, 6f
+        sw    zero, 0(t0)
+6:      addi  t0, t0, 3
+        addi  t1, t1, -1
+        bnez  t1, 5b
         call  desc_inherit             # its parent's descriptors (desc.s)
 
         call  alloc_page

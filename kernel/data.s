@@ -29,6 +29,8 @@ procs:  .words NPROC * PCB_SIZE / 3     # the process table
 
 epochs: .words NPROC                   # tenants each slot has had (see resume)
 seen:   .words NHART * NPROC           # the epoch each hart last flushed, by slot
+fpu_owner: .words NHART                # whose bank each hart's coprocessor
+                                       # holds: a record, or 0 (see resume)
 
 names:  .words NSRV * SRV / 3          # server names (names.s)
 srv_key: .zero SRV_NAME_MAX + 1        # the name a call gave, zero-padded

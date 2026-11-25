@@ -39,6 +39,23 @@ ktrap:
         sw    t0, 0(sp)                # the user's sp
         csrr  t0, stpc
         sw    t0, PCB_PC(sp)
+        li    t1, FPU_KA               # its coprocessor bank: it may have been
+        lw    t0, -9(t1)               # stopped between an operation and its
+        sw    t0, PCB_FPU(sp)          # result, and another process may run
+        lw    t0, -6(t1)               # here, or it may resume on another hart
+        sw    t0, PCB_FPU + 3(sp)
+        lw    t0, -3(t1)
+        sw    t0, PCB_FPU + 6(sp)
+        lw    t0, 0(t1)
+        sw    t0, PCB_FPU + 9(sp)
+        lw    t0, 3(t1)
+        sw    t0, PCB_FPU + 12(sp)
+        lw    t0, 6(t1)
+        sw    t0, PCB_FPU + 15(sp)
+        lw    t0, 12(t1)
+        sw    t0, PCB_FPU + 18(sp)
+        lw    t0, 15(t1)
+        sw    t0, PCB_FPU + 21(sp)
         li    t0, 0                    # csrw from zero would only read
         csrw  sscratch, t0
         mv    s0, sp                   # s0: the current process, from here on
@@ -99,6 +116,32 @@ resume:
         addi  t2, t2, 1                # the ASID
         fence.vm zero, t2
 1:      sw    tp, PCB_HART(s0)         # for ktrap, which cannot read hartid
+        la    t0, fpu_owner            # the coprocessor bank: ktrap saved it,
+        addi  t1, tp, HART_MAX         # so it is the hart's still unless
+        li    t2, 3                    # another process ran here since
+        mul   t1, t1, t2
+        add   t0, t0, t1
+        lw    t1, 0(t0)
+        beq   t1, s0, 2f
+        sw    s0, 0(t0)
+        li    t1, FPU_KA
+        lw    t2, PCB_FPU(s0)
+        sw    t2, -9(t1)
+        lw    t2, PCB_FPU + 3(s0)
+        sw    t2, -6(t1)
+        lw    t2, PCB_FPU + 6(s0)
+        sw    t2, -3(t1)
+        lw    t2, PCB_FPU + 9(s0)
+        sw    t2, 0(t1)
+        lw    t2, PCB_FPU + 12(s0)
+        sw    t2, 3(t1)
+        lw    t2, PCB_FPU + 15(s0)
+        sw    t2, 6(t1)
+        lw    t2, PCB_FPU + 18(s0)
+        sw    t2, 12(t1)
+        lw    t2, PCB_FPU + 21(s0)
+        sw    t2, 15(t1)
+2:
         csrr  t0, time                 # a whole slice from now: time the
         sw    t0, PCB_RAN(s0)          # (and it runs from now: ktrap counts)
         addi  t0, t0, QUANTUM          # kernel spent on others is not its
