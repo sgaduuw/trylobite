@@ -1,0 +1,100 @@
+// nc -u ADDRESS PORT: send what standard input gives, each read as one
+// UDP datagram, to port PORT at ADDRESS (a.b.c.d), and after each print
+// what comes back within a moment. nc -u -l PORT: listen on port PORT,
+// printing what each datagram carries, until killed (Ctrl-C) or output
+// fails. As Unix's nc -u; only UDP so far, so -u must be given. Exit
+// with 0, 1 if the network fails, and 2 for bad arguments or no IP
+// server.
+
+import "../include/layout.s";
+import "../lib/start.s";
+import "../lib/io.tc";
+import "../lib/ip.tc";
+
+const int WAIT = 200000;         // ticks to wait for what comes back
+const int DGRAM = 1478;          // the address and port, and 1,472 octets
+
+tryte out[DGRAM];                // a datagram to send,
+tryte in[DGRAM];                 // and one received
+
+bool same(tryte *a, tryte *b) {
+    int i = 0;
+    while (a[i] == b[i] && a[i] != 0) i++;
+    return a[i] == b[i];
+}
+
+// The port s writes, 1 to 65535, or NOT_AN_ADDRESS.
+int port_of(tryte *s) {
+    int n = 0;
+    int i = 0;
+    while (s[i] >= '0' && s[i] <= '9' && i < 5) {
+        n = n * 10 + (s[i] - '0');
+        i++;
+    }
+    if (i == 0 || s[i] != 0 || n < 1 || n > 65535) return NOT_AN_ADDRESS;
+    return n;
+}
+
+int usage() {
+    puts(STDERR, "usage: nc -u ADDRESS PORT, or nc -u -l PORT\n");
+    return 2;
+}
+
+// Say on standard error why the network failed, and give 1.
+int failed(int why) {
+    puts(STDERR, "nc: ");
+    if (why == E_NOROUTE) puts(STDERR, "no route there\n");
+    else if (why == E_TIMEDOUT) puts(STDERR, "no answer to ARP\n");
+    else if (why == E_IO) puts(STDERR, "the network is down\n");
+    else if (why == E_BUSY) puts(STDERR, "the port is taken\n");
+    else puts(STDERR, "failed\n");
+    return 1;
+}
+
+int listen(int ip, int port) {
+    int bound = sys(SYS_CALL, ip, IP_BIND, port);
+    if (bound < 0) return failed(bound);
+    while (true) {
+        int n = sys(SYS_CALL, ip, IP_RECEIVE, in, DGRAM, 0);
+        if (n < 0) return failed(n);
+        if (!put(STDOUT, in + 6, n - 6)) return 0;
+    }
+    return 0;
+}
+
+int talk(int ip, int to, int port) {
+    int bound = sys(SYS_CALL, ip, IP_BIND, 0);
+    if (bound < 0) return failed(bound);
+    int shift = 16777216;
+    for (int i = 0; i < 4; i++) {
+        out[i] = to / shift % 256;
+        shift = shift / 256;
+    }
+    out[4] = port / 256;
+    out[5] = port % 256;
+    while (true) {
+        int n = read(STDIN, out + 6, DGRAM - 6);
+        if (n == 0) return 0;
+        if (n < 0) return 1;
+        int sent = sys(SYS_CALL, ip, IP_SEND, out, n + 6);
+        if (sent < 0) return failed(sent);
+        int got = sys(SYS_CALL, ip, IP_RECEIVE, in, DGRAM, WAIT);
+        if (got >= 6) put(STDOUT, in + 6, got - 6);
+    }
+    return 0;
+}
+
+int main(int argc, tryte **argv) {
+    if (argc != 4 || !same(argv[1], "-u")) return usage();
+    bool listening = same(argv[2], "-l");
+    int to = listening ? 0 : address(argv[2]);
+    int port = port_of(argv[3]);
+    if (to == NOT_AN_ADDRESS || port == NOT_AN_ADDRESS) return usage();
+    int ip = ip_server();
+    if (ip < 0) {
+        puts(STDERR, "nc: no IP server\n");
+        return 2;
+    }
+    if (listening) return listen(ip, port);
+    return talk(ip, to, port);
+}

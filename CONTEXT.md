@@ -1433,3 +1433,27 @@ as `ip`, with ARP and ICMP echo; `bin/ping` and `bin/ifconfig` use it.
 - **`shell.s` starts both now,** as init rows 4 and 5 after the file
   server, so the earlier servers keep their process numbers; the shell
   is process 7. 19 of 81 pages stay free in a session.
+
+### 2026-11-25 · UDP
+
+The IP server carries UDP, and `bin/nc` uses it.
+
+- **One port per process,** bound with `IP_BIND`, so send and receive
+  need not name it: three words of arguments is all a call has, and an
+  address (32 bits) and a port (16) do not fit in one 27-trit word
+  together. For the same reason the other end's address and port
+  travel in the buffer, six octets before the data, both ways. Several
+  ports, or sockets as descriptors, can come with TCP.
+- **Datagrams wait in twelve slots of a block window,** shared by every
+  process, oldest given first; with none free one is dropped, as UDP
+  allows. A receive waits for ever or up to a time limit, and every time
+  limit (the ping's, ARP's for a send, each receive's) shares the
+  server's one alarm, set for the earliest (`ip_rearm`).
+- **A send that needs ARP is held**, one at a time, and finished from
+  the top of the server's loop once the cache knows the hop, as a ping
+  waiting for ARP now is too.
+- **An echo service on port 7** in the server, while nobody binds it:
+  something to talk to on a loopback link, and between machines.
+- **Checksums** are sent always and checked when present, with the
+  pseudo-header's sum fed to `ip_sum` as its start.
+- **No fragments**: a datagram fits one frame, 1,472 octets of data.

@@ -360,8 +360,24 @@ ran out), `E_NOROUTE` (off the network with no gateway), or `E_BUSY`
 (one ping is under way at a time). `IP_ADDRESS` gives its address,
 prefix length and gateway, `10.0.0.2/24` and `10.0.0.1` at boot, and
 `IP_CONFIG` sets them. An address is a word, a.b.c.d being
-a × 2²⁴ + b × 2¹⁶ + c × 2⁸ + d. `bin/ping ADDRESS [COUNT]` and
-`bin/ifconfig [ADDRESS/PREFIX [GATEWAY]]` are its tools in the shell.
+a × 2²⁴ + b × 2¹⁶ + c × 2⁸ + d.
+
+It carries UDP too. A process binds one port with `IP_BIND` (0 picks a
+free one from 49152 up). `IP_SEND` takes a buffer that starts with the
+address and port it goes to, four octets and two, then the data, up to
+1,472 octets. `IP_RECEIVE` fills a buffer the same way with the
+sender's address and port, waiting up to a time limit in ticks, or for
+ever with 0. A datagram that comes while its process is not receiving
+is kept, in one of twelve slots in the server's block window, for its
+next receive; when the slots are full it is dropped, as UDP may. A
+datagram to port 7 that nobody has bound is sent straight back: the
+echo service. A port goes with its process. A send to a host whose
+Ethernet address is not known waits for ARP, one at a time, and fails
+with `E_TIMEDOUT` if nobody answers.
+
+`bin/ping ADDRESS [COUNT]`, `bin/ifconfig [ADDRESS/PREFIX [GATEWAY]]`
+and `bin/nc -u ADDRESS PORT` / `nc -u -l PORT` are its tools in the
+shell.
 
 Run with `detrytus run --net loop` for a link that hands every frame
 back, where pinging the machine's own address runs the whole exchange,

@@ -561,7 +561,7 @@
 # it has the IP_ operation in a2 and the arguments in a3 to a5; the
 # reply's first word is the result. An address is a word: a.b.c.d is
 # a * 2^24 + b * 2^16 + c * 2^8 + d.
-        .equ  IP_PROTOCOL, 1
+        .equ  IP_PROTOCOL, 2
         .equ  IP_PING,    0               # ping(address, seq, wait): send an ICMP
                                           # echo request numbered seq (0 to
                                           # 65535) and wait up to wait rounds
@@ -573,6 +573,24 @@
                                           # gateway (0 for none)
         .equ  IP_CONFIG,  2               # config(address, prefix, gateway): set
                                           # them: 0; E_INVAL
+        .equ  IP_BIND,    3               # bind(port): give the caller UDP port
+                                          # port (1 to 65535), or with 0 a free
+                                          # one, in place of any it had: the port;
+                                          # E_BUSY (another process has it), E_INVAL
+        .equ  IP_SEND,    4               # send(buffer, n): send the datagram at
+                                          # buffer, n octets: the address and port
+                                          # it goes to (4 and 2 octets), then up to
+                                          # 1,472 of data, from the caller's port:
+                                          # 0; E_INVAL (no port, n out of range),
+                                          # E_FAULT, E_NOROUTE, E_TIMEDOUT (ARP had
+                                          # no answer), E_BUSY, E_IO
+        .equ  IP_RECEIVE, 5               # receive(buffer, size, wait): the next
+                                          # datagram to the caller's port, as send
+                                          # takes one but with the sender's address
+                                          # and port, waiting up to wait ticks (0
+                                          # for ever): its length; E_TIMEDOUT,
+                                          # E_NOROOM (longer than size, and gone),
+                                          # E_INVAL (no port, size below 6), E_FAULT
 
 # Pipes come from the pipe server, which registers as "pipe" with
 # protocol PIPE_PROTOCOL. Its ends are descriptors: IO_READ waits for

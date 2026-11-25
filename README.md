@@ -41,8 +41,8 @@ sea floor, living among the detritus.
   programs run from `/bin` on the disk with arguments, `<`, `>` and
   `>>` redirection, `|` pipelines, quoting, and Ctrl-C to end a program.
 - **The start of a network stack:** a driver for the network device and
-  an IP server that speaks ARP and answers and sends pings, so two
-  machines linked over UDP can `ping` each other.
+  an IP server that speaks ARP, ICMP echo and UDP, so two machines
+  linked over UDP can `ping` each other and pass datagrams with `nc`.
 
 ## Ternary all the way down
 
@@ -244,6 +244,17 @@ reply from 10.0.0.2: seq 3, 35046 ticks
 $ ping 10.0.0.4 1
 no reply from 10.0.0.4: seq 1
 sh: exit 1
+$ echo and back | nc -u 10.0.0.2 7
+and back
+$ echo hello from B | nc -u 10.0.0.2 9000
+```
+
+Port 7 is the IP server's echo service. The last line arrives on the
+first machine if it is listening there:
+
+```text
+$ nc -u -l 9000
+hello from B
 ```
 
 (The kernel's `process N exited` lines are left out.) `--net loop`
@@ -254,8 +265,8 @@ The programs on the disk are `hello`, `fail` (exits with 3), `spin`
 (loops for ever, for Ctrl-C), `echo`, `upper` (standard input to output
 in capitals) and `wc` (lines, words and code points), system tools
 as on Unix: `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`,
-`sleep` and `df` (docs/kernel.md, System tools), and `ping` and
-`ifconfig` for the network. `rhello`, `recho`,
+`sleep` and `df` (docs/kernel.md, System tools), and `ping`,
+`ifconfig` and `nc` for the network. `rhello`, `recho`,
 `rfact` (a table of factorials up to 34!, with `println!` and 128-bit
 integers) and `rmandel` (the Mandelbrot set in characters, in `f32`
 floating point on detrytus's binary coprocessor) are written in Rust, translated from rustc's LLVM IR by `detrytus ll`
@@ -273,7 +284,7 @@ while it runs, and the kernel reports each.
           ┌──▶ fsd (files) ──▶ diskd (disk) ──▶ block device
           ├──▶ consd (console) ──▶ console
   sh ─────┼──▶ piped (pipes)
-          └──▶ ipd (ARP, ping) ──▶ netd (frames) ──▶ network device
+          └──▶ ipd (ARP, ping, UDP) ──▶ netd (frames) ──▶ network device
 
   every arrow is a call through the kernel: call / receive / reply
   init, program 0, starts the servers and then sh
@@ -288,7 +299,7 @@ while it runs, and the kernel reports each.
 | `user/consd.s` | `console` | drives the console: input, output, Ctrl-C for the foreground program |
 | `user/piped.s` | `pipe` | pipes |
 | `user/netd.s` | `net` | drives the network device: Ethernet frames, moved by DMA |
-| `user/ipd.s` | `ip` | IPv4: answers ARP and pings, and sends pings for `bin/ping` |
+| `user/ipd.s` | `ip` | IPv4: answers ARP and pings, sends pings for `bin/ping`, and UDP |
 
 A client finds a server by name (`lookup("fs")`), and talks to it with
 `call`, or through a descriptor the server gave it. The kernel copies no
@@ -345,7 +356,7 @@ emulator, so trylobite has never run on hardware.
 | `kernel/data.s` | the process table, buffers, messages |
 | `kernel/pagetables.s` | the boot address space and the kernel's shared leaf table |
 | `user/` | programs built into the kernel image: `demo-init`, `ping` and `pong` for the demo; `init`, `sh`, `pingpong` and the servers `fsd`, `diskd`, `consd`, `piped`, `netd` and `ipd` for the shell |
-| `bin/` | programs for the disk, each assembled on its own: `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `cp`, `mv`, `touch`, the system tools `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`, and `ping` and `ifconfig` for the network; and in Rust, `rhello`, `recho`, `rfact` and `rmandel` |
+| `bin/` | programs for the disk, each assembled on its own: `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `cp`, `mv`, `touch`, the system tools `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`, and `ping`, `ifconfig` and `nc` for the network; and in Rust, `rhello`, `recho`, `rfact` and `rmandel` |
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
 | `shell.s` | an 81-page machine starting the shell and its servers |
 | `docs/` | the kernel and the filesystem, described |
