@@ -136,7 +136,7 @@ pipe.
   (detrytus `docs/linker.md`). A program may also be Rust (`.rs`,
   `no_std`, detrytus `docs/rust.md`): it brings in `lib/rust/sys.rs`
   with `#[path]` and defines `extern "C" fn main(argc, argv)`
-  (`bin/recho.rs`), and may print with `println!` (`bin/rfact.rs`); `tools/fs.py` builds it with cargo (`-Zbuild-std`,
+  (`bin/recho.rs`), and may print with `println!` (`bin/rfact.rs`) and use floating point (`bin/rmandel.rs`); `tools/fs.py` builds it with cargo (`-Zbuild-std`,
   needing `rust-src` and the `riscv32imac-unknown-none-elf` target)
   and `detrytus ll`, with `lib/rust/start.s` as its start code and
   runtime. `bin_disk` in

@@ -207,9 +207,10 @@ The programs on the disk are `hello`, `fail` (exits with 3), `spin`
 (loops for ever, for Ctrl-C), `echo`, `upper` (standard input to output
 in capitals) and `wc` (lines, words and code points), and system tools
 as on Unix: `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`,
-`sleep` and `df` (docs/kernel.md, System tools). `rhello`, `recho`
-and `rfact` (a table of factorials, with `println!` and 64-bit
-integers) are written in Rust, translated from rustc's LLVM IR by `detrytus ll`
+`sleep` and `df` (docs/kernel.md, System tools). `rhello`, `recho`,
+`rfact` (a table of factorials up to 34!, with `println!` and 128-bit
+integers) and `rmandel` (the Mandelbrot set in characters, in `f32`
+floating point done in software) are written in Rust, translated from rustc's LLVM IR by `detrytus ll`
 (detrytus docs/rust.md); building them needs `rustup component add
 rust-src` and `rustup target add riscv32imac-unknown-none-elf`.
 
@@ -293,7 +294,7 @@ emulator, so trylobite has never run on hardware.
 | `kernel/data.s` | the process table, buffers, messages |
 | `kernel/pagetables.s` | the boot address space and the kernel's shared leaf table |
 | `user/` | programs built into the kernel image: `demo-init`, `ping` and `pong` for the demo; `init`, `sh`, `pingpong` and the servers `fsd`, `diskd`, `consd` and `piped` for the shell |
-| `bin/` | programs for the disk, each assembled on its own: `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `cp`, `mv`, `touch`, and the system tools `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`; and in Rust, `rhello`, `recho` and `rfact` |
+| `bin/` | programs for the disk, each assembled on its own: `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `cp`, `mv`, `touch`, and the system tools `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`; and in Rust, `rhello`, `recho`, `rfact` and `rmandel` |
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
 | `shell.s` | an 81-page machine starting the shell and its servers |
 | `docs/` | the kernel and the filesystem, described |

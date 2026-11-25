@@ -97,7 +97,7 @@ def test_a_word_without_a_slash_is_looked_for_in_bin(shell):
 def test_ls_lists_the_programs_on_the_disk(shell):
     result = session(shell, "ls bin\nfail\n")
     assert "sh: exit 3\n" in result.console
-    listed = result.after_boot.splitlines()[1:24]
+    listed = result.after_boot.splitlines()[1:25]
     assert [line.split()[1] for line in listed] == [
         "cp",
         "df",
@@ -114,6 +114,7 @@ def test_ls_lists_the_programs_on_the_disk(shell):
         "recho",
         "rfact",
         "rhello",
+        "rmandel",
         "sleep",
         "spin",
         "top",
