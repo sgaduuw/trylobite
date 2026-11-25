@@ -210,7 +210,7 @@ as on Unix: `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`,
 `sleep` and `df` (docs/kernel.md, System tools). `rhello`, `recho`,
 `rfact` (a table of factorials up to 34!, with `println!` and 128-bit
 integers) and `rmandel` (the Mandelbrot set in characters, in `f32`
-floating point done in software) are written in Rust, translated from rustc's LLVM IR by `detrytus ll`
+floating point on detrytus's binary coprocessor) are written in Rust, translated from rustc's LLVM IR by `detrytus ll`
 (detrytus docs/rust.md); building them needs `rustup component add
 rust-src` and `rustup target add riscv32imac-unknown-none-elf`.
 

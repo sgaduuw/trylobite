@@ -1,6 +1,7 @@
 """Boot, isolation, preemption, faults and messages."""
 
 import re
+import struct
 
 from tests.kernel import (
     BREAKPOINT,
@@ -177,3 +178,32 @@ def test_the_kernel_alone_says_how_to_build_it():
     assert done.returncode != 0
     assert "include/kernel.s is not run on its own" in done.stderr
     assert "such as demo.s or shell.s" in done.stderr
+
+
+def test_each_process_keeps_its_own_coprocessor_bank():
+    # Both write the coprocessor's operand A and have it compute a result
+    # into R, yield to the other, and read both back: the kernel saves and
+    # restores the bank around them. Each exits with A if R is right too.
+    def program(value: int) -> str:
+        bits = struct.unpack("<I", struct.pack("<f", float(value)))[0]
+        return f"""
+        li    s1, V_FPU
+        li    t0, {value}
+        sw    t0, -9(s1)
+        li    t0, -15                  # FPU_FROM_I32, binary32: into R
+        sw    t0, 9(s1)
+        li    a0, SYS_YIELD
+        sys
+        li    a0, SYS_YIELD
+        sys
+        lw    t1, -9(s1)
+        lw    t2, 12(s1)
+        li    t3, {bits}
+        beq   t2, t3, 1f
+        li    t1, 0                    # R was lost
+1:      {exit_with("t1")}
+        """
+
+    result = run(SPAWN_BOTH, program(5), program(9))
+    assert result.code_of(1) == 5
+    assert result.code_of(2) == 9

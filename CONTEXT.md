@@ -1335,3 +1335,28 @@ floating point (detrytus docs/rust.md). Here:
   large on detrytus, so `rmandel` uses `f32` and no division in its
   loop.
 - Atomics have no demo: a trylobite process has one thread.
+
+### 2026-11-25 · The binary floating point coprocessor in every process
+
+detrytus now has a binary floating point coprocessor, a device on page
+−15 with a bank of registers per hart, and `detrytus ll` runs Rust's
+`f32` and `f64` on it (detrytus platform.md, docs/rust.md). Here:
+
+- **Mapped for every process, at its physical address.** The kernel's
+  shared leaf table maps page −15 user-accessible, so one entry serves
+  every address space and `detrytus ll` can use the physical address.
+  Unlike the disk it moves no memory, so any process may use it; no
+  `drive` is needed. Rejected: mapping it per process on first use,
+  which would need a fault path and a table entry outside the shared
+  region for little gain.
+- **The bank is saved on every trap and restored when it changed
+  hands.** A process can be interrupted between writing an operation
+  and reading its result, and may resume on another hart, so `ktrap`
+  saves the eight words into `PCB_FPU` each time (16 instructions).
+  `resume` restores them only when `fpu_owner` says another process
+  used this hart's bank since. `spawn` forgets a reused slot's
+  ownership, so a new process never sees its predecessor's operands.
+  Rejected: saving lazily, which cannot follow a process that moves to
+  another hart, as a hart can read only its own bank.
+- **`rmandel` went from 3 908 to 754 trytes**, its `f32` arithmetic
+  now a few stores and loads instead of compiler_builtins calls.

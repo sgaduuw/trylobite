@@ -39,6 +39,13 @@
         .equ  V_HART,    -6 * PAGE        # ... and this hart's own
         .equ  V_POWER,   -5 * PAGE        # power-off register
         .equ  V_CONSOLE, -4 * PAGE        # console output register
+        .equ  V_FPU,    -15 * PAGE        # binary floating point coprocessor
+                                          # (detrytus platform.md, page -15): every
+                                          # process may use it, at its physical
+                                          # address, as detrytus ll's code expects
+        .equ  FPU_KA, V_FPU + DMAP        # the same, for the kernel: the direct map
+        .equ  FPU_REGS, 8                 # A, B, C, R: two words each, at
+                                          # FPU_KA - 9, -6, -3, 0, 3, 6, 12, 15
         .equ  CONSOLE_IN, 3               # with V_CONSOLE: the next input code
                                           # point, or one of these when there is none:
         .equ  CONSOLE_EMPTY, -1           # nothing yet: more may come
@@ -618,7 +625,9 @@
         .equ  PCB_NAME,   PCB_RAN + 2     # its name, PROC_NAME trytes, 0-padded:
                                           # the last part of argv[0] (spawnw) or
                                           # what it gave SYS_NAME; empty if neither
-        .equ  PCB_SIZE,   PCB_NAME + PROC_NAME + 1
+        .equ  PCB_FPU,    PCB_NAME + PROC_NAME + 1   # its coprocessor bank, FPU_REGS
+                                          # words in FPU_SAVED's order (trap.s)
+        .equ  PCB_SIZE,   PCB_FPU + 3 * FPU_REGS
         .assert PCB_SIZE % 3 == 0, "PCB_SIZE is not whole words"
         .assert PCB_NOTES + NPROC <= PCB_TURN - 1, "PCB_NOTES runs into PCB_TURN's trytes"
         .assert (NPROC % 3 == 0) * (NHANDLE % 3 == 0), "receive reads PCB_NOTES and PCB_CLOSED a word at a time"
