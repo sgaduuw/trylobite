@@ -31,10 +31,10 @@ sys_proc:
         li    t1, 0                    # pages: none once it has ended
         li    t2, ST_ZOMBIE
         beq   t0, t2, 2f
-        li    t1, PAGES_PER_PROCESS    # its own, and each window it has
-        mv    t2, s1
-        li    t3, NWIN
-1:      lw    t0, PCB_WINS(t2)
+        li    t1, PAGES_PER_PROCESS    # its own, and each image page above it
+        mv    t2, s1                   # and window it has
+        li    t3, NXPAGE + NWIN
+1:      lw    t0, PCB_XPAGES(t2)
         beqz  t0, 0f
         addi  t1, t1, 1
 0:      addi  t2, t2, 3

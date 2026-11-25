@@ -302,8 +302,10 @@ as on Unix: `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`,
 `sleep` and `df` (docs/kernel.md, System tools), and `ping`,
 `ifconfig`, `host` and `nc` for the network. `rhello`, `recho`,
 `rfact` (a table of factorials up to 34!, with `println!` and 128-bit
-integers) and `rmandel` (the Mandelbrot set in characters, in `f32`
-floating point on detrytus's binary coprocessor) are written in Rust, translated from rustc's LLVM IR by `detrytus ll`
+integers), `rmandel` (the Mandelbrot set in characters, in `f32`
+floating point on detrytus's binary coprocessor) and `rsqrt` (square
+roots printed with `{}`, a program of two blocks for core's float
+formatting) are written in Rust, translated from rustc's LLVM IR by `detrytus ll`
 (detrytus docs/rust.md); building them needs `rustup component add
 rust-src` and `rustup target add riscv32imac-unknown-none-elf`.
 
@@ -390,7 +392,7 @@ emulator, so trylobite has never run on hardware.
 | `kernel/data.s` | the process table, buffers, messages |
 | `kernel/pagetables.s` | the boot address space and the kernel's shared leaf table |
 | `user/` | programs built into the kernel image: `demo-init`, `ping` and `pong` for the demo; `init`, `sh`, `pingpong` and the servers `fsd`, `diskd`, `consd`, `piped`, `netd` and `ipd` for the shell |
-| `bin/` | programs for the disk, each assembled on its own: `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `cp`, `mv`, `touch`, the system tools `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`, and `ping`, `ifconfig`, `host` and `nc` for the network; and in Rust, `rhello`, `recho`, `rfact` and `rmandel` |
+| `bin/` | programs for the disk, each assembled on its own: `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `cp`, `mv`, `touch`, the system tools `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`, and `ping`, `ifconfig`, `host` and `nc` for the network; and in Rust, `rhello`, `recho`, `rfact`, `rmandel` and `rsqrt` |
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
 | `shell.s` | an 81-page machine starting the shell and its servers |
 | `docs/` | the kernel and the filesystem, described |

@@ -91,10 +91,11 @@ the root. A path has at most
 A file is trytes. Two kinds use this:
 
 - **Text**: one code point per tryte, 1 to 9,841.
-- **Programs**: `EXEC_MAGIC` as the first word, then the program's
-  image, at most `EXEC_MAX` (9,843) trytes, so only the first block
-  matters. The magic word's first tryte is negative, which no text
-  file's is.
+- **Programs**: `EXEC_MAGIC` as the first word, the image's size in
+  trytes as the second (`EXEC_SIZE`), then the program's image, at most
+  `EXEC_MAX` (177,141) trytes: as many blocks as the file server's nine
+  windows hold, less the two words. The magic word's first tryte is
+  negative, which no text file's is.
 
 ## The file server's calls
 
@@ -156,7 +157,7 @@ file's last block) and `E_BUSY`.
 |-----------|------|------|
 | `FS_OPEN` (0) | `open(path, flags)` | gives the caller's lowest free descriptor (of `NDESC`, 9), at position 0 of the file or directory. `flags` is below. `E_MFILE` when the caller has no descriptor free, or the server has `NFILE` (27) files open; with `O_CREAT` the file may have been made by then |
 | `FS_STAT` (5) | `stat(path, buffer)` | four words at the word-aligned buffer: `ST_INO`, `ST_TYPE`, `ST_LINKS` and `ST_SIZE` |
-| `FS_SPAWN` (6) | `spawnf(path, args, n)` | starts the program file at the path as the caller's child, with the `n` trytes of arguments at `args` in the caller's memory (Program arguments): the server reads its first block into a window and gives it to `spawnw` with the caller as the parent. Anything but a program file is `E_NOEXEC` |
+| `FS_SPAWN` (6) | `spawnf(path, args, n)` | starts the program file at the path as the caller's child, with the `n` trytes of arguments at `args` in the caller's memory (Program arguments): the server reads its blocks into consecutive windows (the first stays where its cache read it if the rest fit after it), and gives them to `spawnw` with the caller as the parent. Anything but a program file is `E_NOEXEC` |
 | `FS_UNLINK` (8) | `unlink(path)` | removes a file's name from its directory, and frees the file when no name is left. A directory is `E_ISDIR`, a name `.` or `..` `E_INVAL` |
 | `FS_MKDIR` (9) | `mkdir(path)` | makes an empty directory, holding `.` and `..`: `E_EXIST` if the name is taken |
 | `FS_RMDIR` (10) | `rmdir(path)` | removes an empty directory (`E_NOTEMPTY` otherwise); the root is `E_BUSY`, a name `.` or `..` `E_INVAL` |
@@ -266,12 +267,16 @@ they are `echo`, `upper`, `wc`, `head` and `grep` for text, and `cp`,
 Every process runs from `V_USER`, so a program is assembled to run
 there and needs no relocating: its image is what it holds from
 `V_USER − 1` (the low tryte of its first word, at `V_USER`) upward.
-`spawnw`, given the file's first block in a block window, checks the
-magic word, copies the image to `V_USER` in a fresh
-page, clears the rest of the page, and starts the new process at
-`V_USER` with `gp` at `USER_GP`, as `spawn` starts a built-in program.
-The image includes the program's stack space: the stack starts at the
-top of the page and grows down towards the image.
+`spawnw`, given the file's blocks in consecutive block windows, checks
+the magic word and that the windows hold the whole image, copies the
+image to `V_USER` in a fresh page, and on into as many pages above it
+as it needs (`NXPAGE` at most), clears the rest, and starts the new
+process at `V_USER` with `gp` at `USER_GP` and `sp` at `USER_SP`, as
+`spawn` starts a built-in program. `USER_SP` is `V_USER`: the stack
+grows down from just below the image, through the lower half of the
+page, towards the arguments at its bottom (Program arguments), about
+8,800 trytes of it. Since the file server has nine windows, a program
+file has at most nine blocks.
 
 A program for the disk is a file of its own, assembled where it loads
 and runs:
@@ -293,9 +298,9 @@ of them and `a1` the address `V_ARGV`, where a word per argument holds
 the address of its string, ended by 0, and a 0 word follows the last.
 The parent names a block of at most `ARG_MAX` (243) trytes in its own
 memory, the strings one after another, each ended by 0 (the last may
-end at the block's end instead); `spawnw` copies it into the lower half
-of the child's page, which nothing else uses, from `V_ARGS`, and builds
-the list at `V_ARGV`, the page's first word. The block is read in the
+end at the block's end instead); `spawnw` copies it into the bottom of
+the lower half of the child's page, below its stack, from `V_ARGS`,
+and builds the list at `V_ARGV`, the page's first word. The block is read in the
 parent's memory whoever calls, so the file server passes its client's
 `args` and `n` straight to `spawnw` without copying them. A count out of
 range is `E_INVAL`, a block not all in the parent's memory `E_FAULT`,
@@ -341,7 +346,7 @@ Given an image assembled by `detrytus asm`, or a `.s` file, which it
 assembles with `detrytus` first, `put` and `new` store it as a program
 file, named after the file without `.dti` or `.s`, in `/bin` unless a
 path is given, and refuse one that does not lie between `V_USER − 1`
-and the top of the page. `cat` refuses a program file, and `rm` a
+and `EXEC_MAX` trytes above it. `cat` refuses a program file, and `rm` a
 directory with anything in it.
 
 ## Later

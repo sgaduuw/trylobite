@@ -47,14 +47,20 @@ Every address space has three regions, one per mid-table entry:
 |--------|---------------|----------|
 | direct map | around −6561 | all of physical memory, kernel only: kernel virtual = physical − 3¹⁷ |
 | kernel | −15, −7 to −2 | the binary floating point coprocessor, which every process may use; the hart controller (its slots, and this hart's own), power off, console, kernel code, kernel data and stack; page 0 unmapped |
-| process | 6561 (`V_USER`) | the process's code, data and stack |
+| process | 6561 (`V_USER`) and up | the process's code, data and stack; the pages above its own that a large program's image takes; its block windows |
 
 The first two regions are shared by every address space. A new process
 costs four pages: a root, a mid and a leaf table, and its own page,
 into which `spawn` copies the program image loaded at boot, or
-`spawnw` a program file read from the disk. Block windows take up to
-nine more, as a process asks for them; a driver also has its device's
-registers mapped past them, at `V_DEVICE`.
+`spawnw` a program file read from the disk. A program runs from
+`V_USER − 1` up and its stack from `V_USER` down, through the lower
+half of its page (below its arguments, for a program file). A program
+file's image may go on past its own page, through up to `NXPAGE` (9)
+pages above it, which `spawnw` makes as it needs them: `rsqrt`, whose
+float formatting comes to about 22,000 trytes, takes one. Block
+windows take up to nine more pages, as a process asks for them, from
+`V_BLOCK`, past those; a driver also has its device's registers mapped
+past them, at `V_DEVICE`.
 
 The binary floating point coprocessor (detrytus platform.md, page −15)
 is mapped for every process at its physical address, `V_FPU`, where
@@ -94,7 +100,7 @@ is as it was, since the trap entry saves them all. Trice relies on this
 | 8 | `hart()` | the number of the hart running the caller, −4 to +4 |
 | 10 | `wait(pid)` | how child `pid` ended, once it has: `a0` 0 exited, 1 faulted or 2 killed, `a1` its exit code, trap cause, or 0 when killed; `a0` −2 if `pid` is not the caller's child |
 | 13 | `kill(pid, for)` | ends `pid` before it runs again, a child of the caller when `for` is `FOR_SELF` (−1), or, for a driver, a child of process `for`: 0; 1 (`KILL_ENDED`) if it had ended already; −2 if `pid` is not that process's child, −21 `for` from a process that drives nothing. With `for` `KILL_ANY` (−2), any process but init: 0; −2 none, or it has ended; −21 for init |
-| 15 | `spawnw(window, for, args, n)` | starts the program file whose first block is in block window `window` (docs/filesystem.md), as the caller's child when `for` is `FOR_SELF` (−1), or as the child of process `for`, whose call the caller holds, with the `n` trytes of arguments at `args` in that parent's memory (docs/filesystem.md, Program arguments): as `spawn`, with −2 when there is no window or no program in it, or `for` is not waiting for the caller, −10 (`E_INVAL`) for `n` below 0 or above `ARG_MAX`, −12 (`E_FAULT`) for arguments not all in the parent's memory |
+| 15 | `spawnw(window, for, args, n)` | starts the program file whose first block is in block window `window`, and each next block in the next window (docs/filesystem.md), as the caller's child when `for` is `FOR_SELF` (−1), or as the child of process `for`, whose call the caller holds, with the `n` trytes of arguments at `args` in that parent's memory (docs/filesystem.md, Program arguments): as `spawn`, with −2 when there is no window or no program in it, its image is larger than `EXEC_MAX` or runs past the windows the caller has, or `for` is not waiting for the caller, −10 (`E_INVAL`) for `n` below 0 or above `ARG_MAX`, −12 (`E_FAULT`) for arguments not all in the parent's memory |
 | 16 | `close(fd)` | empties descriptor `fd`: 0; −8 if it names nothing |
 | 17 | `give(pid, handle)` | puts the caller's `handle`, 0 to 26, in the lowest free descriptor of process `pid`, whose call the caller holds: the descriptor; −9 none free, −2 `pid` is not waiting for the caller, −10 no such handle |
 | 18 | `dup2(fd, to)` | makes descriptor `to` a copy of `fd`, closing what `to` held: `to`; −8 if `fd` names nothing or `to` is not 0 to 8 |
@@ -166,8 +172,8 @@ the `time` CSR, counts one tick per step (detrytus platform.md, Time),
 so times are in ticks.
 
 **Processes.** `proc` fills, for one process, `PI_STATE` (an `ST_`
-value), `PI_PARENT` (`NO_PARENT`, −1, for none), `PI_PAGES` (its four
-and its block windows; 0 once ended), `PI_CPU` (the ticks it has run in
+value), `PI_PARENT` (`NO_PARENT`, −1, for none), `PI_PAGES` (its four,
+its image's pages above its own and its block windows; 0 once ended), `PI_CPU` (the ticks it has run in
 user mode: the kernel adds the time from `resume` to the next trap) and
 its name, 8 code points and a 0 from `PI_NAME`. A process's name is the
 last part of the first argument `spawnw` gave it (`/bin/ps` is `ps`), or
@@ -312,7 +318,8 @@ foreground process.
 
 A block is one page, and a process's own page holds its code, so blocks
 travel through **block windows**: up to nine pages, window `k` at
-`V_BLOCK + PAGE × k` just above the process's own, each made by
+`V_BLOCK + PAGE × k`, above the process's own and the `NXPAGE` a large
+program's image may take, each made by
 `window` and freed when the process ends. The disk belongs to a
 process, the **disk server** (`user/diskd.s`), which registers as
 `disk`, protocol `DISK_PROTOCOL`: a call to it with `DK_READ` or
