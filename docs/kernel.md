@@ -416,7 +416,10 @@ back, where pinging the machine's own address runs the whole exchange,
 or `--net udp:LOCAL,PEER` to carry frames over UDP to another machine
 (detrytus `README.md`): give the second one another `--mac` and
 another address with `ifconfig`, and run both with `--live` so that
-their clocks keep to real time. The tests start the servers with
+their clocks keep to real time. `--net user` reaches the host's
+network through a gateway detrytus plays at 10.0.0.1, the default
+gateway, which translates to the host's sockets and stands for the
+host itself (detrytus `docs/platform.md`). The tests start the servers with
 `run(..., net=True, link="loop")`, or `ip=True` for both.
 
 ## Files
