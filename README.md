@@ -40,9 +40,10 @@ sea floor, living among the detritus.
 - **A shell** with built-ins (`ls`, `cat`, `cd`, `pwd`, `mkdir`, ...),
   programs run from `/bin` on the disk with arguments, `<`, `>` and
   `>>` redirection, `|` pipelines, quoting, and Ctrl-C to end a program.
-- **The start of a network stack:** a driver for the network device and
-  an IP server that speaks ARP, ICMP echo and UDP, so two machines
-  linked over UDP can `ping` each other and pass datagrams with `nc`.
+- **A network stack:** a driver for the network device and an IP
+  server that speaks ARP, ICMP echo, UDP and TCP, so two machines
+  linked over UDP can `ping` each other, pass datagrams and hold TCP
+  connections with `nc`.
 
 ## Ternary all the way down
 
@@ -246,14 +247,17 @@ no reply from 10.0.0.4: seq 1
 sh: exit 1
 $ echo and back | nc -u 10.0.0.2 7
 and back
-$ echo hello from B | nc -u 10.0.0.2 9000
+$ echo over tcp | nc 10.0.0.2 7
+over tcp
+$ echo hello from B | nc 10.0.0.2 9000
 ```
 
-Port 7 is the IP server's echo service. The last line arrives on the
-first machine if it is listening there:
+Port 7 is the IP server's echo service, for UDP and TCP. The last line
+goes over a TCP connection to the first machine, if it is listening
+there:
 
 ```text
-$ nc -u -l 9000
+$ nc -l 9000
 hello from B
 ```
 
@@ -284,7 +288,7 @@ while it runs, and the kernel reports each.
           ┌──▶ fsd (files) ──▶ diskd (disk) ──▶ block device
           ├──▶ consd (console) ──▶ console
   sh ─────┼──▶ piped (pipes)
-          └──▶ ipd (ARP, ping, UDP) ──▶ netd (frames) ──▶ network device
+          └──▶ ipd (ARP, ping, UDP, TCP) ──▶ netd (frames) ──▶ network device
 
   every arrow is a call through the kernel: call / receive / reply
   init, program 0, starts the servers and then sh
@@ -299,7 +303,7 @@ while it runs, and the kernel reports each.
 | `user/consd.s` | `console` | drives the console: input, output, Ctrl-C for the foreground program |
 | `user/piped.s` | `pipe` | pipes |
 | `user/netd.s` | `net` | drives the network device: Ethernet frames, moved by DMA |
-| `user/ipd.s` | `ip` | IPv4: answers ARP and pings, sends pings for `bin/ping`, and UDP |
+| `user/ipd.s` | `ip` | IPv4: answers ARP and pings, sends pings for `bin/ping`, UDP, and TCP connections as descriptors |
 
 A client finds a server by name (`lookup("fs")`), and talks to it with
 `call`, or through a descriptor the server gave it. The kernel copies no

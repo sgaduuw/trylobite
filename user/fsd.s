@@ -1849,11 +1849,12 @@ fs_busy:
 fs_ops: .word fs_open, fs_inval, fs_inval, fs_inval, fs_inval, fs_stat
         .word fs_spawn, fs_inval, fs_unlink, fs_mkdir, fs_rmdir, fs_chdir
         .word fs_getcwd, fs_statfs, fs_rename # 1 to 4 and 7 are descriptor calls now
-fs_ioops: .word fs_readdir, fs_lseek, fs_write, fs_read   # from IO_FIRST
-        .assert IO_READDIR == IO_FIRST, "fs_ioops must list the IO_ operations in order"
-        .assert IO_LSEEK == IO_FIRST + 1, "fs_ioops must list the IO_ operations in order"
-        .assert IO_WRITE == IO_FIRST + 2, "fs_ioops must list the IO_ operations in order"
-        .assert IO_READ == IO_FIRST + 3, "fs_ioops must list the IO_ operations in order"
+fs_ioops: .word fs_inval, fs_readdir, fs_lseek, fs_write, fs_read   # from IO_FIRST
+        .assert IO_SHUTDOWN == IO_FIRST, "fs_ioops must list the IO_ operations in order"
+        .assert IO_READDIR == IO_FIRST + 1, "fs_ioops must list the IO_ operations in order"
+        .assert IO_LSEEK == IO_FIRST + 2, "fs_ioops must list the IO_ operations in order"
+        .assert IO_WRITE == IO_FIRST + 3, "fs_ioops must list the IO_ operations in order"
+        .assert IO_READ == IO_FIRST + 4, "fs_ioops must list the IO_ operations in order"
         .assert NFILE <= NHANDLE, "more files than handles to give for them"
         .assert FS_RENAME == FS_NOPS - 1, "fs_ops must list every FS_ operation"
 

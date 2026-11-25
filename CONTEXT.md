@@ -1457,3 +1457,39 @@ The IP server carries UDP, and `bin/nc` uses it.
 - **Checksums** are sent always and checked when present, with the
   pseudo-header's sum fed to `ip_sum` as its start.
 - **No fragments**: a datagram fits one frame, 1,472 octets of data.
+
+### 2026-11-25 · TCP
+
+The IP server carries TCP, and `bin/nc` uses it by default.
+
+- **A connection is a descriptor,** given by the IP server, so `read`,
+  `write`, `close`, `dup2` and inheritance work on it as on a file or a
+  pipe, and the shell can redirect a program onto one. The handle is
+  the connection's number. Connect and accept answer with a descriptor;
+  closing the last one closes the connection (`NOTE_CLOSED`).
+- **`IO_SHUTDOWN` is a new descriptor operation** (−5, now `IO_FIRST`),
+  for a half-close: `nc` sends its input, shuts down writing and reads
+  the answer, which a request-and-reply peer such as the echo service
+  needs. Other servers refuse it with `E_INVAL`.
+- **Stop-and-wait, one segment in flight:** simple, and a receive
+  window the size of one segment (1,460 octets, our MSS) keeps the
+  buffers in two block windows, eight connections each way. A fixed
+  retransmission time (300,000 ticks) and six tries; probing a closed
+  window does not count as a try, or two peers waiting on each other
+  would reset after six probes. Sliding windows and a measured RTT can
+  come when throughput matters.
+- **The handshake does not wait for accept,** as on Unix: a listener's
+  connections queue in the eight records until accepted, and are reset
+  if it ends first.
+- **No TIME-WAIT**: a connection is forgotten once both FINs are
+  acknowledged (or, after our FIN, a while later without theirs). A
+  late copy of the other end's FIN then gets a reset, which harms
+  nothing it was waiting for.
+- **ip_tx and ip_rx moved to window 1,** beside the transmit buffers:
+  the server's code and data had grown to two thirds of its page, and
+  frames were 3,028 trytes of it.
+- **Tested over loss:** two machines over UDP through a proxy that
+  drops a quarter of the datagrams pass 4,000 octets through the echo
+  service whole; that found the two retransmission bugs fixed before
+  it went in (a SYN+ACK sent again after the handshake was
+  answered with a SYN, and probes counting as tries).

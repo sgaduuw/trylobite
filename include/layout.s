@@ -275,7 +275,10 @@
         .equ  IO_READDIR, -4              # readdir(handle, buffer): the next
                                           # entry's inode, its name to the buffer;
                                           # 0 at the end (directories)
-        .equ  IO_FIRST,  -4               # the lowest IO_ operation
+        .equ  IO_SHUTDOWN, -5             # shutdown(handle): no more writing; the
+                                          # other end reads to its end, while this
+                                          # one can still read (TCP connections): 0
+        .equ  IO_FIRST,  -5               # the lowest IO_ operation
 
 # Messages for servers (docs/kernel.md, Messages for servers). A message is four words, a2 to
 # a5 as sent; a server answers each call with a reply of four words.
@@ -561,7 +564,7 @@
 # it has the IP_ operation in a2 and the arguments in a3 to a5; the
 # reply's first word is the result. An address is a word: a.b.c.d is
 # a * 2^24 + b * 2^16 + c * 2^8 + d.
-        .equ  IP_PROTOCOL, 2
+        .equ  IP_PROTOCOL, 3
         .equ  IP_PING,    0               # ping(address, seq, wait): send an ICMP
                                           # echo request numbered seq (0 to
                                           # 65535) and wait up to wait rounds
@@ -591,6 +594,26 @@
                                           # for ever): its length; E_TIMEDOUT,
                                           # E_NOROOM (longer than size, and gone),
                                           # E_INVAL (no port, size below 6), E_FAULT
+        .equ  IP_CONNECT, 6               # connect(address, port): open a TCP
+                                          # connection, waiting for the handshake:
+                                          # its descriptor; E_REFUSED, E_TIMEDOUT,
+                                          # E_NOROUTE, E_NOSPC (every connection in
+                                          # use), E_MFILE, E_INVAL, E_IO
+        .equ  IP_LISTEN,  7               # listen(port): take connections to TCP
+                                          # port port (1 to 65535) for the caller,
+                                          # in place of any it listened on; 0 stops:
+                                          # 0; E_BUSY (another process listens
+                                          # there), E_INVAL
+        .equ  IP_ACCEPT,  8               # accept(): wait for a connection to the
+                                          # port the caller listens on: a0 = its
+                                          # descriptor, a1 = the other end's address,
+                                          # a2 its port; E_INVAL (not listening),
+                                          # E_MFILE
+# A connection is a descriptor: IO_READ waits for data and gives 0 once
+# the other end has closed; IO_WRITE waits until all n octets are queued
+# to send. Either is E_RESET once the other end reset the connection, or
+# E_TIMEDOUT once it stopped answering. Closing the last descriptor
+# closes the connection, after what was written has been delivered.
 
 # Pipes come from the pipe server, which registers as "pipe" with
 # protocol PIPE_PROTOCOL. Its ends are descriptors: IO_READ waits for
@@ -646,6 +669,8 @@
         .equ  E_PIPE,   -22               # pipe write: no read end is open
         .equ  E_TIMEDOUT, -23             # ping: no reply in time
         .equ  E_NOROUTE, -24              # ping: off the network, and no gateway
+        .equ  E_REFUSED, -25              # connect: nothing listens on that port
+        .equ  E_RESET,  -26               # a connection: the other end reset it
 
         .equ  O_RDONLY, 0                 # open: the access mode is the flags mod
         .equ  O_WRONLY, 1                 # 3. Add any of O_CREAT (make a file not
