@@ -779,7 +779,9 @@ def rust_ir(source: Path) -> list[Path]:
         _CARGO_TOML.format(name=name, source=source.resolve())
     )
     target = work / "target"
-    deps = target / RUST_TARGET / "release" / "deps"
+    # Where cargo leaves the IR moved in 1.100 (deps/ before, build/<crate>/
+    # <hash>/out/ since), so look under the whole release directory.
+    release = target / RUST_TARGET / "release"
     env = {
         **os.environ,
         "RUSTC_BOOTSTRAP": "1",
@@ -803,12 +805,13 @@ def rust_ir(source: Path) -> list[Path]:
             raise FsError(done.stderr.strip())
 
     def newest(pattern: str) -> list[Path]:
-        return sorted(deps.glob(pattern), key=lambda p: p.stat().st_mtime)
+        return sorted(release.rglob(pattern), key=lambda p: p.stat().st_mtime)
 
     program = newest(f"{name}-*.ll")
     core = newest("core-*.ll")
     if not program or not core:
-        raise FsError(f"cargo left no LLVM IR for {source}")
+        found = ", ".join(sorted(p.name for p in release.rglob("*.ll"))) or "none"
+        raise FsError(f"cargo left no LLVM IR for {source} (in {release}: {found})")
     return [program[-1], core[-1]]
 
 
