@@ -76,11 +76,12 @@ detrytus run demo.s --ram-pages 40 --harts 3
 
 ```text
 trylobite: version 0.1.0, a microkernel for detrytus, the balanced-ternary machine
-trylobite: memory: 40 pages (787320 trytes), 32 free
+trylobite: memory: 40 pages (787320 trytes), 31 free
 trylobite: harts: 3
-trylobite: irq0: interrupt controller, 2 sources, at page -13
+trylobite: irq0: interrupt controller, 3 sources, at page -13
 trylobite: cons0: console, at page -1
 trylobite: disk0: block device, no disk, at page -14
+trylobite: net0: network device, no link, at page -16
 trylobite: process table: 27 slots, 3 programs in the image
 trylobite: starting init
 init: starting pong and ping
@@ -108,11 +109,12 @@ detrytus run shell.s --ram-pages 81 --input session.txt --disk disk.img
 
 ```text
 trylobite: version 0.1.0, a microkernel for detrytus, the balanced-ternary machine
-trylobite: memory: 81 pages (1594323 trytes), 67 free
+trylobite: memory: 81 pages (1594323 trytes), 66 free
 trylobite: harts: 1
-trylobite: irq0: interrupt controller, 2 sources, at page -13
+trylobite: irq0: interrupt controller, 3 sources, at page -13
 trylobite: cons0: console, at page -1
 trylobite: disk0: block device, 100 blocks, at page -14
+trylobite: net0: network device, no link, at page -16
 trylobite: process table: 27 slots, 9 programs in the image
 trylobite: starting init
 init: started console, process 1
@@ -170,11 +172,12 @@ detrytus run shell.s --ram-pages 81 --disk disk.img
 
 ```text
 trylobite: version 0.1.0, a microkernel for detrytus, the balanced-ternary machine
-trylobite: memory: 81 pages (1594323 trytes), 67 free
+trylobite: memory: 81 pages (1594323 trytes), 66 free
 trylobite: harts: 1
-trylobite: irq0: interrupt controller, 2 sources, at page -13
+trylobite: irq0: interrupt controller, 3 sources, at page -13
 trylobite: cons0: console, at page -1
 trylobite: disk0: block device, 100 blocks, at page -14
+trylobite: net0: network device, no link, at page -16
 trylobite: process table: 27 slots, 9 programs in the image
 trylobite: starting init
 init: started console, process 1

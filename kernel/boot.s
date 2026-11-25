@@ -64,6 +64,23 @@ boot_report:
 3:      call  kputs
         li    a1, P_DISK
         call  boot_page
+        la    a0, msg_net
+        call  kputs
+        li    t0, NET_KA
+        lw    t1, NET_LINK(t0)
+        la    a0, msg_nolink
+        blez  t1, 4f
+        lw    a2, NET_MAC_HI(t0)       # its address, as BSD's ifconfig shows it
+        call  boot_octets
+        li    a0, ':'
+        call  kputc
+        li    t0, NET_KA
+        lw    a2, NET_MAC_LO(t0)
+        call  boot_octets
+        la    a0, msg_empty
+4:      call  kputs
+        li    a1, P_NET
+        call  boot_page
 
         la    a0, msg_slots            # the process table, and the programs
         call  kputs                    # the image brings
@@ -97,6 +114,41 @@ harts_present:
         li    t0, HART_MAX
         ble   a2, t0, 1b
         ret
+
+# boot_octets: print a2, 24 bits, as three octets in hexadecimal with
+# colons between. Clobbers a0..a2, t0..t5.
+boot_octets:
+        addi  sp, sp, -6
+        sw    ra, 0(sp)
+        li    a1, 65536                # a1: the octet's place
+1:      div   t1, a2, a1
+        rem   a2, a2, a1
+        sw    t1, 3(sp)
+        li    t2, 16
+        div   a0, t1, t2
+        call  boot_hex
+        lw    t1, 3(sp)
+        li    t2, 16
+        rem   a0, t1, t2
+        call  boot_hex
+        li    t2, 256
+        div   a1, a1, t2
+        beqz  a1, 2f
+        li    a0, ':'
+        call  kputc
+        j     1b
+2:      lw    ra, 0(sp)
+        addi  sp, sp, 6
+        ret
+
+# boot_hex: print a0, 0 to 15, as a hexadecimal digit. Clobbers a0,
+# t0..t5.
+boot_hex:
+        li    t0, 10
+        blt   a0, t0, 1f
+        addi  a0, a0, 'a' - '0' - 10
+1:      addi  a0, a0, '0'
+        j     kputc                    # which returns to our caller
 
 # boot_page: ", at page " a1 and the end of the line. Clobbers a0, t0..t5.
 boot_page:

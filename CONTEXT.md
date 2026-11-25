@@ -1360,3 +1360,29 @@ detrytus now has a binary floating point coprocessor, a device on page
   another hart, as a hart can read only its own bank.
 - **`rmandel` went from 3 908 to 754 trytes**, its `f32` arithmetic
   now a few stores and loads instead of compiler_builtins calls.
+
+### 2026-11-25 · The network server
+
+detrytus has a network device (page −16, source 3): Ethernet frames,
+octets one to a tryte, moved by DMA through a send and a receive
+channel, with a loopback link and a UDP link to the outside. The first
+step toward TCP/IP is its driver, `user/netd.s`, registered as `net`:
+
+- **A server like the disk's.** It drives the source, has the device
+  move frames through two windows of its own (one to send from, one to
+  receive into) and copies them to and from callers, so the device
+  never writes a page a client could free. Calls wait their turn one
+  per process, as the disk server's do.
+- **Frames, not packets.** `NT_SEND`, `NT_RECEIVE` and `NT_ADDRESS`
+  are the whole protocol. ARP, IP and TCP go in a stack server above
+  it, which will be netd's one real client; until then, readers are
+  served in turn, and a frame waits in the server for the next one.
+- **The interrupt is armed only while somebody waits on the device.**
+  An armed source keeps the kernel waiting rather than stopping a
+  machine whose processes all sleep, so a server that always listened
+  would keep every run alive. A network stack keeps a receive waiting
+  when it wants to listen.
+- **Not in `shell.s` yet.** Starting it there renumbers the shell and
+  every program after it, for a server nothing in the shell uses; it
+  joins init's rows with the stack that needs it. `NSRC` is 3, which
+  still fits `PCB_IRQS` in one word.

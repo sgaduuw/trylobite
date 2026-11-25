@@ -183,6 +183,7 @@ drv_ended:
 dev_pages:
         .word P_CONSOLE
         .word P_DISK
+        .word P_NET
 dev_pages_end:
         .assert dev_pages_end - dev_pages == 3 * NSRC, "a source without a register page in dev_pages"
 
