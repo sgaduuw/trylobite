@@ -164,3 +164,33 @@ def test_without_a_link_sends_and_receives_fail():
         link=None,
     )
     assert result.code_of(0) == 0, result.console
+
+
+def test_an_armed_device_does_not_keep_the_machine_on_for_nobody():
+    # A driver arms the network device and waits in receive; once init is
+    # done nobody waits on anything, so a frame could serve nobody, and the
+    # machine stops rather than waiting for one.
+    driver = """
+        li    a0, SYS_DRIVE
+        li    a1, SRC_NET
+        sys
+        li    a0, SYS_ARM
+        li    a1, SRC_NET
+        sys
+1:      li    a0, SYS_RECEIVE
+        sys
+        j     1b
+"""
+    result = run_kernel(
+        f"""
+        {start(1)}
+        li    s4, 3000                 # time for the driver to arm
+1:      addi  s4, s4, -1
+        bnez  s4, 1b
+        li    a1, 0
+        {EXIT}
+""",
+        driver,
+        link="loop",
+    )
+    assert "all processes exited" in result.console, result.console

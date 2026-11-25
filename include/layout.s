@@ -299,6 +299,8 @@
                                           # receiver drives, interrupted
         .equ  NOTE_CLOSED, 2              # ... no descriptor names handle a2 of
                                           # the receiver's any more
+        .equ  NOTE_SIGNAL, 3              # ... process a2 notified the receiver
+        .equ  NOTE_ALARM, 4               # ... the receiver's alarm went off
 
 # Server names (docs/kernel.md, Names). A server registers a name and the
 # version of the protocol it speaks once it is ready to take calls; a
@@ -413,6 +415,18 @@
                                           # reaches a1: 0. Absolute, so a loop
                                           # that adds its period each time keeps
                                           # step (bin/top, bin/sleep)
+        .equ  SYS_NOTIFY, 39              # notify(pid): tell process a1, without
+                                          # waiting, that the caller wants its
+                                          # attention: its receive gives a
+                                          # NOTE_SIGNAL notice naming the caller,
+                                          # once however often it was notified
+                                          # since: 0, E_NOPROC, E_SELF
+        .equ  SYS_ALARM, 40               # alarm(until): when the time CSR reaches
+                                          # a1, the caller's receive gives a
+                                          # NOTE_ALARM notice; a later alarm
+                                          # replaces an earlier one, and
+                                          # NO_ALARM cancels it: 0
+        .equ  NO_ALARM, -1
 
 # Files (docs/filesystem.md) come from the file server, which registers
 # as "fs" with protocol FS_PROTOCOL; a program looks it up once, and
@@ -679,9 +693,17 @@
                                           # what it gave SYS_NAME; empty if neither
         .equ  PCB_FPU,    PCB_NAME + PROC_NAME + 1   # its coprocessor bank, FPU_REGS
                                           # words in FPU_SAVED's order (trap.s)
-        .equ  PCB_SIZE,   PCB_FPU + 3 * FPU_REGS
+        .equ  PCB_ALARM,  PCB_FPU + 3 * FPU_REGS   # when its alarm goes off,
+                                          # or 0 for none (alarm stores 1 for 0)
+        .equ  PCB_RANG,   PCB_ALARM + 3   # 1 once it has gone off, until receive
+                                          # tells it
+        .equ  PCB_SIGNALS, PCB_RANG + 2   # NPROC trytes (in the words from
+                                          # PCB_RANG + 3): 1 for each process that
+                                          # has notified it since receive last told it
+        .equ  PCB_SIZE,   PCB_SIGNALS + NPROC + 1
         .assert PCB_SIZE % 3 == 0, "PCB_SIZE is not whole words"
         .assert PCB_NOTES + NPROC <= PCB_TURN - 1, "PCB_NOTES runs into PCB_TURN's trytes"
+        .assert (PCB_SIGNALS + 1) % 3 == 0, "receive reads PCB_SIGNALS a word at a time"
         .assert (NPROC % 3 == 0) * (NHANDLE % 3 == 0), "receive reads PCB_NOTES and PCB_CLOSED a word at a time"
         .assert PCB_IRQS + NSRC <= 125, "PCB_IRQS runs into PCB_RETRY's word"
         .equ  PAGES_PER_PROCESS, 4

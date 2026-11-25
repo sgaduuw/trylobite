@@ -453,3 +453,113 @@ def test_block_windows_are_freed_with_their_process():
     result = run(init, child, ram_pages=35, disk_server=True)
     assert result.code_of(0) == 0
     assert [c for p, c in result.exits() if p != 0] == [0, 0, 0]
+
+
+# --- notify and alarm ------------------------------------------------------------
+
+
+def test_notify_gives_one_notice_however_often_it_came():
+    # Init notifies the server twice while it sleeps; its receive then
+    # gives one NOTE_SIGNAL naming init, and the next gives the alarm, not
+    # a second notice.
+    server = """
+        .gp   USER_GP
+        csrr  a1, time
+        li    t0, 3000
+        add   a1, a1, t0
+        li    a0, SYS_SLEEP
+        sys
+        li    a0, SYS_RECEIVE
+        sys
+        li    s1, 1000                 # s1: 1000 for a notice not the kernel's
+        li    t0, FROM_KERNEL
+        bne   a0, t0, 1f
+        li    s1, 0
+1:      li    t0, 100
+        mul   t0, a1, t0
+        add   s1, s1, t0
+        li    t0, 10
+        mul   t0, a2, t0
+        add   s1, s1, t0
+        csrr  a1, time
+        addi  a1, a1, 100
+        li    a0, SYS_ALARM
+        sys
+        add   s1, s1, a0
+        li    a0, SYS_RECEIVE
+        sys
+        add   s1, s1, a1               # NOTE_ALARM
+        mv    a1, s1
+        li    a0, SYS_EXIT
+        sys
+"""
+    init = f"""
+        .gp   USER_GP
+        {spawn(1, "s1")}
+        li    a0, SYS_NOTIFY
+        mv    a1, s1
+        sys
+        call  putn
+        li    a0, SYS_NOTIFY
+        mv    a1, s1
+        sys
+        call  putn
+        li    a0, SYS_NOTIFY           # itself
+        li    a1, 0
+        sys
+        call  putn
+        li    a0, SYS_NOTIFY           # nobody
+        li    a1, NPROC - 1
+        sys
+        call  putn
+        {wait_for("s1")}
+        mv    a0, a1
+        call  putn
+        li    a1, 0
+        {EXIT}
+{PUTN}
+"""
+    result = run(init, server)
+    assert said(result) == [0, 0, E_SELF, E_NOPROC, 304], result.console
+
+
+def test_an_alarm_wakes_receive_once_its_time_has_come():
+    # A later alarm replaces an earlier one, NO_ALARM cancels, and the
+    # alarm alone keeps the machine on: nobody is stuck while it is set.
+    program = """
+        .gp   USER_GP
+        csrr  s0, time
+        li    t0, 1000
+        add   a1, s0, t0
+        li    a0, SYS_ALARM            # replaced below
+        sys
+        li    t0, 50000
+        add   s0, s0, t0               # s0: when it rings
+        mv    a1, s0
+        li    a0, SYS_ALARM
+        sys
+        li    a0, SYS_RECEIVE
+        sys
+        csrr  t0, time
+        li    s1, 0
+        bge   t0, s0, 1f
+        li    s1, 1000                 # rang early
+1:      li    t0, FROM_KERNEL
+        beq   a0, t0, 1f
+        addi  s1, s1, 100
+1:      add   s1, s1, a1               # NOTE_ALARM
+        csrr  a1, time
+        addi  a1, a1, 100
+        li    a0, SYS_ALARM
+        sys
+        li    a0, SYS_ALARM
+        li    a1, NO_ALARM
+        sys
+        add   a1, s1, a0
+        li    a0, SYS_EXIT             # nothing left set: the machine stops
+        sys
+"""
+    result = run(program)
+    assert result.code_of(0) == 4, result.console
+    assert "all processes exited" in result.console
+

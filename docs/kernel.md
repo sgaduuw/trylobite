@@ -103,14 +103,14 @@ is as it was, since the trap entry saves them all. Trice relies on this
 | 21 | `write(fd, buffer, n)` | `iocall` with `IO_WRITE`: how many were written |
 | 22 | `fdflags(fd, flags)` | sets descriptor `fd`'s flags: `FD_NOINHERIT` (1), a child does not get a copy, or 0: 0; −8 if `fd` names nothing, −10 another flag |
 | 23 | `call(pid, w1, w2, w3, w4)` | sends four words to process `pid` and waits for its reply: the reply's four words in `a0` to `a3`; `a0` −2 if there is no such process or it ends first, −3 if `pid` is the caller, −10 if `w1` is negative (an `IO_` operation, which only a descriptor sends) |
-| 24 | `receive()` | waits for a call: `a0` the caller, `a1` to `a4` its words; or `a0` `FROM_KERNEL` (−1) and `a1` `NOTE_ENDED` (0), `a2` a process that ended, or `a1` `NOTE_IRQ` (1), `a2` a device source the caller drives that interrupted, or `a1` `NOTE_CLOSED` (2), `a2` a handle of the caller's that no descriptor names any more |
+| 24 | `receive()` | waits for a call: `a0` the caller, `a1` to `a4` its words; or `a0` `FROM_KERNEL` (−1) and `a1` `NOTE_ENDED` (0), `a2` a process that ended, or `a1` `NOTE_IRQ` (1), `a2` a device source the caller drives that interrupted, or `a1` `NOTE_CLOSED` (2), `a2` a handle of the caller's that no descriptor names any more, or `a1` `NOTE_SIGNAL` (3), `a2` a process that notified the caller, or `a1` `NOTE_ALARM` (4), the caller's alarm went off |
 | 25 | `reply(pid, w1, w2, w3, w4)` | ends the call of process `pid`, which this process received: 0; −2 if `pid` is not waiting for its reply |
 | 26 | `copyin(pid, from, to, n)` | copies `n` trytes from `from` in process `pid`, whose call this process holds, to its own `to`: 0; −2 as `reply`, −12 if either range is not all mapped, when nothing is copied |
 | 27 | `copyout(pid, from, to, n)` | copies `n` trytes from its own `from` to `to` in process `pid`: as `copyin` |
 | 28 | `register(name, version)` | gives the caller the server name at `name` (a string of 1 to 8 code points) with protocol version `version`: 0; −15 another process has it, −16 all 9 names are taken, −10 `version` below 1 or an empty name, −11 a name too long, −12 not in the caller's memory. Registering a name it has again changes the version |
 | 29 | `lookup(name, how, pid)` | `a0` the process that registered `name`, `a1` its version; −5 nobody has it (`how` `LOOKUP_NOW`, 0), or with `LOOKUP_WAIT` (1) waits until somebody registers it, or with `LOOKUP_WHILE` (2) waits only while process `pid` lives: −2 once it has ended (or if it never was); −10, −11 and −12 as `register` |
 | 30 | `window(k)` | makes block window `k`, 0 to 8, a zeroed page at `V_BLOCK + PAGE × k`, unless the caller has it already: 0; −10 no such window, −3 no memory |
-| 31 | `drive(source)` | makes the caller the driver of device source `source` (`SRC_CONSOLE`, 1, or `SRC_DISK`, 2), its registers mapped at `V_DEVICE + PAGE × (source − 1)` until it ends: 0; −19 it has a driver, −10 no such source, −21 the caller runs a program file |
+| 31 | `drive(source)` | makes the caller the driver of device source `source` (`SRC_CONSOLE`, 1, `SRC_DISK`, 2, or `SRC_NET`, 3), its registers mapped at `V_DEVICE + PAGE × (source − 1)` until it ends: 0; −19 it has a driver, −10 no such source, −21 the caller runs a program file |
 | 32 | `arm(source)` | lets the source the caller drives interrupt once: 0; −21 it does not drive it |
 | 33 | `phys(address)` | the physical address of the caller's `address`, for a device to use: −12 nothing there, −21 the caller drives no device |
 | 34 | `log(buffer, n, from)` | copies the kernel's log from the `from`-th code point it ever printed (the oldest it keeps, if that one is gone) to `buffer`, at most `n`, and as many as fit in its page: `a0` how many, 0 once there are no more, `a1` where the next read starts; −10 `n` below 0, −12 not in the caller's memory |
@@ -118,6 +118,8 @@ is as it was, since the trap entry saves them all. Trice relies on this
 | 36 | `proc(pid, buffer)` | the `PI_` words of process `pid` at the word-aligned `buffer`: 0; −2 no such process (a free slot), −12 as `info` |
 | 37 | `name(string)` | names the caller after the string: its part after the last `/`, at most 8 code points: 0; −12 not in the caller's memory |
 | 38 | `sleep(until)` | waits until the `time` CSR reaches `until`: 0 |
+| 39 | `notify(pid)` | tells process `pid`, without waiting, that the caller wants its attention: its `receive` gives a `NOTE_SIGNAL` notice naming the caller, once however often it was notified since: 0; −2 no such process, −3 `pid` is the caller |
+| 40 | `alarm(until)` | when the `time` CSR reaches `until`, the caller's `receive` gives a `NOTE_ALARM` notice; a later alarm replaces an earlier one, and `NO_ALARM` (−1) cancels it: 0 |
 
 Numbers 9, 11, 12 and 14 are free: console input, blocks and
 files are not system calls but calls to the console server, the disk
@@ -212,6 +214,18 @@ to register. A call to a
 process that ends fails. A server asleep in `receive` with nobody left
 to call it does not keep the machine from powering off.
 
+Two notices let a server hear of things without a call, so it never
+has to block anywhere but in `receive`. `notify(pid)` marks the caller
+in process `pid`'s notices and returns at once; the next `receive`
+there gives `NOTE_SIGNAL` naming the caller, once, however often it was
+notified since. A server may notify a client that is calling it, and a
+client a server it calls, without either waiting on the other: this is
+how the network server tells the IP server a frame has come. `alarm(until)`
+gives a `NOTE_ALARM` from `receive` once the clock reaches `until`, for
+timeouts; a process has one alarm, and setting it again replaces it.
+A process waiting for an alarm keeps the machine on, as a sleeper
+does.
+
 ## Names
 
 A server makes itself known with `register(name, version)`
@@ -234,8 +248,11 @@ registers are mapped into it, and the kernel only passes its interrupts
 on. The driver `arm`s the source when it expects an interrupt, such as
 after starting a command; the interrupt masks it again and reaches the
 driver as a `NOTE_IRQ` notice from `receive`. While a source is armed
-the kernel waits for it, rather than call a client stuck whose server
-waits on the device. A device like the disk moves memory by physical
+and some process waits on something (a call, a child, a name), the
+kernel waits for the device, rather than call a client stuck whose
+server waits on it. Once every process is asleep in `receive`, an
+armed source does not keep the machine on: a frame or a key could only
+reach servers with nobody left to serve. A device like the disk moves memory by physical
 address, which `phys` gives; it could write any page, which is why a
 program file read from the disk may not drive one.
 

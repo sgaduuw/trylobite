@@ -13,7 +13,7 @@ next_slot:  .word 0                    # where spawn starts looking (set at boot
 log_base:   .word 0                    # the log page's first tryte, through the
                                        # direct map; 0 until boot gives it one
 log_pos:    .word 0                    # code points ever printed (console.s)
-sleepers:   .word 0                    # 1 while a process may be in SYS_SLEEP
+sleepers:   .word 0                    # 1 while a process may sleep or have an alarm set
 next_wake:  .word 0                    # ... and the earliest time one waits for
 
 klock:  .word 0                        # the kernel lock: 1 while a hart holds it

@@ -116,15 +116,44 @@ sys_sleep:
 1:      li    a0, 0
         j     sys_return
 
-# wake_sleepers: make ready each sleeper whose time has come; sleepers
-# becomes whether any still sleep, and next_wake the earliest time one
-# waits for. Clobbers a0, a1, t0..t5.
+# alarm(until): set the caller's alarm, or cancel it with NO_ALARM. It
+# waits with the sleepers: wake_sleepers rings it.
+sys_alarm:
+        sw    zero, PCB_ALARM(s0)
+        bltz  a1, 1f                   # NO_ALARM
+        bgtz  a1, 2f
+        li    a1, 1                    # 0 means none: time 1 has come as surely
+2:      sw    a1, PCB_ALARM(s0)
+        li    t0, 1
+        sw    t0, sleepers
+1:      li    a0, 0
+        j     sys_return
+
+# wake_sleepers: make ready each sleeper whose time has come, and ring
+# each alarm whose time has come (its receive gives NOTE_ALARM); sleepers
+# becomes whether any still sleep or have an alarm set, and next_wake the
+# earliest time one waits for. Clobbers a0, a1, s1, t0..t5.
 wake_sleepers:
         mv    t5, ra
         csrr  a1, time
         li    a0, 0                    # a0: 1 once one still sleeps
         la    t4, procs
-1:      lw    t0, PCB_STATE(t4)
+1:      lw    t0, PCB_ALARM(t4)
+        beqz  t0, 4f
+        bgt   t0, a1, 5f
+        sw    zero, PCB_ALARM(t4)      # it rings
+        li    t0, 1
+        sw    t0, PCB_RANG(t4)
+        mv    s1, t4
+        call  rouse                    # clobbers t0, t1 (and wake_one's)
+        csrr  a1, time
+        j     4f
+5:      beqz  a0, 6f                   # the earliest so far?
+        lw    t1, next_wake
+        bge   t0, t1, 4f
+6:      sw    t0, next_wake
+        li    a0, 1
+4:      lw    t0, PCB_STATE(t4)
         li    t1, ST_SLEEP
         bne   t0, t1, 3f
         lw    t0, PCB_A1(t4)
