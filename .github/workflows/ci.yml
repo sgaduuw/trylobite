@@ -50,6 +50,7 @@ jobs:
           tools/fs.py cat disk.img docs/hi | grep -q 'hello from a balanced-ternary machine'
       - name: Ping over a loopback link
         run: |
-          printf 'ifconfig\nping 10.0.0.2 2\nexit\n' | detrytus run shell.s --ram-pages 81 --input - --disk disk.img --net loop | tee ping.txt
+          printf 'ifconfig\nping 10.0.0.2 2\necho over udp | nc -u 10.0.0.2 7\nexit\n' | detrytus run shell.s --ram-pages 81 --input - --disk disk.img --net loop | tee ping.txt
           grep -qx 'inet 10.0.0.2/24 gateway 10.0.0.1' ping.txt
           grep -qE '^reply from 10\.0\.0\.2: seq 2, [0-9]+ ticks$' ping.txt
+          grep -qx 'over udp' ping.txt

@@ -3,18 +3,28 @@
 # "net", learned the interface's address and become its listener
 # (NT_LISTEN); clients find it by that name (SYS_LOOKUP).
 #
-# It speaks ARP and ICMP echo over IPv4: it answers ARP requests for its
-# own address and keeps what ARP tells it in a small cache, it answers
-# pings, and IP_PING sends one for a client (include/layout.s). Its
-# address is 10.0.0.2/24 with gateway 10.0.0.1 until IP_CONFIG says
+# It speaks ARP, ICMP echo and UDP over IPv4: it answers ARP requests
+# for its own address and keeps what ARP tells it in a small cache, it
+# answers pings, and IP_PING sends one for a client (include/layout.s).
+# Its address is 10.0.0.2/24 with gateway 10.0.0.1 until IP_CONFIG says
 # otherwise.
+#
+# UDP: a process binds one port (IP_BIND), sends from it (IP_SEND) and
+# receives what comes to it (IP_RECEIVE). A datagram for a process with
+# no receive waiting is kept in one of IPD_SLOTS slots in the server's
+# block window 0, and given to its next receive, oldest first; one that
+# finds no free slot is dropped, as UDP allows. A datagram to port 7
+# that no process has bound is sent straight back: the echo service.
+# A send to a host whose Ethernet address is not known waits for ARP;
+# one such send waits at a time.
 #
 # Like every server it waits only in its own receive. The network server
 # notifies it (NOTE_SIGNAL) when a frame waits, and its NT_RECEIVE then
 # takes the frame at once; a ping's time limit is its alarm (SYS_ALARM),
-# which comes as NOTE_ALARM. One ping is under way at a time: it waits
+# which comes as NOTE_ALARM, set for the earliest of everything that
+# waits for a time (ip_rearm). One ping is under way at a time: it waits
 # for the next hop's address first, if the cache lacks it, then for the
-# echo reply.
+# echo reply. What waits for ARP is looked at again before each receive.
 #
 # Frames are octets, one per tryte, as the network server's are; fields
 # of more than one octet are big-endian, and ip_getn and ip_putn read
@@ -41,6 +51,17 @@
         .equ  IPD_TARP, 2054           # Ethernet types: 0x0806,
         .equ  IPD_TIP, 2048            # and 0x0800
         .equ  IPD_AFORM, 134219268     # ARP for IPv4 on Ethernet: 0800 06 04
+        .equ  IPD_UDP, 17              # the IP protocols: UDP,
+        .equ  IPD_ICMP, 1              # and ICMP
+        .equ  IPD_ECHOPORT, 7          # the echo service's port
+        .equ  IPD_EPHEMERAL, 49152     # bind(0) chooses from here up
+        .equ  IPD_ARPWAIT, 100000      # ticks a send waits for ARP
+        .equ  IPD_UMAX, 1472           # octets of data a datagram carries
+        .equ  IPD_SLOTS, 12            # datagrams kept for later receives,
+        .equ  IPD_SLOT, 1600           # each in this many trytes of window 0
+        .equ  IPD_QBASE, V_BLOCK + BLOCK_T0   # where slot 0 starts
+        .assert IPD_SLOTS * IPD_SLOT <= PAGE, "the UDP slots overflow window 0"
+        .assert IPD_UMAX + 6 <= IPD_SLOT, "a UDP slot holds a whole datagram"
 
         # Where things are in a frame: the Ethernet header,
         .equ  IPD_DST, 0
@@ -74,6 +95,14 @@
         .equ  IPD_CID, 4
         .equ  IPD_CSEQ, 6
         .equ  IPD_CDATA, 8
+        # A UDP header, from its start, and the data after it.
+        .equ  IPD_USPORT, 0
+        .equ  IPD_UDPORT, 2
+        .equ  IPD_ULEN, 4
+        .equ  IPD_UCSUM, 6
+        .equ  IPD_UDATA, 8
+        # A client's datagram: the other end's address and port, then data.
+        .equ  IPD_CLIENT, IPD_IHDR + IPD_UDATA - 6   # where ip_tx holds one
 
 ip_main:
         li    a0, SYS_NAME             # for ps: a program of the image
@@ -101,6 +130,10 @@ ip_main:
         li    a2, NT_LISTEN
         sys
         bltz  a0, ip_quit
+        li    a0, SYS_WINDOW           # for the UDP slots
+        li    a1, 0
+        sys
+        bltz  a0, ip_quit
         li    a0, SYS_REGISTER
         la    a1, ip_name
         li    a2, IP_PROTOCOL
@@ -113,7 +146,18 @@ ip_quit:                               # a0: why it cannot serve
 
 ip_wait:
         li    sp, USER_SP
-        li    a0, SYS_RECEIVE
+        lw    t0, ip_spid              # a send that ARP has answered for
+        bltz  t0, 1f
+        lw    a0, ip_shop
+        call  ip_lookup
+        bgez  a0, ip_usendnow
+1:      lw    t0, ip_pstate            # a ping that ARP has answered for
+        li    t1, IPD_ARP
+        bne   t0, t1, 2f
+        lw    a0, ip_hop
+        call  ip_lookup
+        bgez  a0, ip_echo
+2:      li    a0, SYS_RECEIVE
         sys
         li    t0, FROM_KERNEL
         beq   a0, t0, ip_notice
@@ -123,6 +167,12 @@ ip_wait:
         beq   a1, t0, ip_ping
         li    t0, IP_ADDRESS
         beq   a1, t0, ip_address
+        li    t0, IP_BIND
+        beq   a1, t0, ip_bind
+        li    t0, IP_SEND
+        beq   a1, t0, ip_usend
+        li    t0, IP_RECEIVE
+        beq   a1, t0, ip_urecv
         li    t0, IP_CONFIG
         bne   a1, t0, ip_answer
         blez  a2, ip_answer            # config: an address,
@@ -179,10 +229,10 @@ ip_ping:
         bltz  a0, ip_answer
         sw    a0, ip_hop
         sw    s0, ip_pinger
-        csrr  a1, time
-        add   a1, a1, s1
-        li    a0, SYS_ALARM
-        sys
+        csrr  t0, time
+        add   t0, t0, s1
+        sw    t0, ip_pdead
+        call  ip_rearm
         lw    a0, ip_hop
         call  ip_lookup
         bgez  a0, ip_echo              # its address is known
@@ -228,6 +278,7 @@ ip_echo:
         blt   t0, t1, 1b
         mv    a0, s2
         li    a1, IPD_CDATA + IPD_DATA
+        li    a2, 0
         call  ip_sum
         mv    a1, a0
         addi  a0, s2, IPD_CCSUM
@@ -253,27 +304,70 @@ ip_forget:
         li    t0, IPD_NONE
         sw    t0, ip_pinger
         sw    zero, ip_pstate
-        li    a0, SYS_ALARM
-        li    a1, NO_ALARM
-        sys
+        call  ip_rearm
         j     ip_wait
 
 ip_notice:
         li    t0, NOTE_SIGNAL
         beq   a1, t0, ip_frame
         li    t0, NOTE_ALARM
-        bne   a1, t0, 1f
-        lw    t0, ip_pinger            # the ping has run out of time
-        bltz  t0, ip_wait
-        li    a5, E_TIMEDOUT
-        j     ip_done
-1:      li    t0, NOTE_ENDED
+        beq   a1, t0, ip_alarm
+        li    t0, NOTE_ENDED
         bne   a1, t0, ip_wait
         lw    t0, ip_net
         li    a0, E_IO                 # the network server is gone
         beq   a2, t0, ip_quit
-        lw    t0, ip_pinger
-        beq   a2, t0, ip_forget        # nobody to answer now
+        mv    s0, a2                   # what it held goes with it
+        call  ip_unbind
+        lw    t0, ip_spid
+        bne   t0, s0, 1f
+        li    t0, IPD_NONE
+        sw    t0, ip_spid
+1:      lw    t0, ip_pinger
+        beq   s0, t0, ip_forget        # nobody to answer now
+        call  ip_rearm
+        j     ip_wait
+
+# ip_alarm: the time has come for something: fail each receive, send or
+# ping whose time is up.
+ip_alarm:
+        csrr  s1, time                 # s1: now
+        li    s0, 0                    # s0: a process
+1:      li    t0, 3
+        mul   s2, s0, t0
+        la    t0, ip_usize
+        add   t0, t0, s2
+        lw    t1, 0(t0)
+        beqz  t1, 2f                   # no receive waits
+        la    t1, ip_udead
+        add   t1, t1, s2
+        lw    t1, 0(t1)
+        beqz  t1, 2f                   # it waits for ever
+        bgt   t1, s1, 2f
+        sw    zero, 0(t0)
+        li    a0, SYS_REPLY
+        mv    a1, s0
+        li    a2, E_TIMEDOUT
+        sys
+2:      addi  s0, s0, 1
+        li    t0, NPROC
+        blt   s0, t0, 1b
+        lw    a1, ip_spid
+        bltz  a1, 3f
+        lw    t0, ip_sdead
+        bgt   t0, s1, 3f
+        li    t0, IPD_NONE             # ARP never answered
+        sw    t0, ip_spid
+        li    a0, SYS_REPLY
+        li    a2, E_TIMEDOUT
+        sys
+3:      lw    t0, ip_pinger
+        bltz  t0, 4f
+        lw    t0, ip_pdead
+        bgt   t0, s1, 4f
+        li    a5, E_TIMEDOUT           # the ping has run out of time
+        j     ip_done
+4:      call  ip_rearm
         j     ip_wait
 
 # ip_frame: the network server has a frame for us: take it, and see
@@ -301,8 +395,7 @@ ip_frame:
         j     ip_wait
 
 # ip_arp: an ARP message in frame s1, s2 long. Learn the sender if it
-# speaks to us, answer a request, and send a ping waiting for the
-# sender's address on its way.
+# speaks to us, and answer a request.
 ip_arp:
         li    t0, IPD_ALEN
         blt   s2, t0, ip_wait
@@ -347,18 +440,11 @@ ip_arp:
         mv    a2, s5
         mv    a3, s3
         call  ip_arpsend
-1:      lw    t0, ip_pstate
-        li    t1, IPD_ARP
-        bne   t0, t1, ip_wait
-        lw    t0, ip_hop
-        bne   t0, s3, ip_wait
-        mv    a1, s4                   # the ping's hop: on with it
-        mv    a2, s5
-        j     ip_echo
+1:      j     ip_wait                  # which carries on what waited for it
 
-# ip_ipv4: an IPv4 packet in frame s1, s2 long. Only ICMP to our own
-# address is for us: answer an echo request, and take the reply the
-# ping waits for.
+# ip_ipv4: an IPv4 packet in frame s1, s2 long. Only ICMP and UDP to
+# our own address are for us. ICMP: answer an echo request, and take the
+# reply the ping waits for.
 ip_ipv4:
         li    t0, IPD_IHDR
         blt   s2, t0, ip_wait
@@ -386,10 +472,13 @@ ip_ipv4:
         bne   a0, t0, ip_wait
         addi  a0, s1, IPD_HDR
         mv    a1, s3
+        li    a2, 0
         call  ip_sum
         bnez  a0, ip_wait              # damaged
         lt    t0, IPD_PROTO(s1)
-        li    t1, 1
+        li    t1, IPD_UDP
+        beq   t0, t1, ip_udp
+        li    t1, IPD_ICMP
         bne   t0, t1, ip_wait
         add   s5, s1, s3
         addi  s5, s5, IPD_HDR          # s5: the ICMP message
@@ -398,6 +487,7 @@ ip_ipv4:
         blt   s4, t0, ip_wait
         mv    a0, s5
         mv    a1, s4
+        li    a2, 0
         call  ip_sum
         bnez  a0, ip_wait
         addi  a0, s1, IPD_ISRC
@@ -461,6 +551,7 @@ ip_pong:
         st    zero, IPD_CCSUM + 1(s2)
         mv    a0, s2
         mv    a1, s4
+        li    a2, 0
         call  ip_sum
         mv    a1, a0
         addi  a0, s2, IPD_CCSUM
@@ -469,6 +560,508 @@ ip_pong:
         addi  a4, s4, IPD_IHDR
         call  ip_send
         j     ip_wait
+
+# ip_bind: bind(port a2) for process s0: 0 chooses a free port.
+ip_bind:
+        bltz  a2, ip_answer
+        li    t0, 65535
+        bgt   a2, t0, ip_answer
+        mv    s1, a2                   # s1: the port
+        bnez  s1, 2f
+        li    s2, 65536 - IPD_EPHEMERAL   # s2: how many are left to try
+1:      lw    s1, ip_ephem
+        addi  t0, s1, 1
+        li    t1, 65536
+        blt   t0, t1, 3f
+        li    t0, IPD_EPHEMERAL
+3:      sw    t0, ip_ephem
+        mv    a0, s1
+        call  ip_owner
+        bltz  a0, 5f
+        addi  s2, s2, -1
+        bnez  s2, 1b
+        li    a5, E_BUSY               # every one is taken
+        j     ip_answer
+2:      mv    a0, s1
+        call  ip_owner
+        li    a5, E_BUSY
+        bltz  a0, 5f
+        bne   a0, s0, ip_answer        # another process has it
+5:      call  ip_unbind                # its old port, and what came to it
+        li    t0, 3
+        mul   t0, s0, t0
+        la    t1, ip_uport
+        add   t1, t1, t0
+        sw    s1, 0(t1)
+        mv    a5, s1
+        j     ip_answer
+
+# ip_usend: send(buffer a2, n a3) for process s0.
+ip_usend:
+        call  ip_myport
+        blez  a0, ip_answer            # no port to send from
+        li    t0, 6
+        blt   a3, t0, ip_answer
+        li    t0, IPD_UMAX + 6
+        bgt   a3, t0, ip_answer
+        mv    s1, a2                   # s1: the buffer
+        mv    s2, a3                   # s2: its length
+        call  ip_ucopy
+        li    a5, E_FAULT
+        bnez  a0, ip_answer
+        la    a0, ip_tx
+        addi  a0, a0, IPD_CLIENT
+        li    a1, 4
+        call  ip_getn
+        li    a5, E_INVAL
+        blez  a0, ip_answer
+        li    t0, IPD_LIMIT
+        bge   a0, t0, ip_answer
+        call  ip_route
+        li    a5, E_NOROUTE
+        bltz  a0, ip_answer
+        mv    s4, a0                   # s4: the hop
+        call  ip_lookup
+        bltz  a0, 1f
+        call  ip_myport
+        mv    a3, a0
+        call  ip_uout
+        mv    a5, a0
+        j     ip_answer
+1:      li    a5, E_BUSY               # it waits for ARP: one may
+        lw    t0, ip_spid
+        bgez  t0, ip_answer
+        li    a0, 1
+        mv    a3, s4
+        call  ip_arpsend
+        mv    a5, a0
+        bltz  a0, ip_answer
+        sw    s0, ip_spid
+        sw    s1, ip_sbuf
+        sw    s2, ip_slen
+        sw    s4, ip_shop
+        csrr  t0, time
+        li    t1, IPD_ARPWAIT
+        add   t0, t0, t1
+        sw    t0, ip_sdead
+        call  ip_rearm
+        j     ip_wait
+
+# ip_usendnow: ARP has told the waiting send's hop, at a1, a2: send it.
+ip_usendnow:
+        mv    s4, a1
+        mv    s5, a2
+        lw    s0, ip_spid
+        lw    s1, ip_sbuf
+        lw    s2, ip_slen
+        li    t0, IPD_NONE
+        sw    t0, ip_spid
+        call  ip_ucopy                 # the buffer again: ip_tx has been used
+        li    s3, E_FAULT
+        bnez  a0, 1f
+        call  ip_myport
+        mv    a3, a0
+        mv    a1, s4
+        mv    a2, s5
+        call  ip_uout
+        mv    s3, a0
+1:      call  ip_rearm
+        mv    a5, s3
+        j     ip_answer
+
+# ip_urecv: receive(buffer a2, size a3, wait a4) for process s0.
+ip_urecv:
+        call  ip_myport
+        blez  a0, ip_answer
+        li    t0, 6
+        blt   a3, t0, ip_answer
+        bltz  a4, ip_answer
+        mv    s1, a2                   # s1: the buffer
+        mv    s2, a3                   # s2: its size
+        mv    s3, a4                   # s3: how long it may wait
+        call  ip_oldest
+        bltz  a0, 1f
+        mv    s4, a0                   # s4: a datagram kept for it
+        li    t0, 3
+        mul   t0, s4, t0
+        la    t1, ip_qowner
+        add   t1, t1, t0
+        sw    zero, 0(t1)              # given, or too long: gone either way
+        la    t1, ip_qlen
+        add   t1, t1, t0
+        lw    s5, 0(t1)
+        li    a5, E_NOROOM
+        bgt   s5, s2, ip_answer
+        li    a0, SYS_COPYOUT
+        mv    a1, s0
+        li    t0, IPD_SLOT
+        mul   a2, s4, t0
+        li    t0, IPD_QBASE
+        add   a2, a2, t0
+        mv    a3, s1
+        mv    a4, s5
+        sys
+        mv    a5, s5
+        beqz  a0, ip_answer
+        li    a5, E_FAULT
+        j     ip_answer
+1:      li    t0, 3                    # nothing yet: hold the call
+        mul   t0, s0, t0
+        la    t1, ip_ubuf
+        add   t1, t1, t0
+        sw    s1, 0(t1)
+        la    t1, ip_usize
+        add   t1, t1, t0
+        addi  t2, s2, 1
+        sw    t2, 0(t1)
+        li    t2, 0                    # for ever,
+        beqz  s3, 2f
+        csrr  t2, time                 # or until then
+        add   t2, t2, s3
+2:      la    t1, ip_udead
+        add   t1, t1, t0
+        sw    t2, 0(t1)
+        call  ip_rearm
+        j     ip_wait
+
+# ip_udp: a UDP datagram in frame s1: s3 the IP header's length, s4 the
+# packet's. Give it to the receive waiting on its port, or keep it for
+# the next; to port 7 with nobody on it, send it back.
+ip_udp:
+        add   s5, s1, s3
+        addi  s5, s5, IPD_HDR          # s5: the UDP header
+        sub   s4, s4, s3               # s4: what the IP header says follows
+        li    t0, IPD_UDATA
+        blt   s4, t0, ip_wait
+        addi  a0, s5, IPD_ULEN
+        li    a1, 2
+        call  ip_getn
+        mv    s6, a0                   # s6: the UDP length
+        li    t0, IPD_UDATA
+        blt   s6, t0, ip_wait
+        bgt   s6, s4, ip_wait
+        addi  a0, s1, IPD_ISRC
+        li    a1, 4
+        call  ip_getn
+        mv    s3, a0                   # s3: who sent it
+        addi  a0, s5, IPD_UCSUM
+        li    a1, 2
+        call  ip_getn
+        beqz  a0, 1f                   # sent without a checksum
+        mv    a0, s3
+        mv    a1, s6
+        call  ip_pseudo
+        mv    a0, s5
+        mv    a1, s6
+        call  ip_sum
+        bnez  a0, ip_wait              # damaged
+1:      addi  a0, s5, IPD_UDPORT
+        li    a1, 2
+        call  ip_getn
+        mv    s4, a0                   # s4: the port it is for
+        addi  a0, s5, IPD_USPORT
+        li    a1, 2
+        call  ip_getn
+        mv    s7, a0                   # s7: the port it came from
+        addi  a0, s5, IPD_UDATA - 6    # as a client sees it: the sender's
+        mv    a1, s3                   # address and port, then the data
+        li    a2, 4
+        call  ip_putn
+        addi  a0, s5, IPD_UDATA - 2
+        mv    a1, s7
+        li    a2, 2
+        call  ip_putn
+        addi  s5, s5, IPD_UDATA - 6    # s5: the datagram as a client sees it
+        addi  s6, s6, 6 - IPD_UDATA    # s6: its length
+        mv    a0, s4
+        call  ip_owner
+        bltz  a0, ip_uecho
+        mv    s0, a0                   # s0: whose port
+        li    t0, 3
+        mul   t0, s0, t0
+        la    t1, ip_usize
+        add   t1, t1, t0
+        lw    s2, 0(t1)
+        beqz  s2, ip_keep              # no receive waits: keep it
+        sw    zero, 0(t1)
+        addi  s2, s2, -1               # s2: the receive's size
+        la    t1, ip_ubuf
+        add   t1, t1, t0
+        lw    a3, 0(t1)
+        li    a2, E_NOROOM
+        bgt   s6, s2, 2f
+        li    a0, SYS_COPYOUT
+        mv    a1, s0
+        mv    a2, s5
+        mv    a4, s6
+        sys
+        mv    a2, s6
+        beqz  a0, 2f
+        li    a2, E_FAULT
+2:      li    a0, SYS_REPLY
+        mv    a1, s0
+        sys
+        call  ip_rearm
+        j     ip_wait
+
+# ip_keep: keep datagram s5, s6 long, for process s0's next receive, in
+# a free slot; with none free it is dropped.
+ip_keep:
+        li    t0, 0                    # t0: a slot
+1:      li    t1, 3
+        mul   t1, t0, t1
+        la    t2, ip_qowner
+        add   t2, t2, t1
+        lw    t3, 0(t2)
+        beqz  t3, 2f
+        addi  t0, t0, 1
+        li    t3, IPD_SLOTS
+        blt   t0, t3, 1b
+        j     ip_wait
+2:      addi  t3, s0, 1
+        sw    t3, 0(t2)
+        la    t2, ip_qlen
+        add   t2, t2, t1
+        sw    s6, 0(t2)
+        lw    t3, ip_qnext
+        la    t2, ip_qseq
+        add   t2, t2, t1
+        sw    t3, 0(t2)
+        addi  t3, t3, 1
+        sw    t3, ip_qnext
+        li    t1, IPD_SLOT
+        mul   t1, t0, t1
+        li    t2, IPD_QBASE
+        add   t1, t1, t2               # t1: the slot's first tryte
+        li    t0, 0
+3:      add   t2, s5, t0
+        lt    t3, 0(t2)
+        add   t2, t1, t0
+        st    t3, 0(t2)
+        addi  t0, t0, 1
+        blt   t0, s6, 3b
+        j     ip_wait
+
+# ip_uecho: the echo service: send datagram s5, s6 long, from frame s1
+# and for port s4, back where it came from, if s4 is port 7.
+ip_uecho:
+        li    t0, IPD_ECHOPORT
+        bne   s4, t0, ip_wait
+        la    t0, ip_tx
+        addi  t0, t0, IPD_CLIENT
+        li    t1, 0
+1:      add   t2, s5, t1
+        lt    t3, 0(t2)
+        add   t2, t0, t1
+        st    t3, 0(t2)
+        addi  t1, t1, 1
+        blt   t1, s6, 1b
+        addi  a0, s1, IPD_SRC
+        li    a1, 3
+        call  ip_getn
+        mv    s7, a0
+        addi  a0, s1, IPD_SRC + 3
+        li    a1, 3
+        call  ip_getn
+        mv    a2, a0
+        mv    a1, s7
+        li    a3, IPD_ECHOPORT
+        mv    s2, s6
+        call  ip_uout
+        j     ip_wait
+
+# ip_uout: send the client's datagram at ip_tx + IPD_CLIENT, s2 long,
+# from port a3 to Ethernet address a1, a2: a0 is how it went. Clobbers
+# a1..a5, s1, s3..s5, t0..t5.
+ip_uout:
+        addi  sp, sp, -6
+        sw    ra, 0(sp)
+        sw    a3, ip_usport
+        la    s1, ip_tx
+        mv    a0, s1
+        call  ip_putmac
+        call  ip_ethtail
+        addi  a0, s1, IPD_CLIENT
+        li    a1, 4
+        call  ip_getn
+        mv    s3, a0                   # s3: where to
+        addi  a0, s1, IPD_CLIENT + 4
+        li    a1, 2
+        call  ip_getn
+        mv    s4, a0                   # s4: its port
+        addi  s5, s2, IPD_UDATA - 6    # s5: the UDP length
+        addi  a0, s5, IPD_IHDR - IPD_HDR
+        li    a1, IPD_UDP
+        mv    a2, s3
+        call  ip_iphead
+        addi  s1, s1, IPD_IHDR         # s1: the UDP header
+        addi  a0, s1, IPD_USPORT
+        lw    a1, ip_usport
+        li    a2, 2
+        call  ip_putn
+        addi  a0, s1, IPD_UDPORT
+        mv    a1, s4
+        li    a2, 2
+        call  ip_putn
+        addi  a0, s1, IPD_ULEN
+        mv    a1, s5
+        li    a2, 2
+        call  ip_putn
+        st    zero, IPD_UCSUM(s1)
+        st    zero, IPD_UCSUM + 1(s1)
+        mv    a0, s3
+        mv    a1, s5
+        call  ip_pseudo
+        mv    a0, s1
+        mv    a1, s5
+        call  ip_sum
+        bnez  a0, 1f
+        li    a0, 65535                # 0 would say there is none
+1:      mv    a1, a0
+        addi  a0, s1, IPD_UCSUM
+        li    a2, 2
+        call  ip_putn
+        addi  a4, s5, IPD_IHDR
+        call  ip_send
+        lw    ra, 0(sp)
+        addi  sp, sp, 6
+        ret
+
+# ip_ucopy: a0 = copyin of process s0's s1, s2 long, to ip_tx +
+# IPD_CLIENT: 0, or how it failed.
+ip_ucopy:
+        li    a0, SYS_COPYIN
+        mv    a1, s0
+        mv    a2, s1
+        la    a3, ip_tx
+        addi  a3, a3, IPD_CLIENT
+        mv    a4, s2
+        sys
+        ret
+
+# ip_myport: a0 = process s0's port, 0 for none. Clobbers t0, t1.
+ip_myport:
+        li    t0, 3
+        mul   t0, s0, t0
+        la    t1, ip_uport
+        add   t1, t1, t0
+        lw    a0, 0(t1)
+        ret
+
+# ip_owner: a0 = the process that has port a0, IPD_NONE for nobody.
+# Clobbers t0..t2.
+ip_owner:
+        blez  a0, 3f                   # port 0 is nobody's
+        la    t0, ip_uport
+        li    t1, 0
+1:      lw    t2, 0(t0)
+        beq   t2, a0, 2f
+        addi  t0, t0, 3
+        addi  t1, t1, 1
+        li    t2, NPROC
+        blt   t1, t2, 1b
+3:      li    a0, IPD_NONE
+        ret
+2:      mv    a0, t1
+        ret
+
+# ip_unbind: process s0 has no port now, no receive waiting, and nothing
+# kept for it. Clobbers t0..t3.
+ip_unbind:
+        li    t0, 3
+        mul   t0, s0, t0
+        la    t1, ip_uport
+        add   t1, t1, t0
+        sw    zero, 0(t1)
+        la    t1, ip_usize
+        add   t1, t1, t0
+        sw    zero, 0(t1)
+        la    t0, ip_qowner
+        li    t1, IPD_SLOTS
+        addi  t2, s0, 1
+1:      lw    t3, 0(t0)
+        bne   t3, t2, 2f
+        sw    zero, 0(t0)
+2:      addi  t0, t0, 3
+        addi  t1, t1, -1
+        bnez  t1, 1b
+        ret
+
+# ip_oldest: a0 = the slot of the oldest datagram kept for process s0,
+# IPD_NONE if none is. Clobbers a1, t0..t3.
+ip_oldest:
+        li    a0, IPD_NONE
+        addi  t3, s0, 1                # t3: its mark in ip_qowner
+        li    t0, 0                    # t0: a slot
+1:      li    t1, 3
+        mul   t1, t0, t1
+        la    t2, ip_qowner
+        add   t2, t2, t1
+        lw    t2, 0(t2)
+        bne   t2, t3, 3f
+        la    t2, ip_qseq
+        add   t2, t2, t1
+        lw    t2, 0(t2)
+        bltz  a0, 2f
+        bge   t2, a1, 3f
+2:      mv    a0, t0                   # a1: its number
+        mv    a1, t2
+3:      addi  t0, t0, 1
+        li    t1, IPD_SLOTS
+        blt   t0, t1, 1b
+        ret
+
+# ip_rearm: set the alarm for the earliest of the ping's time limit, the
+# ARP wait of a send, and each receive's time limit; cancel it if none
+# waits for a time. Clobbers a0..a5, t0..t3.
+ip_rearm:
+        li    a1, NO_ALARM             # a1: the earliest so far, or none
+        lw    t0, ip_pinger
+        bltz  t0, 1f
+        lw    a1, ip_pdead
+1:      lw    t0, ip_spid
+        bltz  t0, 2f
+        lw    t0, ip_sdead
+        bltz  a1, 3f
+        bge   t0, a1, 2f
+3:      mv    a1, t0
+2:      li    t1, 0                    # t1: a process
+4:      li    t2, 3
+        mul   t2, t1, t2
+        la    t3, ip_usize
+        add   t3, t3, t2
+        lw    t3, 0(t3)
+        beqz  t3, 6f
+        la    t3, ip_udead
+        add   t3, t3, t2
+        lw    t0, 0(t3)
+        beqz  t0, 6f                   # it waits for ever
+        bltz  a1, 5f
+        bge   t0, a1, 6f
+5:      mv    a1, t0
+6:      addi  t1, t1, 1
+        li    t2, NPROC
+        blt   t1, t2, 4b
+        li    a0, SYS_ALARM
+        sys
+        ret
+
+# ip_pseudo: a2 = the sum of the UDP pseudo-header for a datagram a1
+# long between us and address a0, for ip_sum to start from. Clobbers
+# a0, t0, t1.
+ip_pseudo:
+        li    t1, 65536
+        div   a2, a0, t1
+        rem   t0, a0, t1
+        add   a2, a2, t0
+        lw    a0, ip_addr
+        div   t0, a0, t1
+        add   a2, a2, t0
+        rem   t0, a0, t1
+        add   a2, a2, t0
+        addi  a2, a2, IPD_UDP
+        add   a2, a2, a1
+        ret
 
 # ip_arpsend: send ARP message a0 (1 a request, 2 a reply) about address
 # a3: a request to everyone, a reply to Ethernet address a1, a2. a0 is
@@ -603,6 +1196,7 @@ ip_iphead:
         call  ip_putn
         addi  a0, t2, IPD_HDR
         li    a1, IPD_IHDR - IPD_HDR
+        li    a2, 0
         call  ip_sum
         mv    a1, a0
         la    a0, ip_tx
@@ -625,12 +1219,13 @@ ip_send:
         sys
         ret
 
-# ip_sum: a0 = the Internet checksum of the a1 octets at a0: the ones'
-# complement of their ones'-complement sum, as 16-bit words, an odd last
-# octet padded with 0. Over a header or message holding its own checksum
-# it is 0 when that is right. Clobbers a1, t0, t1, t3.
+# ip_sum: a0 = the Internet checksum of the a1 octets at a0, starting
+# from the sum a2 (0, or ip_pseudo's): the ones' complement of their
+# ones'-complement sum, as 16-bit words, an odd last octet padded with 0.
+# Over a header or message holding its own checksum it is 0 when that is
+# right. Clobbers a1, t0, t1, t3.
 ip_sum:
-        li    t3, 0                    # t3: the sum
+        mv    t3, a2                   # t3: the sum
 1:      li    t0, 2
         blt   a1, t0, 2f
         lt    t0, 0(a0)
@@ -778,6 +1373,22 @@ ip_hop:     .word 0                    # through this hop
 ip_start:   .word 0                    # when its request was sent
 ip_tpa:     .word 0                    # ip_arpsend's address
 ip_arpnext: .word 0                    # the ARP entry to replace next
+ip_pdead:   .word 0                    # when the ping runs out of time
+ip_spid:    .word IPD_NONE             # whose send waits for ARP,
+ip_sbuf:    .word 0                    # its buffer,
+ip_slen:    .word 0                    # how long,
+ip_shop:    .word 0                    # the hop ARP is asked about,
+ip_sdead:   .word 0                    # and until when
+ip_usport:  .word 0                    # ip_uout's source port
+ip_ephem:   .word IPD_EPHEMERAL        # the port bind(0) tries next
+ip_qnext:   .word 0                    # the next kept datagram's number
+ip_uport:   .words NPROC               # each process's port, 0 for none,
+ip_ubuf:    .words NPROC               # its waiting receive's buffer,
+ip_usize:   .words NPROC               # size plus 1 (0 for none),
+ip_udead:   .words NPROC               # and time limit (0 for none)
+ip_qowner:  .words IPD_SLOTS           # each slot's process plus 1 (0 free),
+ip_qlen:    .words IPD_SLOTS           # its datagram's length,
+ip_qseq:    .words IPD_SLOTS           # and number, the oldest least
 ip_arps:    .words 3 * IPD_ARPS        # address, Ethernet address halves
 ip_tx:      .zero FRAME_MAX            # the frame being sent
 ip_rx:      .zero FRAME_MAX            # the frame being looked at
