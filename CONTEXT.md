@@ -1314,3 +1314,24 @@ it with a table of factorials up to 20!, the largest that fits a u64.
 It was 5 715 trytes, against 668 for recho: formatting is the cost.
 With detrytus's load and store helpers and the rest of its size work
 (detrytus docs/rust.md, Size) it is 3 960, recho 596 and rhello 367.
+
+### 2026-11-25 · 128-bit integers and floating point in Rust programs
+
+detrytus's translator now handles atomics, 128-bit integers and
+floating point (detrytus docs/rust.md). Here:
+
+- **`rfact` goes to 34!**, the last factorial that fits a u128, so it
+  shows 128-bit arithmetic and formatting. It grew from 3 960 to
+  7 230 trytes: core formats a u128 with a 256-bit multiply.
+- **`rmandel` draws the Mandelbrot set in `f32`.** Floating point is
+  done in software, with compiler_builtins' routines, about 3 900
+  trytes in all.
+- **No demo prints a float with `{}`.** Core's float formatting
+  (Grisu and Dragon) is about 20 000 trytes, and a program file holds
+  at most `EXEC_MAX` (9 843): a program is one block. Lifting that
+  limit (programs over several blocks and pages) is a kernel change
+  of its own. An f64 demo that only used `+ - * /` and `sqrt` was
+  still 11 000 trytes, as `__divdf3`, `__adddf3` and `__muldf3` are
+  large on detrytus, so `rmandel` uses `f32` and no division in its
+  loop.
+- Atomics have no demo: a trylobite process has one thread.
