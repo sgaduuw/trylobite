@@ -160,7 +160,7 @@ interrupts taken), `SI_PAGES` and `SI_FREE` (memory, in pages),
 `SI_NPROC` and `SI_PROCS` (the process table and the slots in use,
 zombies included), `SI_HARTS` (harts present) and the kernel's version
 as a string from `SI_RELEASE`: `uname -a` says `trylobite 0.1.0
-detrytus`, `uptime` `up 1171367 ticks, 7 processes, 1 hart`, and `free`
+detrytus`, `uptime` `up 1171367 ticks, 9 processes, 1 hart`, and `free`
 memory in pages and in trytes. The machine has no seconds: its clock,
 the `time` CSR, counts one tick per step (detrytus platform.md, Time),
 so times are in ticks.
@@ -339,16 +339,37 @@ in each of the reply's next two words. Frames pass through two block
 windows of the server's, by DMA, and are copied to and from the caller,
 as the disk server's blocks are. Sends wait their turn one per process,
 and so do readers; a frame that arrives while nobody reads waits in the
-server, and the device keeps nine more behind it. The server arms the
-device only while somebody waits on it, so a machine whose processes
-have all finished still stops. Without a link, sends and receives fail
-with `E_IO`.
+server, and the device keeps nine more behind it. A network stack,
+which must keep taking calls of its own, calls `NT_LISTEN` instead of
+waiting in a receive: the server then notifies it (`notify`) once for
+each frame that waits with nobody reading, and its `NT_RECEIVE` takes
+the frame at once. The server arms the device only while somebody waits
+on it or listens, and an armed device keeps the machine on only while
+some process waits on something, so a machine whose processes have all
+finished still stops. Without a link, sends and receives fail with
+`E_IO`.
+
+Above it, the **IP server** (`user/ipd.s`) registers as `ip`, protocol
+`IP_PROTOCOL`: the start of the TCP/IP stack. It speaks ARP and ICMP
+echo over IPv4. It answers ARP requests for its address and keeps what
+ARP tells it in an eight-entry cache, and answers pings. `IP_PING`, an
+address, a sequence number and a time limit in ticks sends an echo
+request, asking ARP for the next hop first if the cache lacks it, and
+answers with the ticks the reply took, or `E_TIMEDOUT` (its `alarm`
+ran out), `E_NOROUTE` (off the network with no gateway), or `E_BUSY`
+(one ping is under way at a time). `IP_ADDRESS` gives its address,
+prefix length and gateway, `10.0.0.2/24` and `10.0.0.1` at boot, and
+`IP_CONFIG` sets them. An address is a word, a.b.c.d being
+a × 2²⁴ + b × 2¹⁶ + c × 2⁸ + d. `bin/ping ADDRESS [COUNT]` and
+`bin/ifconfig [ADDRESS/PREFIX [GATEWAY]]` are its tools in the shell.
 
 Run with `detrytus run --net loop` for a link that hands every frame
-back, or `--net udp:LOCAL,PEER` to carry frames over UDP to another
-machine (detrytus `README.md`). The tests start the server with
-`run(..., net=True, link="loop")`; `shell.s` does not start it yet,
-since nothing in it uses the network.
+back, where pinging the machine's own address runs the whole exchange,
+or `--net udp:LOCAL,PEER` to carry frames over UDP to another machine
+(detrytus `README.md`): give the second one another `--mac` and
+another address with `ifconfig`, and run both with `--live` so that
+their clocks keep to real time. The tests start the servers with
+`run(..., net=True, link="loop")`, or `ip=True` for both.
 
 ## Files
 

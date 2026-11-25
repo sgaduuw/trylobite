@@ -338,10 +338,12 @@ init_rows:
         .word INIT_PIPED, PIPE_PROTOCOL, init_pipe, INIT_NONE     # row 1
         .word INIT_DISKD, DISK_PROTOCOL, init_disk, INIT_NONE     # row 2
         .word INIT_FSD, FS_PROTOCOL, init_fs, 2                   # row 3
+        .word INIT_NETD, NET_PROTOCOL, init_net, INIT_NONE        # row 4
+        .word INIT_IPD, IP_PROTOCOL, init_ip, 4                   # row 5
         .word 0
-init_pids:  .word INIT_DOWN, INIT_DOWN, INIT_DOWN, INIT_DOWN   # each row's
-                                       # process
-init_tries: .words 4                   # and how often it has started again
+init_pids:  .word INIT_DOWN, INIT_DOWN, INIT_DOWN, INIT_DOWN, INIT_DOWN, INIT_DOWN
+                                       # each row's process
+init_tries: .words 6                   # and how often it has started again
 init_sh:    .word INIT_DOWN            # the shell's process
 init_shtries: .word 0                  # and how often it has started again
 
@@ -361,5 +363,7 @@ init_con:      .string "console"
 init_pipe:     .string "pipe"
 init_disk:     .string "disk"
 init_fs:       .string "fs"
+init_net:      .string "net"
+init_ip:       .string "ip"
 init_myname: .string "init"
         .nocompress

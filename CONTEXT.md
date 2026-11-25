@@ -1386,3 +1386,50 @@ step toward TCP/IP is its driver, `user/netd.s`, registered as `net`:
   every program after it, for a server nothing in the shell uses; it
   joins init's rows with the stack that needs it. `NSRC` is 3, which
   still fits `PCB_IRQS` in one word.
+
+### 2026-11-25 · The IP server: ARP and ping
+
+The second step toward TCP/IP is an IP server, `user/ipd.s`, registered
+as `ip`, with ARP and ICMP echo; `bin/ping` and `bin/ifconfig` use it.
+
+- **A separate server, so the stack needed two kernel calls.** A
+  server that both serves calls and waits for frames cannot block in
+  the network server's `NT_RECEIVE`, as calls are synchronous. Rather
+  than poll or fold the stack into the driver, the kernel gained
+  `notify(pid)`, a nudge that does not wait and arrives in the target's
+  `receive` as `NOTE_SIGNAL` (once, however often it came, as an seL4
+  notification), and `alarm(until)`, a `NOTE_ALARM` from `receive` for
+  timeouts. With both, every server still waits in one place only.
+  Rejected: a `receive` with a timeout (the alarm is the same thing,
+  and a later TCP needs one timer whatever it is waiting for); a thread
+  in the stack (no threads yet).
+- **`NT_LISTEN`.** The stack listens rather than reads: the network
+  server notifies the listener once for each frame that waits with no
+  reader, and the listener's `NT_RECEIVE` then takes it at once. One
+  process listens; a reader waiting still gets frames first.
+- **An armed device keeps the machine on only while somebody waits.**
+  A listening stack keeps the network interrupt armed, and an armed
+  source used to keep `pick` waiting for ever, so every run with the
+  stack would never power off. Now `pick` waits for a device only if
+  some process waits on something other than `receive` (a call, a
+  child, a name): servers all asleep in `receive` have nobody to serve,
+  whatever arrives. A process with an alarm set keeps the machine on as
+  a sleeper does.
+- **One ping at a time,** in two states (waiting for ARP, waiting for
+  the echo), with the caller's process number as the ICMP identifier; a
+  second caller gets `E_BUSY`. The ARP cache has eight entries,
+  replaced oldest first, and never expires. Addresses are words, since
+  2³² fits easily in 27 trits. Ticks are measured from the echo
+  request, not the ARP, as Unix's ping does.
+- **Its address is fixed at boot** (10.0.0.2/24, gateway 10.0.0.1) and
+  set with `IP_CONFIG`; there is no DHCP or configuration file yet.
+- **A round trip takes about 30,000 ticks** on a loopback link: two
+  frames, each waiting up to 1,000 for the link, and the rest system
+  calls (each frame passes the network server and the IP server, with
+  copies) and checksums done an octet at a time.
+- **Two machines over UDP need `--live`.** Without it the emulator
+  skips idle time to the next deadline, so a ping's alarm goes off
+  before the other machine, running in real time, could answer.
+- **`shell.s` starts both now,** as init rows 4 and 5 after the file
+  server, so the earlier servers keep their process numbers; the shell
+  is process 7. 19 of 81 pages stay free in a session.

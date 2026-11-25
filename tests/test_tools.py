@@ -48,7 +48,7 @@ def test_uptime_says_ticks_processes_and_harts(shell):
     out = said(shell, "uptime\n")
     harts = "1 hart" if kernel.HARTS == 1 else f"{kernel.HARTS} harts"
     assert re.fullmatch(
-        rf"\$ uptime\nup \d+ ticks, 7 processes, {harts}\n\$ \n", out
+        rf"\$ uptime\nup \d+ ticks, 9 processes, {harts}\n\$ \n", out
     ), out
 
 
@@ -66,17 +66,19 @@ def test_ps_lists_every_process_by_name(shell):
     out = said(shell, "ps\n/bin/ps\n")
     rows = [line.split() for line in out.splitlines() if line[:1] == " "]
     assert rows[0] == ["PID", "PPID", "STATE", "PAGES", "TIME", "NAME"]
-    table = {int(r[0]): (r[1], r[2], r[5]) for r in rows[1:8]}
+    table = {int(r[0]): (r[1], r[2], r[5]) for r in rows[1:10]}
     assert table == {
         0: ("-", "receive", "init"),
         1: ("0", "receive", "consd"),
         2: ("0", "receive", "piped"),
         3: ("0", "receive", "diskd"),
         4: ("0", "receive", "fsd"),
-        5: ("0", "wait", "sh"),
-        6: ("5", "run", "ps"),
+        5: ("0", "receive", "netd"),
+        6: ("0", "receive", "ipd"),
+        7: ("0", "wait", "sh"),
+        8: ("7", "run", "ps"),
     }
-    assert rows[-1][1:3] + rows[-1][5:] == ["5", "run", "ps"]  # not /bin/ps
+    assert rows[-1][1:3] + rows[-1][5:] == ["7", "run", "ps"]  # not /bin/ps
 
 
 def test_kill_ends_a_server_and_init_starts_it_again(shell):
@@ -107,12 +109,12 @@ def test_top_shows_a_screen_each_period(shell):
     for screen in screens[1:]:
         lines = screen.splitlines()
         assert re.fullmatch(
-            r"top: up \d+ ticks, 7 processes, \d+ harts?, \d+ of 81 pages free",
+            r"top: up \d+ ticks, 9 processes, \d+ harts?, \d+ of 81 pages free",
             lines[0],
         )
         header = "PID PPID STATE PAGES CPU% TIME NAME"
         assert lines[2].split() == header.split()
-        assert re.fullmatch(r" +6 +5 run +4 +\d+\.\d +\d+ top", lines[9]), lines[9]
+        assert re.fullmatch(r" +8 +7 run +4 +\d+\.\d +\d+ top", lines[11]), lines[11]
     assert out.endswith("$ top -n 0\nusage: top [-n COUNT]\nsh: exit 2\n$ \n")
 
 

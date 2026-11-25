@@ -562,4 +562,3 @@ def test_an_alarm_wakes_receive_once_its_time_has_come():
     result = run(program)
     assert result.code_of(0) == 4, result.console
     assert "all processes exited" in result.console
-

@@ -141,6 +141,7 @@ SERVERS = {
     "console": "user/consd.s",
     "pipe": "user/piped.s",
     "net": "user/netd.s",
+    "ip": "user/ipd.s",
 }
 
 
@@ -193,6 +194,7 @@ def build(
     console: bool = False,
     pipes: bool = False,
     net: bool = False,
+    ip: bool = False,
 ) -> Image:
     """The kernel with init as program 0 and prog1, prog2 to spawn; with
     disk_server, also the disk server (user/diskd.s), with files the
@@ -208,7 +210,8 @@ def build(
         *(["fs"] if files else []),
         *(["console"] if console else []),
         *(["pipe"] if pipes else []),
-        *(["net"] if net else []),
+        *(["net"] if net or ip else []),
+        *(["ip"] if ip else []),
     ]
     server = ""
     for k, name in enumerate(servers, 3):
@@ -380,7 +383,7 @@ def new_disk() -> Path:
 _BIN: dict[str, list[int]] = {}
 
 
-def bin_disk(blocks: int = 32, **texts: str) -> tuple[Path, int]:
+def bin_disk(blocks: int = 40, **texts: str) -> tuple[Path, int]:
     """A new disk holding a filesystem with every program of bin/ in /bin,
     as the shell expects, and these text files in /: (path, blocks)."""
     from tools.fs import Filesystem, assemble, program_file
@@ -467,10 +470,11 @@ def run(
     console: bool = False,
     pipes: bool = False,
     net: bool = False,
+    ip: bool = False,
     link: str | None = None,
 ) -> Run:
     image = build(
-        init, prog1, prog2, ram_pages, files, disk_server, console, pipes, net
+        init, prog1, prog2, ram_pages, files, disk_server, console, pipes, net, ip
     )
     return run_image(
         image, ram_pages, max_steps, harts, plug, unplug, input, disk, link

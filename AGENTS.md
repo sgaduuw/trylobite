@@ -103,13 +103,13 @@ pipe.
   in pages from `P_PROG0`, and the free pages start after the last.
 - **Program 0 is init.** The kernel starts it and nothing else. In
   `demo.s` it is `user/demo-init.s`; in `shell.s` it is `user/init.s`,
-  which starts the servers (console, pipe, disk, file, in that order,
-  from its table `init_rows`), waiting for each to register, then the
-  shell, as process 5; it exits when the shell does, and starts again
-  a server that ends (with what needs it) or a shell that faults, at
-  most `INIT_RETRIES` (3) times each. The shell finds
+  which starts the servers (console, pipe, disk, file, network, IP, in
+  that order, from its table `init_rows`), waiting for each to register,
+  then the shell, as process 7; it exits when the shell does, and starts
+  again a server that ends (with what needs it) or a shell that faults,
+  at most `INIT_RETRIES` (3) times each. The shell finds
   the servers with `lookup(LOOKUP_NOW)`; the programs it runs start at
-  process 6. Tests build their own init with `run(init, ...)`, which
+  process 8. Tests build their own init with `run(init, ...)`, which
   starts the servers they ask for first (`tests/kernel.py`, `SERVERS`).
 - **A new program goes in `bin/`, on the disk**, unless another program
   spawns it by number (ping, pong, the servers and sh) or the kernel
@@ -117,7 +117,11 @@ pipe.
   `docs/trice.md`), built with `detrytus link`: a Trice program imports
   `include/layout.s` and then `lib/start.s`, which places it at `V_USER`
   and calls `main(argc, argv)` (`bin/echo.tc` is the example), and
-  usually `lib/io.tc`, the helpers Trice programs share. A disk
+  usually `lib/io.tc`, the helpers Trice programs share (and
+  `lib/ip.tc` for the network ones). A library's assembly helpers must
+  be `.global` for a program to call them, and a library may not share
+  its stem with the assembly it imports (`ip.tc` beside `ip.s` makes
+  the linker include itself). A disk
   program is assembled on its own, including
   `include/layout.s` and loading where it runs, at `V_USER`
   (docs/filesystem.md, Program files); `include/layout.s` must
