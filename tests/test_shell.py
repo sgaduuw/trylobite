@@ -53,6 +53,23 @@ def test_only_the_first_word_counts_and_blank_lines_are_skipped(shell):
     assert "hello from a balanced-ternary machine" in result.console
 
 
+def test_a_carriage_return_ends_a_line_and_control_characters_are_dropped(shell):
+    # A terminal's Enter may send CR, or CR LF: either ends one line, so
+    # neither leaves a stray empty command behind.
+    result = session(shell, "\r\n\rhel\x01lo\r\n\thello\rexit\n")
+    assert "no such program" not in result.console
+    assert result.console.count("hello from a balanced-ternary machine") == 2
+
+
+def test_arrow_keys_and_other_escape_sequences_are_dropped(shell):
+    # Up arrow (ESC [ A, or ESC O A in application mode), Delete (ESC [ 3 ~)
+    # and Alt+x (ESC x) leave nothing in the line.
+    result = session(shell, "\x1b[A\n\x1bOAhe\x1b[3~l\x1bxlo\x1b[1;5C\n")
+    assert "no such program" not in result.console
+    assert "\x1b" not in result.after_boot
+    assert "hello from a balanced-ternary machine" in result.console
+
+
 def test_a_long_line_keeps_its_first_sixty_characters(shell):
     result = session(shell, "x" * 70 + "\n")
     assert f"sh: no such program: {'x' * 60}\n" in result.console

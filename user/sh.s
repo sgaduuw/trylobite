@@ -39,6 +39,11 @@
         .gp   USER_GP                  # set by spawn
 
         .equ  LINE_MAX, 60             # characters kept from a line
+        .equ  CR, 13                   # carriage return: the assembler has no \r
+        .equ  ESC, 27                  # escape, which starts the arrow keys' sequences
+        .equ  SH_CR, 1                 # sh_state: a carriage return came last
+        .equ  SH_ESC, 2                # an escape came last
+        .equ  SH_SEQ, 3                # inside ESC [ or ESC O, before its final character
         .equ  BS, 8                    # backspace, and delete, both erase
         .equ  DEL, 127
         .equ  BUF_MAX, 243             # trytes cat reads at a time
@@ -136,15 +141,46 @@ read:   li    a0, SYS_READ
         lt    a0, sh_ch
         bnez  a0, got                  # zero, NUL, is ignored
         j     read
+got:    lw    t1, sh_state             # t1: what came before (SH_ values)
+        sw    zero, sh_state
+        li    t0, SH_ESC
+        blt   t1, t0, 4f
+        bne   t1, t0, 5f
+        li    t0, '['                  # after an escape: ESC [ and ESC O
+        beq   a0, t0, 6f               # start a sequence, as the arrow
+        li    t0, 'O'                  # keys send; any other character
+        bne   a0, t0, read             # after it (Alt+key) is dropped
+6:      li    t0, SH_SEQ
+        sw    t0, sh_state
         j     read
-got:    li    t0, '\n'
-        beq   a0, t0, enter
-        li    t0, CTRL_C               # nothing runs: drop the line instead
+5:      li    t0, '@'                  # in a sequence: everything up to
+        blt   a0, t0, 6b               # its final character, @ to ~, is
+        j     read                     # dropped, so no key leaves a trace
+4:      li    t0, ESC
+        bne   a0, t0, 7f
+        li    t0, SH_ESC
+        sw    t0, sh_state
+        j     read
+7:      li    t0, CR                   # a carriage return ends the line,
+        bne   a0, t0, 1f               # as a terminal's Enter may send it,
+        li    t0, SH_CR
+        sw    t0, sh_state
+        j     enter
+1:      li    t0, '\n'                 # and so does a newline, but not
+        bne   a0, t0, 2f               # one right after it (CR LF)
+        bnez  t1, read
+        j     enter
+2:      li    t0, CTRL_C               # nothing runs: drop the line instead
         beq   a0, t0, cancel
         li    t0, BS
         beq   a0, t0, erase
         li    t0, DEL
         beq   a0, t0, erase
+        li    t0, '\t'                 # a tab is a space,
+        bne   a0, t0, 3f
+        li    a0, ' '
+3:      li    t0, ' '                  # and other control characters
+        blt   a0, t0, read             # are dropped
         addi  t0, s0, LINE_MAX
         bge   s1, t0, read             # the line is full: drop it
         st    a0, 0(s1)
@@ -1116,6 +1152,7 @@ sh_birest:   .word 0                   # and the rest of the built-in's line
 sh_npids:    .word 0                   # programs it has started,
 sh_pids:     .words SH_STAGES          # in order
 sh_outfd:    .word STDOUT              # where puts and putc print
+sh_state:    .word 0                   # SH_CR after a CR, SH_ESC/SH_SEQ in an escape
 sh_redir:    .word 0                   # 1 while a command has redirections
 sh_fsname:   .string "fs"
 sh_conname:  .string "console"
