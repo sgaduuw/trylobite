@@ -8,14 +8,17 @@
 #   detrytus run shell.s --ram-pages 81 --input session.txt --disk disk.img
 
         .equ  RAM_PAGES, 81            # the machine this build is for
-        .equ  NPROG, 9                 # init, ping, pong, pingpong, the file
+        .equ  NPROG, 11                # init, ping, pong, pingpong, the file
                                        # server, the disk server, the console
-                                       # server, the pipe server and the shell
+                                       # server, the pipe server, the shell,
+                                       # the network server and the IP server
         .equ  INIT_FSD, 4              # the programs init starts, by number
         .equ  INIT_DISKD, 5
         .equ  INIT_CONSD, 6
         .equ  INIT_PIPED, 7
         .equ  INIT_SH, 8
+        .equ  INIT_NETD, 9
+        .equ  INIT_IPD, 10
 
         .include "include/kernel.s"
         .section prog0, P_PROG0 * PAGE, V_USER
@@ -33,3 +36,7 @@
         .include "user/piped.s"
         .section prog8, (P_PROG0 + 8) * PAGE, V_USER
         .include "user/sh.s"
+        .section prog9, (P_PROG0 + 9) * PAGE, V_USER
+        .include "user/netd.s"
+        .section prog10, (P_PROG0 + 10) * PAGE, V_USER
+        .include "user/ipd.s"

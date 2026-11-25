@@ -79,6 +79,10 @@ syscall_again:                         # resume runs a call again (ipc.s)
         beq   a0, t0, sys_name
         li    t0, SYS_SLEEP
         beq   a0, t0, sys_sleep
+        li    t0, SYS_NOTIFY
+        beq   a0, t0, sys_notify
+        li    t0, SYS_ALARM
+        beq   a0, t0, sys_alarm
         li    a0, E_NOCALL
 
 sys_return:                            # a0: the result

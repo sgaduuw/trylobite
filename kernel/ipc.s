@@ -37,9 +37,9 @@ sys_call:
 8:      li    a0, E_SELF
         j     sys_return
 
-# receive(): a notice first (an interrupt's, then a closed handle's, then
-# an ending's), else the next caller after the last one taken, else sleep
-# until rouse wakes it.
+# receive(): a notice first (an interrupt's, then its alarm's, then a
+# closed handle's, then a notification's, then an ending's), else the
+# next caller after the last one taken, else sleep until rouse wakes it.
 sys_receive:
         li    t0, 1
         sw    t0, PCB_SERVES(s0)
@@ -50,7 +50,13 @@ sys_receive:
         addi  t3, t3, 1
         li    t1, NSRC
         ble   t3, t1, 0b
-        li    t3, 0                    # t3: a handle, three at a time: a
+        lw    t0, PCB_RANG(s0)
+        beqz  t0, 0f
+        sw    zero, PCB_RANG(s0)       # a notice: its alarm went off
+        li    t3, 0
+        li    t0, NOTE_ALARM
+        j     8f
+0:      li    t3, 0                    # t3: a handle, three at a time: a
 0:      add   t2, s0, t3               # word is 0 only if its trytes all are
         lw    t0, PCB_CLOSED + 1(t2)
         bnez  t0, 1f
@@ -59,12 +65,24 @@ sys_receive:
         blt   t3, t1, 0b
         li    t3, 0                    # t3: a process number, alike
 0:      add   t2, s0, t3
+        lw    t0, PCB_SIGNALS + 1(t2)
+        bnez  t0, 10f
+        addi  t3, t3, 3
+        li    t1, NPROC
+        blt   t3, t1, 0b
+        li    t3, 0
+0:      add   t2, s0, t3
         lw    t0, PCB_NOTES + 1(t2)
         bnez  t0, 2f
         addi  t3, t3, 3
         li    t1, NPROC
         blt   t3, t1, 0b
         j     0f
+10:     lt    t0, PCB_SIGNALS(t2)      # which of the three
+        bnez  t0, 11f
+        addi  t3, t3, 1
+        add   t2, s0, t3
+        j     10b
 1:      lt    t0, PCB_CLOSED(t2)       # which of the three
         bnez  t0, 9f
         addi  t3, t3, 1
@@ -113,6 +131,10 @@ sys_receive:
 9:      li    t0, 0                    # a notice: handle t3 is closed
         st    t0, PCB_CLOSED(t2)
         li    t0, NOTE_CLOSED
+        j     8f
+11:     li    t0, 0                    # a notice: process t3 notified it
+        st    t0, PCB_SIGNALS(t2)
+        li    t0, NOTE_SIGNAL
 8:      sw    t0, PCB_A1(s0)
         sw    t3, PCB_A2(s0)
         li    a0, FROM_KERNEL
@@ -208,6 +230,22 @@ client_of:
         addi  sp, sp, 3
         ret
 
+# notify(pid): mark the caller in process a1's PCB_SIGNALS and wake it if
+# it sleeps in receive. Nothing waits: a process may notify a server it
+# also calls, and the server may notify a process that is calling it.
+sys_notify:
+        call  proc_of
+        bltz  a0, sys_return
+        li    a0, E_SELF
+        beq   s1, s0, sys_return
+        call  current_pid
+        add   t0, s1, a0
+        li    t1, 1
+        st    t1, PCB_SIGNALS(t0)
+        call  rouse
+        li    a0, 0
+        j     sys_return
+
 # rouse: wake process s1 if it sleeps in receive, to run it again.
 # Clobbers t0..t2.
 rouse:
@@ -228,6 +266,7 @@ rouse:
 ipc_ended:
         addi  sp, sp, -6
         sw    ra, 0(sp)
+        sw    zero, PCB_ALARM(s0)      # nobody to ring for now
         li    t0, 0                    # its parent's record, 0 for none
         lw    t1, PCB_PARENT(s0)
         bltz  t1, 0f
@@ -247,6 +286,8 @@ ipc_ended:
 5:      add   t1, s1, t4
         li    t2, 1
         st    t2, PCB_NOTES(t1)
+        li    t2, 0                    # a notification from it is stale now
+        st    t2, PCB_SIGNALS(t1)
         call  rouse
         lw    t0, PCB_STATE(s1)
 2:      li    t1, ST_CALL

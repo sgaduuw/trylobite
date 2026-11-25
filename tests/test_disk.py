@@ -180,11 +180,16 @@ def test_a_client_killed_with_its_block_in_flight_leaves_the_server_usable():
         li    a1, 1
         sys
         mv    s1, a0
-        li    s2, 3                    # the child calls, the server starts
-1:      li    a0, SYS_YIELD            # the disk on it and waits
+1:      li    a0, SYS_YIELD            # until the server has taken the
+        sys                            # child's call, and started the disk
+        li    a0, SYS_PROC             # on it
+        mv    a1, s1
+        la    a2, info
         sys
-        addi  s2, s2, -1
-        bnez  s2, 1b
+        la    t0, info
+        lw    t0, PI_STATE(t0)
+        li    t1, ST_REPLY
+        bne   t0, t1, 1b
         li    a0, SYS_KILL
         mv    a1, s1
         li    a2, FOR_SELF
@@ -197,6 +202,8 @@ def test_a_client_killed_with_its_block_in_flight_leaves_the_server_usable():
         mul   a1, s3, t0
         add   a1, a1, a0
         {EXIT}
+        .align 1
+info:   .words PROCINFO / 3
 """
     result = run(init, child, disk=(new_disk(), 4))
     assert result.code_of(0) == L["WAIT_KILLED"] * 10

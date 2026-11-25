@@ -26,14 +26,14 @@ def test_a_session_runs_programs_and_reports_how_they_ended(shell):
     assert transcript.rsplit(" ", 1)[0] == (
         "$ hello\n"
         "hello from a balanced-ternary machine\n"
-        "trylobite: process 6 exited with code 0\n"
+        "trylobite: process 8 exited with code 0\n"
         "$ fail\n"
-        "trylobite: process 7 exited with code 3\n"
+        "trylobite: process 9 exited with code 3\n"
         "sh: exit 3\n"
         "$ nope\n"
         "sh: no such program: nope\n"
         "$ exit\n"
-        "trylobite: process 5 exited with code 0\n"
+        "trylobite: process 7 exited with code 0\n"
         "trylobite: process 0 exited with code 0\n"
         "trylobite: all processes exited after"
     )
@@ -97,7 +97,7 @@ def test_a_word_without_a_slash_is_looked_for_in_bin(shell):
 def test_ls_lists_the_programs_on_the_disk(shell):
     result = session(shell, "ls bin\nfail\n")
     assert "sh: exit 3\n" in result.console
-    listed = result.after_boot.splitlines()[1:25]
+    listed = result.after_boot.splitlines()[1:27]
     assert [line.split()[1] for line in listed] == [
         "cp",
         "df",
@@ -108,8 +108,10 @@ def test_ls_lists_the_programs_on_the_disk(shell):
         "grep",
         "head",
         "hello",
+        "ifconfig",
         "kill",
         "mv",
+        "ping",
         "ps",
         "recho",
         "rfact",

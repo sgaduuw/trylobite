@@ -38,9 +38,23 @@ pick:
 
         # Nobody is ready. A process running on another hart can still
         # send or spawn, and an armed device can still wake its driver:
-        # wait for work.
+        # wait for work. A device is worth waiting for only while some
+        # process waits on something (a call, a child, a name, a message):
+        # servers all asleep in receive have nobody left to serve, so a
+        # network server listening for frames does not keep the machine
+        # on by itself.
         lw    t0, irq_armed
-        bnez  t0, idle
+        beqz  t0, 8f
+        mv    s1, t2
+7:      lw    t0, PCB_STATE(s1)
+        bgez  t0, 9f                   # free, or running (checked below)
+        li    t1, ST_RECEIVE
+        beq   t0, t1, 9f
+        li    t1, ST_ZOMBIE
+        bne   t0, t1, idle             # it waits
+9:      addi  s1, s1, PCB_SIZE
+        blt   s1, t3, 7b
+8:
         lw    t0, sleepers             # the clock will wake a sleeper
         bnez  t0, idle
         mv    s1, t2

@@ -42,9 +42,14 @@ jobs:
           grep -qx 'hello from Rust on a balanced-ternary machine' out.txt
           grep -qx '/docs' out.txt
           grep -qx '1 5 38' out.txt
-          grep -qE '^ +[0-9]+ +5 run +4 +[0-9]+ ps$' out.txt
+          grep -qE '^ +[0-9]+ +7 run +4 +[0-9]+ ps$' out.txt
           grep -qE '^disk0 +40 ' out.txt
           grep -qx 'trylobite 0.1.0 detrytus' out.txt
           tools/fs.py ls disk.img docs
           tools/fs.py cat disk.img docs/motd | grep -q 'made in the shell'
           tools/fs.py cat disk.img docs/hi | grep -q 'hello from a balanced-ternary machine'
+      - name: Ping over a loopback link
+        run: |
+          printf 'ifconfig\nping 10.0.0.2 2\nexit\n' | detrytus run shell.s --ram-pages 81 --input - --disk disk.img --net loop | tee ping.txt
+          grep -qx 'inet 10.0.0.2/24 gateway 10.0.0.1' ping.txt
+          grep -qE '^reply from 10\.0\.0\.2: seq 2, [0-9]+ ticks$' ping.txt

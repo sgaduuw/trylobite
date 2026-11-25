@@ -23,10 +23,15 @@
 # there; frames go to waiting readers in process order after the last.
 # A frame that arrives while nobody reads waits in window 1 (nt_held).
 #
+# Listening: a network stack cannot wait in a receive and take calls at
+# once, so it calls NT_LISTEN instead, and the server notifies it
+# (SYS_NOTIFY) once for each frame that waits with nobody reading; its
+# receive then takes the frame at once. One process listens at a time.
+#
 # The server arms the device's interrupt only while it waits on the
-# device for somebody: a send in flight, or a reader with no frame to
-# give. With nobody waiting the machine may stop, as it does when every
-# process sleeps; a network stack keeps a receive waiting.
+# device for somebody: a send in flight, or a reader or listener with no
+# frame to give. An armed device keeps the machine on only while some
+# process waits on something, so a listener alone does not.
 #
 # Not a program on its own: a build includes it in a program's section.
 # Its labels all start with nt_, since it shares the build's symbols.
@@ -89,6 +94,8 @@ nt_wait:
         mv    s0, a0                   # s0: the caller
         li    t0, NT_ADDRESS
         beq   a1, t0, nt_address
+        li    t0, NT_LISTEN
+        beq   a1, t0, nt_listen
         li    a5, E_INVAL
         li    t0, NT_SEND
         beq   a1, t0, nt_send
@@ -129,6 +136,15 @@ nt_address:
         sys
         j     nt_wait
 
+nt_listen:
+        sw    s0, nt_listener
+        sw    zero, nt_told            # a frame waiting is news to it
+        li    a0, SYS_REPLY
+        mv    a1, s0
+        li    a2, 0
+        sys
+        j     nt_poll
+
 # nt_answer: reply a5 to process s0, and go back to waiting.
 nt_answer:
         li    a0, SYS_REPLY
@@ -150,7 +166,11 @@ nt_notice:
         la    t1, nt_recvs
         add   t1, t1, t0
         sw    zero, 0(t1)
-        lw    t0, nt_txpid
+        lw    t0, nt_listener
+        bne   t0, a2, 1f
+        li    t0, NT_IDLE
+        sw    t0, nt_listener
+1:      lw    t0, nt_txpid
         bne   t0, a2, nt_wait
         li    t0, 1                    # the send in flight is nobody's now,
         sw    t0, nt_txgone            # and the number may come back
@@ -228,7 +248,7 @@ nt_rx:
 1:      la    a0, nt_recvs
         lw    a1, nt_rxlast
         call  nt_find
-        bltz  s0, nt_arm               # nobody reads: it waits
+        bltz  s0, nt_tell              # nobody reads: it waits
         sw    s0, nt_rxlast
         lw    s2, 0(t0)
         addi  s2, s2, -1               # s2: the reader's size
@@ -250,19 +270,33 @@ nt_rx:
         mv    a1, s0
         sys
 3:      sw    zero, nt_held            # window 1 to the device again
+        sw    zero, nt_told
         li    t0, NT_REGS
         li    t1, NET_RECEIVE
         sw    t1, NET_RX_COMMAND(t0)
         j     nt_rx
 
+# nt_tell: a frame waits with nobody reading: tell the listener, once.
+nt_tell:
+        lw    a1, nt_listener
+        bltz  a1, nt_arm
+        lw    t0, nt_told
+        bnez  t0, nt_arm
+        li    t0, 1
+        sw    t0, nt_told
+        li    a0, SYS_NOTIFY
+        sys
+
 # nt_arm: let the device interrupt if somebody waits on it: a send in
-# flight, or a reader with no frame to give it. The interrupt is
-# level-triggered, so one that came first is not lost.
+# flight, or a reader or listener with no frame to give it. The
+# interrupt is level-triggered, so one that came first is not lost.
 nt_arm:
         lw    t0, nt_txpid
         bgez  t0, 1f
         lw    t0, nt_held
         bnez  t0, nt_wait
+        lw    t0, nt_listener
+        bgez  t0, 1f
         la    a0, nt_recvs
         li    a1, 0
         call  nt_find
@@ -309,6 +343,8 @@ nt_txgone: .word 0                     # 1 if that process has ended since
 nt_txlast: .word NPROC - 1             # whose send was started last
 nt_rxlast: .word NPROC - 1             # who was given a frame last
 nt_held: .word 0                       # 1 while window 1 holds a frame
+nt_listener: .word NT_IDLE             # who listens, NT_IDLE for nobody
+nt_told: .word 0                       # 1 once the listener knows of it
 nt_sends: .words NPROC                 # each process's waiting send: its
 nt_sbufs: .words NPROC                 # length plus 1 (0 for none), and frame
 nt_recvs: .words NPROC                 # each process's waiting receive: its

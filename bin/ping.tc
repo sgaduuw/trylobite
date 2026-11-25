@@ -1,0 +1,88 @@
+// ping ADDRESS [COUNT]: send COUNT echo requests (3 if not given) to the
+// IPv4 address a.b.c.d through the IP server, one after another, and say
+// for each how many ticks its reply took, or that none came in time, as
+// Unix's ping -c does. Exit with 0 if any reply came, 1 if none did or
+// the network failed, and 2 for bad arguments or no IP server.
+
+import "../include/layout.s";
+import "../lib/start.s";
+import "../lib/io.tc";
+import "../lib/ip.tc";
+
+const int WAIT = 100000;         // ticks to wait for each reply
+const int NOT_A_NUMBER = -1;
+
+// The number s writes in decimal, at most six digits, or NOT_A_NUMBER.
+int number(tryte *s) {
+    int n = 0;
+    int i = 0;
+    while (s[i] >= '0' && s[i] <= '9' && i < 6) {
+        n = n * 10 + (s[i] - '0');
+        i++;
+    }
+    if (i == 0 || s[i] != 0) return NOT_A_NUMBER;
+    return n;
+}
+
+tryte line[120];                 // what the next write says
+int at;
+
+void say(tryte *s) {
+    for (int i = 0; s[i] != 0; i++) line[at++] = s[i];
+}
+
+void say_number(int n) {
+    at += decimal(n, line + at);
+}
+
+void flush(int fd) {
+    put(fd, line, at);
+    at = 0;
+}
+
+int main(int argc, tryte **argv) {
+    int to = NOT_AN_ADDRESS;
+    int count = 3;
+    if (argc >= 2) to = address(argv[1]);
+    if (argc == 3) count = number(argv[2]);
+    if (argc < 2 || argc > 3 || to == NOT_AN_ADDRESS || count < 1) {
+        puts(STDERR, "usage: ping ADDRESS [COUNT]\n");
+        return 2;
+    }
+    int ip = ip_server();
+    if (ip < 0) {
+        puts(STDERR, "ping: no IP server\n");
+        return 2;
+    }
+    int replies = 0;
+    for (int seq = 1; seq <= count; seq++) {
+        int took = sys(SYS_CALL, ip, IP_PING, to, seq % 65536, WAIT);
+        if (took >= 0) {
+            replies++;
+            say("reply from ");
+            say(argv[1]);
+            say(": seq ");
+            say_number(seq);
+            say(", ");
+            say_number(took);
+            say(" ticks\n");
+        } else if (took == E_TIMEDOUT) {
+            say("no reply from ");
+            say(argv[1]);
+            say(": seq ");
+            say_number(seq);
+            say("\n");
+        } else {
+            say("ping: ");
+            say(argv[1]);
+            if (took == E_NOROUTE) say(": no route there\n");
+            else if (took == E_IO) say(": the network is down\n");
+            else if (took == E_BUSY) say(": another ping is under way\n");
+            else say(": failed\n");
+            flush(STDERR);
+            return 1;
+        }
+        flush(STDOUT);
+    }
+    return replies > 0 ? 0 : 1;
+}

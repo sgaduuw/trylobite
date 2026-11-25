@@ -1,0 +1,54 @@
+// What the network programs of bin/ share: finding the IP server, and
+// reading and writing addresses as a.b.c.d. A program imports
+// include/layout.s, lib/start.s and lib/io.tc first, then this file.
+
+import "../include/layout.s";
+import "io.tc";
+import "ipcalls.s";
+
+extern int ip_server();
+extern int ip_query(int ip, int *words);
+
+const int NOT_AN_ADDRESS = -1;
+
+// The address s starts with, as a.b.c.d, with *used set to how many
+// trytes it takes; NOT_AN_ADDRESS if it starts with none.
+int address_at(tryte *s, int *used) {
+    int a = 0;
+    int i = 0;
+    for (int part = 0; part < 4; part++) {
+        if (part > 0) {
+            if (s[i] != '.') return NOT_AN_ADDRESS;
+            i++;
+        }
+        int n = 0;
+        int digits = 0;
+        while (s[i] >= '0' && s[i] <= '9') {
+            n = n * 10 + (s[i] - '0');
+            i++;
+            digits++;
+        }
+        if (digits == 0 || digits > 3 || n > 255) return NOT_AN_ADDRESS;
+        a = a * 256 + n;
+    }
+    *used = i;
+    return a;
+}
+
+// The address s writes and nothing after it, or NOT_AN_ADDRESS.
+int address(tryte *s) {
+    int used;
+    int a = address_at(s, &used);
+    if (a == NOT_AN_ADDRESS || s[used] != 0) return NOT_AN_ADDRESS;
+    return a;
+}
+
+// Put address a at to as a.b.c.d: how many trytes.
+int put_address(int a, tryte *to) {
+    int n = 0;
+    for (int shift = 16777216; shift >= 1; shift = shift / 256) {
+        if (n > 0) to[n++] = '.';
+        n += decimal(a / shift % 256, to + n);
+    }
+    return n;
+}

@@ -23,8 +23,8 @@ sea floor, living among the detritus.
   timer, scheduled round-robin, on up to nine harts (cores) that can be
   plugged in and removed while it runs.
 - **A microkernel.** The kernel keeps processes, memory, messages and
-  descriptors, and nothing else. The console, the disk, the filesystem
-  and pipes are each a server process; drivers run outside the kernel,
+  descriptors, and nothing else. The console, the disk, the filesystem,
+  pipes and the network are each a server process; drivers run outside the kernel,
   which only passes their interrupts on.
 - **Point-to-point messages:** `call`, `receive` and `reply`, with
   `copyin` and `copyout` to move a buffer between a server and its
@@ -40,6 +40,9 @@ sea floor, living among the detritus.
 - **A shell** with built-ins (`ls`, `cat`, `cd`, `pwd`, `mkdir`, ...),
   programs run from `/bin` on the disk with arguments, `<`, `>` and
   `>>` redirection, `|` pipelines, quoting, and Ctrl-C to end a program.
+- **The start of a network stack:** a driver for the network device and
+  an IP server that speaks ARP and answers and sends pings, so two
+  machines linked over UDP can `ping` each other.
 
 ## Ternary all the way down
 
@@ -109,18 +112,20 @@ detrytus run shell.s --ram-pages 81 --input session.txt --disk disk.img
 
 ```text
 trylobite: version 0.1.0, a microkernel for detrytus, the balanced-ternary machine
-trylobite: memory: 81 pages (1594323 trytes), 66 free
+trylobite: memory: 81 pages (1594323 trytes), 64 free
 trylobite: harts: 1
 trylobite: irq0: interrupt controller, 3 sources, at page -13
 trylobite: cons0: console, at page -1
 trylobite: disk0: block device, 100 blocks, at page -14
 trylobite: net0: network device, no link, at page -16
-trylobite: process table: 27 slots, 9 programs in the image
+trylobite: process table: 27 slots, 11 programs in the image
 trylobite: starting init
 init: started console, process 1
 init: started pipe, process 2
 init: started disk, process 3
 init: started fs, process 4
+init: started net, process 5
+init: started ip, process 6
 init: starting sh
 $ ls
 34 notes.txt
@@ -128,18 +133,18 @@ bin/
 $ cat notes.txt
 Ternary computers count in trits.
 $ fail
-trylobite: process 6 exited with code 3
+trylobite: process 8 exited with code 3
 sh: exit 3
 $ echo "one   arg" two
 one   arg two
-trylobite: process 7 exited with code 0
-$ hello | upper | wc
-trylobite: process 8 exited with code 0
 trylobite: process 9 exited with code 0
-1 5 38
+$ hello | upper | wc
 trylobite: process 10 exited with code 0
-$ cat notes.txt | upper > shout
 trylobite: process 11 exited with code 0
+1 5 38
+trylobite: process 12 exited with code 0
+$ cat notes.txt | upper > shout
+trylobite: process 13 exited with code 0
 $ cat shout
 TERNARY COMPUTERS COUNT IN TRITS.
 $ mkdir docs
@@ -147,9 +152,9 @@ $ cd docs
 $ pwd
 /docs
 $ exit
-trylobite: process 5 exited with code 0
+trylobite: process 7 exited with code 0
 trylobite: process 0 exited with code 0
-trylobite: all processes exited after 132 timer interrupts
+trylobite: all processes exited after 139 timer interrupts
 ```
 
 The lines starting `trylobite:` are the kernel's log. It opens with
@@ -172,30 +177,32 @@ detrytus run shell.s --ram-pages 81 --disk disk.img
 
 ```text
 trylobite: version 0.1.0, a microkernel for detrytus, the balanced-ternary machine
-trylobite: memory: 81 pages (1594323 trytes), 66 free
+trylobite: memory: 81 pages (1594323 trytes), 64 free
 trylobite: harts: 1
 trylobite: irq0: interrupt controller, 3 sources, at page -13
 trylobite: cons0: console, at page -1
 trylobite: disk0: block device, 100 blocks, at page -14
 trylobite: net0: network device, no link, at page -16
-trylobite: process table: 27 slots, 9 programs in the image
+trylobite: process table: 27 slots, 11 programs in the image
 trylobite: starting init
 init: started console, process 1
 init: started pipe, process 2
 init: started disk, process 3
 init: started fs, process 4
+init: started net, process 5
+init: started ip, process 6
 init: starting sh
 $ ls
 34 notes.txt
 bin/
 $ echo typed live
 typed live
-trylobite: process 6 exited with code 0
+trylobite: process 8 exited with code 0
 $ spin
-trylobite: process 7 killed
+trylobite: process 9 killed
 sh: killed
 $ exit
-trylobite: process 5 exited with code 0
+trylobite: process 7 exited with code 0
 trylobite: process 0 exited with code 0
 trylobite: all processes exited after 4020 timer interrupts
 ```
@@ -206,11 +213,49 @@ waits for (here the runaway `spin`). `exit` or Ctrl-D (the end of
 input) ends the shell, and init and the machine with it; Ctrl-] stops
 the machine from outside. The terminal is put back as it was afterwards.
 
+### Two machines on a network
+
+With `--net`, the machine has a network link, and the shell can `ping`.
+Each machine boots as 10.0.0.2; give the second another Ethernet
+address with `--mac`, and another IP address with `ifconfig`. Run both
+live, so their clocks keep to real time, in two terminals, each on its
+own copy of the disk:
+
+```bash
+cp disk.img a.img && cp disk.img b.img
+```
+
+```bash
+detrytus run shell.s --ram-pages 81 --disk a.img --net udp:127.0.0.1:9101,127.0.0.1:9102
+```
+
+```bash
+detrytus run shell.s --ram-pages 81 --disk b.img --net udp:127.0.0.1:9102,127.0.0.1:9101 --mac 02:00:00:00:00:02
+```
+
+```text
+$ ifconfig 10.0.0.3/24
+$ ifconfig
+inet 10.0.0.3/24 gateway 10.0.0.1
+$ ping 10.0.0.2
+reply from 10.0.0.2: seq 1, 36213 ticks
+reply from 10.0.0.2: seq 2, 35248 ticks
+reply from 10.0.0.2: seq 3, 35046 ticks
+$ ping 10.0.0.4 1
+no reply from 10.0.0.4: seq 1
+sh: exit 1
+```
+
+(The kernel's `process N exited` lines are left out.) `--net loop`
+instead hands every frame straight back, so one machine can ping its
+own address.
+
 The programs on the disk are `hello`, `fail` (exits with 3), `spin`
 (loops for ever, for Ctrl-C), `echo`, `upper` (standard input to output
-in capitals) and `wc` (lines, words and code points), and system tools
+in capitals) and `wc` (lines, words and code points), system tools
 as on Unix: `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`,
-`sleep` and `df` (docs/kernel.md, System tools). `rhello`, `recho`,
+`sleep` and `df` (docs/kernel.md, System tools), and `ping` and
+`ifconfig` for the network. `rhello`, `recho`,
 `rfact` (a table of factorials up to 34!, with `println!` and 128-bit
 integers) and `rmandel` (the Mandelbrot set in characters, in `f32`
 floating point on detrytus's binary coprocessor) are written in Rust, translated from rustc's LLVM IR by `detrytus ll`
@@ -226,8 +271,9 @@ while it runs, and the kernel reports each.
 
 ```text
           ┌──▶ fsd (files) ──▶ diskd (disk) ──▶ block device
-  sh ─────┼──▶ consd (console) ──▶ console
-          └──▶ piped (pipes)
+          ├──▶ consd (console) ──▶ console
+  sh ─────┼──▶ piped (pipes)
+          └──▶ ipd (ARP, ping) ──▶ netd (frames) ──▶ network device
 
   every arrow is a call through the kernel: call / receive / reply
   init, program 0, starts the servers and then sh
@@ -241,6 +287,8 @@ while it runs, and the kernel reports each.
 | `user/diskd.s` | `disk` | drives the block device, moving blocks by DMA |
 | `user/consd.s` | `console` | drives the console: input, output, Ctrl-C for the foreground program |
 | `user/piped.s` | `pipe` | pipes |
+| `user/netd.s` | `net` | drives the network device: Ethernet frames, moved by DMA |
+| `user/ipd.s` | `ip` | IPv4: answers ARP and pings, and sends pings for `bin/ping` |
 
 A client finds a server by name (`lookup("fs")`), and talks to it with
 `call`, or through a descriptor the server gave it. The kernel copies no
@@ -285,19 +333,19 @@ emulator, so trylobite has never run on hardware.
 | `kernel/sched.s` | round-robin scheduling, halting |
 | `kernel/mm.s` | the page allocator, spawning and releasing processes |
 | `kernel/wait.s` | `wait`, `kill`, and what happens to a process once it has ended |
-| `kernel/ipc.s` | messages for servers: `call`, `receive`, `reply`, `copyin`, `copyout` |
+| `kernel/ipc.s` | messages for servers: `call`, `receive`, `reply`, `copyin`, `copyout`, `notify` |
 | `kernel/names.s` | the server name registry: `register`, `lookup` |
 | `kernel/desc.s` | descriptors: `read`, `write`, `iocall`, `close`, `dup2`, `give` |
 | `kernel/devices.s` | device interrupts, and the drivers that take them |
 | `kernel/harts.s` | starting the other harts, waking an idle one |
 | `kernel/console.s` | the kernel's own log on the console, kept in a page for `dmesg` |
 | `kernel/info.s` | the log and the machine, for system tools: `log`, `info` |
-| `kernel/proc.s` | processes, for system tools: `proc`, `name`, `sleep` |
+| `kernel/proc.s` | processes, for system tools: `proc`, `name`, `sleep`; and `alarm` |
 | `kernel/lock.s` | the kernel lock |
 | `kernel/data.s` | the process table, buffers, messages |
 | `kernel/pagetables.s` | the boot address space and the kernel's shared leaf table |
-| `user/` | programs built into the kernel image: `demo-init`, `ping` and `pong` for the demo; `init`, `sh`, `pingpong` and the servers `fsd`, `diskd`, `consd` and `piped` for the shell |
-| `bin/` | programs for the disk, each assembled on its own: `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `cp`, `mv`, `touch`, and the system tools `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`; and in Rust, `rhello`, `recho`, `rfact` and `rmandel` |
+| `user/` | programs built into the kernel image: `demo-init`, `ping` and `pong` for the demo; `init`, `sh`, `pingpong` and the servers `fsd`, `diskd`, `consd`, `piped`, `netd` and `ipd` for the shell |
+| `bin/` | programs for the disk, each assembled on its own: `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `cp`, `mv`, `touch`, the system tools `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`, and `ping` and `ifconfig` for the network; and in Rust, `rhello`, `recho`, `rfact` and `rmandel` |
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
 | `shell.s` | an 81-page machine starting the shell and its servers |
 | `docs/` | the kernel and the filesystem, described |
