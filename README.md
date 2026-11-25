@@ -209,7 +209,8 @@ trylobite: all processes exited after 4020 timer interrupts
 ```
 
 Every key goes to the machine, as on a serial line: the shell echoes
-what you type, backspace erases, and Ctrl-C ends the program the shell
+what you type, backspace erases (there is no history or cursor
+movement yet, so arrow keys do nothing), and Ctrl-C ends the program the shell
 waits for (here the runaway `spin`). `exit` or Ctrl-D (the end of
 input) ends the shell, and init and the machine with it; Ctrl-] stops
 the machine from outside. The terminal is put back as it was afterwards.
