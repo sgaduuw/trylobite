@@ -530,7 +530,7 @@
 # it with the NT_ operation in a2 and the arguments in a3 and a4; the
 # reply's first word is the result. A frame in the caller's memory is
 # octets, one per tryte, from the Ethernet header on.
-        .equ  NET_PROTOCOL, 1
+        .equ  NET_PROTOCOL, 2
         .equ  NT_SEND,    0               # send(frame, n): put n octets on the
                                           # wire, waiting until they have left: 0;
                                           # E_INVAL (n outside FRAME_MIN to
@@ -544,11 +544,35 @@
         .equ  NT_ADDRESS, 2               # address(): 0, then the interface's
                                           # address in the reply's next two words,
                                           # 24 bits each, high half first
+        .equ  NT_LISTEN,  3               # listen(): make the caller the listener,
+                                          # in place of any other: 0. For each
+                                          # frame that waits with no receive for
+                                          # it, the server notifies the listener
+                                          # (SYS_NOTIFY) once, and keeps the frame
+                                          # for its next receive
         .equ  CN_OPEN,    3               # open(): give the caller a descriptor
                                           # for the console: its lowest free one,
                                           # E_MFILE
         .equ  CONSOLE_HANDLE, 0           # the console's one handle, for IO_READ
                                           # and IO_WRITE (E_BADF for another)
+
+# Packets come from the IP server, which registers as "ip" with protocol
+# IP_PROTOCOL and reaches the wire through the network server. A call to
+# it has the IP_ operation in a2 and the arguments in a3 to a5; the
+# reply's first word is the result. An address is a word: a.b.c.d is
+# a * 2^24 + b * 2^16 + c * 2^8 + d.
+        .equ  IP_PROTOCOL, 1
+        .equ  IP_PING,    0               # ping(address, seq, wait): send an ICMP
+                                          # echo request numbered seq (0 to
+                                          # 65535) and wait up to wait rounds
+                                          # for its reply: the rounds it took;
+                                          # E_TIMEDOUT, E_NOROUTE, E_BUSY, E_IO
+                                          # (no link), E_INVAL
+        .equ  IP_ADDRESS, 1               # address(): 0, then the server's
+                                          # address, its prefix length and the
+                                          # gateway (0 for none)
+        .equ  IP_CONFIG,  2               # config(address, prefix, gateway): set
+                                          # them: 0; E_INVAL
 
 # Pipes come from the pipe server, which registers as "pipe" with
 # protocol PIPE_PROTOCOL. Its ends are descriptors: IO_READ waits for
@@ -596,11 +620,14 @@
         .equ  E_FBIG,   -18               # write: past a file's last block
         .equ  E_BUSY,   -19               # unlink, rmdir: a process has it open,
                                           # or it is one's current directory;
-                                          # drive: the source has a driver
+                                          # drive: the source has a driver;
+                                          # ping: another is under way
         .equ  E_NOROOM, -20               # getcwd, receive: the buffer is too small
                                           # (Unix's ERANGE; E_RANGE is puts')
         .equ  E_PERM,   -21               # drive, arm, phys: not allowed
         .equ  E_PIPE,   -22               # pipe write: no read end is open
+        .equ  E_TIMEDOUT, -23             # ping: no reply in time
+        .equ  E_NOROUTE, -24              # ping: off the network, and no gateway
 
         .equ  O_RDONLY, 0                 # open: the access mode is the flags mod
         .equ  O_WRONLY, 1                 # 3. Add any of O_CREAT (make a file not

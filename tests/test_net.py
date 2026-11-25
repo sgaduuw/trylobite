@@ -194,3 +194,66 @@ def test_an_armed_device_does_not_keep_the_machine_on_for_nobody():
         link="loop",
     )
     assert "all processes exited" in result.console, result.console
+
+
+def test_a_listener_is_told_of_a_frame_and_takes_it():
+    # Program 1 listens, and waits in its own receive for the server's
+    # notice; init then sends, and the listener takes the frame at once.
+    listener = f"""
+        {net_call("NT_LISTEN")}
+        bnez  a0, 9f
+1:      li    a0, SYS_RECEIVE
+        sys
+        li    t0, FROM_KERNEL
+        bne   a0, t0, 1b
+        li    t0, NOTE_SIGNAL
+        bne   a1, t0, 1b
+        {RECEIVE}
+        mv    s3, a0
+        li    a0, SYS_PUTS
+        la    a1, buf + 14
+        sys
+        mv    a0, s3
+9:      {exit_with("a0")}
+{BUFFER}
+"""
+    result = run(
+        f"""
+        {start(1)}
+        mv    s5, a0
+        li    s4, 3000                 # time for the listener to listen
+1:      addi  s4, s4, -1
+        bnez  s4, 1b
+        {SEND}
+        mv    s4, a0
+        {wait_for("s5")}
+        {exit_with("s4")}
+{FRAME}
+""",
+        listener,
+    )
+    assert result.code_of(0) == 0, result.console
+    assert result.code_of(2) == FRAME_LEN, result.console
+    assert PAYLOAD in result.console
+    assert result.exit_code == 0
+
+
+def test_a_listener_alone_does_not_keep_the_machine_on():
+    listener = f"""
+        {net_call("NT_LISTEN")}
+1:      li    a0, SYS_RECEIVE
+        sys
+        j     1b
+"""
+    result = run(
+        f"""
+        {start(1)}
+        li    s4, 3000
+1:      addi  s4, s4, -1
+        bnez  s4, 1b
+        li    a1, 0
+        {EXIT}
+""",
+        listener,
+    )
+    assert "all processes exited" in result.console, result.console
