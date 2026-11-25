@@ -44,4 +44,6 @@ def test_factorials_in_rust_with_println(shell):
         "$ rfact\n"
     )
     assert "20! = 2432902008176640000\n" in out
-    assert out.endswith("$ rfact 21\nusage: rfact [N], N from 1 to 20\nsh: exit 1\n$ \n")
+    assert out.endswith(
+        "$ rfact 21\nusage: rfact [N], N from 1 to 20\nsh: exit 1\n$ \n"
+    )
