@@ -1,6 +1,6 @@
 """brk: a process's heap, whole pages from HEAP_START (include/layout.s),
 which the kernel maps as the process asks and takes back when it ends.
-lib/rust/heap.rs builds Rust's allocator on it (tests/test_rust.py)."""
+trystd's heap (lib/rust/trystd) builds Rust's allocator on it (tests/test_rust.py)."""
 
 from tests.kernel import exit_with, run, wait_for
 from tools import fs

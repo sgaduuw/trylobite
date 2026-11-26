@@ -41,7 +41,10 @@ _start: mv    s1, a0
         addi  t5, t5, 3
         addi  t6, t6, 1
         j     1b
-3:      mv    a0, s1
+3:      la    t0, rt$argc              # for trystd's env::args
+        sw    s1, 0(t0)
+        sw    s3, 3(t0)
+        mv    a0, s1
         mv    a1, s3
         call  main
         li    t0, I32_SIGN             # the i32 as a signed value
@@ -84,6 +87,66 @@ brk:    mv    a1, a0
         li    t0, I32_MASK
         band  a0, a0, t0
         ret
+
+# sys(n, a, b, c, d, e): system call n with a to e in a1 to a5, each an
+# i32 taken signed (so -1 is FOR_SELF, not 2^32 - 1), and an address
+# below 2^31 as it is: a0 as an i32. sysu(n, a, b, c, d, e) is the same
+# with a to e taken unsigned, for an IPv4 address of 2^31 or more. What
+# the call leaves in a1 to a3 is kept for sys_more(k) (lib/rust/trystd).
+sys:    li    t0, I32_SIGN
+        bxor  a1, a1, t0
+        sub   a1, a1, t0
+        bxor  a2, a2, t0
+        sub   a2, a2, t0
+        bxor  a3, a3, t0
+        sub   a3, a3, t0
+        bxor  a4, a4, t0
+        sub   a4, a4, t0
+        bxor  a5, a5, t0
+        sub   a5, a5, t0
+sysu:   sys
+        la    t0, rt$more
+        sw    a1, 0(t0)
+        sw    a2, 3(t0)
+        sw    a3, 6(t0)
+        li    t0, I32_MASK
+        band  a0, a0, t0
+        ret
+
+# sys_more(k): a1 (k = 0), a2 or a3 as the last sys or sysu left it,
+# as an i32.
+sys_more:
+        li    t0, 3
+        mul   a0, a0, t0
+        la    t0, rt$more
+        add   t0, t0, a0
+        lw    a0, 0(t0)
+        li    t0, I32_MASK
+        band  a0, a0, t0
+        ret
+
+# word_at(address): the word at an aligned address, as an i32, such as
+# one of the ST_ words stat leaves.
+word_at:
+        lw    a0, 0(a0)
+        li    t0, I32_MASK
+        band  a0, a0, t0
+        ret
+
+# argc() and argv(): main's arguments, as start passed them.
+argc:   la    t0, rt$argc
+        lw    a0, 0(t0)
+        ret
+argv:   la    t0, rt$argc
+        lw    a0, 3(t0)
+        ret
+
+        .align 1
+rt$more: .word 0                        # a1, a2 and a3
+        .word 0
+        .word 0
+rt$argc: .word 0                        # argc, then argv
+        .word 0
 
 # strlen(s)
 strlen: mv    t0, a0

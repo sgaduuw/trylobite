@@ -1,9 +1,5 @@
-//! A heap for a Rust program on trylobite, so that it may use `alloc`
-//! (`Vec`, `String`, `Box`, `format!`). A program brings it in with
-//!
-//!     extern crate alloc;
-//!     #[path = "../lib/rust/heap.rs"]
-//!     mod heap;
+//! The heap, trystd's global allocator, so that a program may use
+//! `alloc` (`Vec`, `String`, `Box`, `format!`).
 //!
 //! The memory comes from the kernel's `brk` (lib/rust/start.s), which
 //! maps whole pages from HEAP_START and never takes them back. Free

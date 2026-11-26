@@ -747,6 +747,7 @@ def libraries(source: Path) -> list[Path]:
 
 ROOT = Path(__file__).resolve().parent.parent
 RUST_TARGET = "riscv32imac-unknown-none-elf"
+TRYSTD = ROOT / "lib" / "rust" / "trystd"  # the system library, a crate
 _CARGO_TOML = """\
 [package]
 name = "{name}"
@@ -756,6 +757,9 @@ edition = "2024"
 [lib]
 path = "{source}"
 crate-type = ["staticlib"]
+
+[dependencies]
+trystd = {{ path = "{trystd}" }}
 
 [profile.release]
 opt-level = "s"
@@ -776,7 +780,7 @@ def rust_ir(source: Path) -> list[Path]:
     project = work / name
     project.mkdir(parents=True, exist_ok=True)
     (project / "Cargo.toml").write_text(
-        _CARGO_TOML.format(name=name, source=source.resolve())
+        _CARGO_TOML.format(name=name, source=source.resolve(), trystd=TRYSTD)
     )
     target = work / "target"
     # Where cargo leaves the IR moved in 1.100 (deps/ before, build/<crate>/
@@ -813,7 +817,8 @@ def rust_ir(source: Path) -> list[Path]:
         found = ", ".join(sorted(p.name for p in release.rglob("*.ll"))) or "none"
         raise FsError(f"cargo left no LLVM IR for {source} (in {release}: {found})")
     alloc = newest("alloc-*.ll")
-    return [program[-1], core[-1], *alloc[-1:]]
+    trystd = newest("trystd-*.ll")
+    return [program[-1], core[-1], *alloc[-1:], *trystd[-1:]]
 
 
 def assemble(source: Path) -> bytes:

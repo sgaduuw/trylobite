@@ -3,8 +3,9 @@
 //! 128-bit integers on trytes, through core::fmt.
 #![no_std]
 
-#[path = "../lib/rust/sys.rs"]
-mod sys;
+use trystd::prelude::*;
+
+trystd::main!(run);
 
 /// The number from 1 to 34 in `arg`, if it is one.
 fn number(arg: &[u8]) -> Option<u128> {
@@ -21,11 +22,10 @@ fn number(arg: &[u8]) -> Option<u128> {
     if n >= 1 { Some(n) } else { None }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn main(argc: i32, argv: *const *const u8) -> i32 {
-    let n = match sys::args(argc, argv).nth(1) {
+fn run() -> i32 {
+    let n = match env::args().nth(1) {
         None => 20,
-        Some(a) => match number(a) {
+        Some(a) => match number(a.as_bytes()) {
             Some(n) => n,
             None => {
                 eprintln!("usage: rfact [N], N from 1 to 34");

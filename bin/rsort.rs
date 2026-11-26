@@ -1,26 +1,19 @@
 //! rsort [-r] [-u]: standard input's lines, sorted (in reverse with -r,
 //! each once with -u), to standard output, as Unix's sort. The lines
 //! are read into a growing Vec<u8> and sorted as a Vec<String> with
-//! Rust's stable sort: memory from the heap (lib/rust/heap.rs).
+//! Rust's stable sort: memory from the heap (trystd's, lib/rust/trystd).
 #![no_std]
 
-extern crate alloc;
+use trystd::prelude::*;
 
-#[path = "../lib/rust/heap.rs"]
-mod heap;
-#[path = "../lib/rust/sys.rs"]
-mod sys;
+trystd::main!(run);
 
-use alloc::string::String;
-use alloc::vec::Vec;
-
-#[unsafe(no_mangle)]
-pub extern "C" fn main(argc: i32, argv: *const *const u8) -> i32 {
+fn run() -> i32 {
     let (mut reverse, mut unique) = (false, false);
-    for arg in sys::args(argc, argv).skip(1) {
+    for arg in env::args().skip(1) {
         match arg {
-            b"-r" => reverse = true,
-            b"-u" => unique = true,
+            "-r" => reverse = true,
+            "-u" => unique = true,
             _ => {
                 eprintln!("usage: rsort [-r] [-u]");
                 return 1;
@@ -28,16 +21,9 @@ pub extern "C" fn main(argc: i32, argv: *const *const u8) -> i32 {
         }
     }
     let mut input: Vec<u8> = Vec::new();
-    let mut buf = [0u8; 243];
-    loop {
-        match sys::get(sys::STDIN, &mut buf) {
-            Some(0) => break,
-            Some(n) => input.extend_from_slice(&buf[..n]),
-            None => {
-                eprintln!("rsort: cannot read");
-                return 1;
-            }
-        }
+    if io::stdin().read_to_end(&mut input).is_err() {
+        eprintln!("rsort: cannot read");
+        return 1;
     }
     let mut lines: Vec<String> = input
         .split(|&c| c == b'\n')
@@ -53,8 +39,9 @@ pub extern "C" fn main(argc: i32, argv: *const *const u8) -> i32 {
     if unique {
         lines.dedup();
     }
+    let mut out = io::stdout();
     for line in &lines {
-        if !sys::put(sys::STDOUT, line.as_bytes()) || !sys::put(sys::STDOUT, b"\n") {
+        if writeln!(out, "{line}").is_err() {
             eprintln!("rsort: cannot write");
             return 1;
         }

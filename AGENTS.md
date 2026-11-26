@@ -139,12 +139,21 @@ pipe.
   `tools/fs.py` links it with every `.tc` file it imports, each
   compiled on its own, so it carries only the helpers it calls
   (detrytus `docs/linker.md`). A program may also be Rust (`.rs`,
-  `no_std`, detrytus `docs/rust.md`): it brings in `lib/rust/sys.rs`
-  with `#[path]` and defines `extern "C" fn main(argc, argv)`
-  (`bin/recho.rs`), and may print with `println!` (`bin/rfact.rs`) and use floating point (`bin/rmandel.rs`) and print it (`bin/rsqrt.rs`, a program of several blocks), and with `extern crate alloc` and `lib/rust/heap.rs` use `Vec`, `String` and `Box` (`bin/rsort.rs`); `tools/fs.py` builds it with cargo (`-Zbuild-std`,
-  needing `rust-src` and the `riscv32imac-unknown-none-elf` target)
-  and `detrytus ll`, with `lib/rust/start.s` as its start code and
-  runtime. `bin_disk` in
+  `no_std`, detrytus `docs/rust.md`), over **trystd**, the system
+  library in `lib/rust/trystd`: a crate every Rust program depends on,
+  with std's names for files (`fs`), standard I/O (`io`), arguments
+  (`env`), child processes (`process`) and sockets (`net`), the heap
+  for `Vec`, `String` and `Box`, and `println!`. A program says
+  `use trystd::prelude::*;` and `trystd::main!(run);` (`bin/tee.rs`
+  is a small one, `bin/httpd.rs` a larger); `tests/rstd.rs` tests the
+  library from inside. Userland is meant to become Rust alone, so
+  trystd sits on the kernel's calls with no C library under it; its
+  numbers come from `include/layout.s`, which its `build.rs` reads, so
+  none is repeated. `tools/fs.py` builds a program with cargo
+  (`-Zbuild-std`, needing `rust-src` and the
+  `riscv32imac-unknown-none-elf` target) and `detrytus ll`, with
+  `lib/rust/start.s` as its start code and runtime (the system call
+  entry `sys`, `brk`, `memcpy` and the rest). `bin_disk` in
   `tests/kernel.py` makes room for every program; a test that writes
   much asks for more blocks.
 - **Servers are found by name** (`kernel/names.s`): a server calls

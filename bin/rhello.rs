@@ -1,12 +1,12 @@
 //! rhello: hello, from Rust. The first program in Rust, translated from
-//! rustc's LLVM IR by detrytus ll (docs/rust.md).
+//! rustc's LLVM IR by detrytus ll (docs/rust.md), and printing through
+//! the system library, trystd (lib/rust/trystd).
 #![no_std]
 
-#[path = "../lib/rust/sys.rs"]
-mod sys;
+use trystd::prelude::*;
 
-#[unsafe(no_mangle)]
-pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
-    sys::put(sys::STDOUT, b"hello from Rust on a balanced-ternary machine\n");
-    0
+trystd::main!(run);
+
+fn run() {
+    println!("hello from Rust on a balanced-ternary machine");
 }
