@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install the detrytus command at the commit detrytus.rev pins, with
-# cargo (a Rust toolchain, 1.88 or later). Extra arguments go to cargo
+# cargo (a Rust toolchain, 1.97 or later). Extra arguments go to cargo
 # install, such as --root DIR to install somewhere other than ~/.cargo.
 set -euo pipefail
 cd "$(dirname "$0")/.."
