@@ -384,7 +384,7 @@ _BIN: dict[str, list[int]] = {}
 
 
 def bin_disk(
-    blocks: int = 40, programs: tuple[Path, ...] = (), **texts: str
+    blocks: int = 56, programs: tuple[Path, ...] = (), **texts: str
 ) -> tuple[Path, int]:
     """A new disk holding a filesystem with every program of bin/ in /bin,
     as the shell expects, and these text files in /: (path, blocks). Each

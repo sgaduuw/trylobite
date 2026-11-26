@@ -11,9 +11,10 @@ def shell():
     return assemble_file(ROOT / "shell.s")
 
 
-def session(shell, typed: str, disk=None):
+def session(shell, typed: str, disk=None, max_steps=None):
     """Run the shell on typed, with bin/ on its disk unless given another."""
-    result = run_image(shell, input=typed, disk=disk or bin_disk())
+    more = {} if max_steps is None else {"max_steps": max_steps}
+    result = run_image(shell, input=typed, disk=disk or bin_disk(), **more)
     assert result.exit_code == 0, result.console
     return result
 
@@ -112,20 +113,23 @@ def test_a_word_without_a_slash_is_looked_for_in_bin(shell):
 
 
 def test_ls_lists_the_programs_on_the_disk(shell):
-    result = session(shell, "ls bin\nfail\n")
+    # Thirty-four programs, some of two blocks, take a while to list.
+    result = session(shell, "ls bin\nfail\n", max_steps=12_000_000)
     assert "sh: exit 3\n" in result.console
-    listed = result.after_boot.splitlines()[1:31]
+    listed = result.after_boot.splitlines()[1:35]
     assert [line.split()[1] for line in listed] == [
         "cp",
         "df",
         "dmesg",
         "echo",
         "fail",
+        "fetch",
         "free",
         "grep",
         "head",
         "hello",
         "host",
+        "httpd",
         "ifconfig",
         "kill",
         "mv",
@@ -140,10 +144,12 @@ def test_ls_lists_the_programs_on_the_disk(shell):
         "rsqrt",
         "sleep",
         "spin",
+        "tee",
         "top",
         "touch",
         "uname",
         "upper",
         "uptime",
         "wc",
+        "xargs",
     ]

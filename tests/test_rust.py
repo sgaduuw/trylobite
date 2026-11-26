@@ -118,10 +118,10 @@ def test_floats_print_with_braces(shell):
 
 def test_sort_in_rust_on_the_heap(shell):
     # Vec<u8>, Vec<String> and core's sort, with memory from brk
-    # (lib/rust/heap.rs). 600 lines take the heap past a page.
+    # (trystd's heap). 600 lines take the heap past a page.
     fruit = "pear\napple\nfig\napple\n"
     words = [f"line {(k * 7919) % 1000}" for k in range(600)]
-    on = bin_disk(48, fruit=fruit, many="".join(f"{w}\n" for w in words))
+    on = bin_disk(64, fruit=fruit, many="".join(f"{w}\n" for w in words))
     result = run_image(
         shell,
         input="rsort < fruit\nrsort -r -u < fruit\nrsort -x\nrsort < many > sorted\n",

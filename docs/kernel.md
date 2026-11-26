@@ -64,8 +64,8 @@ past them, at `V_DEVICE`. Past the devices' pages is the **heap**, from
 `HEAP_START` (the first tryte of page `V_HEAP`): `brk` maps zeroed pages
 there, up to `HEAP_MAX` (243), as the process asks, never takes one back
 before the process ends, and records only how many it has
-(`PCB_HEAP`); the leaf table says which they are. `lib/rust/heap.rs`
-is Rust's allocator over it.
+(`PCB_HEAP`); the leaf table says which they are. trystd's heap
+(`lib/rust/trystd/src/heap.rs`) is Rust's allocator over it.
 
 The binary floating point coprocessor (detrytus platform.md, page −15)
 is mapped for every process at its physical address, `V_FPU`, where

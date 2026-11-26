@@ -1625,3 +1625,66 @@ Eelco picked a sliding window as the next network step, after names.
   quarter of the frames between two machines, 11,400 octets through
   the echo service arrived whole. On the loopback link it is no
   faster, as one CPU plays both ends.
+
+### 2026-11-26 · trystd, a system library in Rust
+
+Eelco asked for std-style bindings for Rust programs, after the heap:
+"the aim is to go rust-only once everything is fully bootstrapped".
+
+- **Rust alone, no shared C library.** A libc that Trice and a future
+  C compiler could share was the other choice; with userland meant to
+  end up Rust, it would be a layer to keep and then throw away. trystd
+  wraps the kernel's calls and servers directly. Trice keeps
+  `lib/io.tc` for as long as it is used.
+- **A crate, not a `#[path]` module.** `lib/rust/trystd` is a cargo
+  package that `tools/fs.py` gives every Rust program as a dependency,
+  and its IR goes to `detrytus ll` with the program's, core's and
+  alloc's. `lib/rust/sys.rs` and `heap.rs` went into it, and the six
+  Rust programs moved over.
+- **std's names and shapes**, so a program reads as one for std does:
+  `fs::File`, `OpenOptions`, `read_dir`, `metadata`; `io::Read`,
+  `Write`, `BufRead`, `Seek`, `BufReader`, `stdin().lines()`;
+  `env::args`, `current_dir`; `process::Command` with `Stdio::piped()`
+  and files, `Child::wait`, `exit`; `net::TcpStream`, `TcpListener`,
+  `UdpSocket`, `Ipv4Addr`. Where trylobite differs the item says so:
+  `env::args` gives `&'static str` without copying; paths are any
+  `AsRef<[u8]>`, as there is no `Path`; IPv4 only, one address from
+  `ToSocketAddrs`; a UDP read timeout in ticks; the IP server's one
+  UDP port and one listening port per process.
+- **The kernel's numbers from `include/layout.s`.** trystd's `build.rs`
+  reads each `.equ` it can work out and writes Rust constants
+  (`trystd::sys::E_NOENT`), so nothing is repeated, as AGENTS.md
+  asks. Errors are `io::Error`s holding the E_ number, with a kind and
+  a message.
+- **One entry for every call.** `sys(n, a..e)` in `lib/rust/start.s`
+  takes each argument as a signed i32 (Rust holds an i32 as its
+  unsigned value, so -1 would arrive as 2^32 - 1), `sysu` takes them
+  unsigned for an IPv4 address of 2^31 or more, and both keep a1..a3
+  for `sys_more`, for calls that answer in several registers.
+- **`main!(run)`** makes the `main` start.s calls; `run` may return
+  `()`, an exit code or a `Result`, whose error is said as
+  "PROGRAM: ERROR" with exit code 1, as std's `Termination`. Standard
+  output is line buffered and flushed when `run` returns, before a
+  child starts and in `process::exit`.
+- **Redirecting a child's standard I/O** keeps this program's
+  descriptor in a spare one marked FD_NOINHERIT, `dup2`s the child's in
+  its place, starts the child and puts it back. Whether a descriptor
+  is open is asked with `dup2(fd, fd)`: `fdflags` would also clear its
+  flags, which at first let a child inherit the parent's end of its
+  own pipe and never see its input end.
+- **Tools that prove it:** `tee` (files), `xargs` (processes, batches
+  under ARG_MAX), `fetch` (HTTP/1.0 client, names through a resolver
+  in Rust) and `httpd` (a TcpListener serving files and directories).
+  `httpd -n 1 notes | fetch -` serves a file to itself: httpd says its
+  URL and closes standard output, and `fetch -` reads it, as wget's
+  `-i -`. That pair, not `httpd | xargs fetch`, because three Rust
+  processes with heaps do not fit the 81-page machine's 15 free
+  pages: a program with a heap takes six pages.
+- **A translator bug it found:** `detrytus ll` loaded an `i24` as 4
+  bytes, so collecting `io::Result<String>` lines saw a `String`'s
+  capacity as an enum's niche and gave an empty `Vec`. Fixed in
+  detrytus (store sizes), which `detrytus.rev` pins.
+- **Sizes:** the library costs a small program about 3,000 trytes
+  (`rhello` 442 to 3,261, mostly core's formatting and the stdio
+  buffers); `fetch` and `httpd` take two blocks. The test disk grew
+  from 40 blocks to 56.

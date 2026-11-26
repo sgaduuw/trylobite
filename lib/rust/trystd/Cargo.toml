@@ -1,0 +1,9 @@
+[package]
+name = "trystd"
+version = "0.1.0"
+edition = "2024"
+description = "The system library for Rust programs on trylobite: files, standard I/O, processes and sockets over the kernel's calls"
+build = "build.rs"
+
+[lib]
+path = "src/lib.rs"

@@ -3,18 +3,17 @@
 //! with 1 if output fails.
 #![no_std]
 
-#[path = "../lib/rust/sys.rs"]
-mod sys;
+use trystd::prelude::*;
 
-#[unsafe(no_mangle)]
-pub extern "C" fn main(argc: i32, argv: *const *const u8) -> i32 {
-    let mut ok = true;
-    for (i, arg) in sys::args(argc, argv).enumerate().skip(1) {
+trystd::main!(run);
+
+fn run() -> io::Result<()> {
+    let mut out = io::stdout();
+    for (i, arg) in env::args_bytes().enumerate().skip(1) {
         if i > 1 {
-            ok &= sys::put(sys::STDOUT, b" ");
+            out.write_all(b" ")?;
         }
-        ok &= sys::put(sys::STDOUT, arg);
+        out.write_all(arg)?;
     }
-    ok &= sys::put(sys::STDOUT, b"\n");
-    if ok { 0 } else { 1 }
+    out.write_all(b"\n")
 }

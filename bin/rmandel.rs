@@ -2,8 +2,9 @@
 //! which detrytus does in software (compiler_builtins' floating point).
 #![no_std]
 
-#[path = "../lib/rust/sys.rs"]
-mod sys;
+use trystd::prelude::*;
+
+trystd::main!(run);
 
 const COLS: i32 = 40;
 const ROWS: i32 = 13;
@@ -24,8 +25,7 @@ fn escape(cr: f32, ci: f32) -> u32 {
     STEPS
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
+fn run() -> io::Result<()> {
     let shades = b" .:-=+*%#@";
     let mut line = [0u8; COLS as usize + 1];
     for row in 0..ROWS {
@@ -40,7 +40,7 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
             };
         }
         line[COLS as usize] = b'\n';
-        sys::put(sys::STDOUT, &line);
+        io::stdout().write_all(&line)?;
     }
-    0
+    Ok(())
 }
