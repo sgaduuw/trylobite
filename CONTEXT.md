@@ -1726,3 +1726,19 @@ pipeline of three Rust programs (`rsort < words | tee sorted | rsort -r
 -u | wc`) over 10,000 lines works, which fails on 81 (about 837 million
 steps, 4.5 minutes: the emulator's speed, not memory, is now what such
 a job waits for).
+
+### 2026-11-26 · The direct map moves within ±2³¹
+
+The kernel is to be ported to Rust, and detrytus' Rust pointers are
+signed 32-bit addresses (detrytus `ll --signed-pointers`), so every
+address the kernel uses must lie within ±2³¹. Its code, data and device
+pages already did (mid entry 0); the direct map, four root-level
+superpages at −3.4 × 10¹², did not. It is now mid entries −16 to −1 of
+root entry 0, sixteen mid-level superpages, `DMAP` = −16·3¹⁷.
+
+That lowers `MEM_MAX` from 150,663,523 pages to 101,695 (about
+2 × 10⁹ trytes): RAM past it goes unused, as before past the old limit.
+Eelco chose this over pointers a whole word wide, which every Rust
+program would pay for; reaching more RAM later means mapping it in on
+demand. Spawn writes sixteen mid entries instead of four root ones.
+

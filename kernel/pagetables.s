@@ -2,14 +2,15 @@
 # the kernel. It has the direct map and the kernel but no process; spawn
 # builds each process's tables at run time (kernel/mm.s).
 
-        .section tables, P_BOOTROOT * PAGE - 3 * DMAP_ROOTS
-        .word DMAP_PTE                             # root -4 to -1: the direct map
-        .word DMAP_PTE + ROOT_SUPER
-        .word DMAP_PTE + 2 * ROOT_SUPER
-        .word DMAP_PTE + 3 * ROOT_SUPER
+        .section tables, P_BOOTROOT * PAGE
         .word PTE_PTR + P_BOOTMID * PAGE           # root entry 0 -> mid table
 
-        .org  P_BOOTMID * PAGE
+        .org  P_BOOTMID * PAGE - 3 * DMAP_SUPERS   # mid -16 to -1: the direct map
+        .word DMAP_PTE, DMAP_PTE + SUPER, DMAP_PTE + 2 * SUPER, DMAP_PTE + 3 * SUPER
+        .word DMAP_PTE + 4 * SUPER, DMAP_PTE + 5 * SUPER, DMAP_PTE + 6 * SUPER, DMAP_PTE + 7 * SUPER
+        .word DMAP_PTE + 8 * SUPER, DMAP_PTE + 9 * SUPER, DMAP_PTE + 10 * SUPER, DMAP_PTE + 11 * SUPER
+        .word DMAP_PTE + 12 * SUPER, DMAP_PTE + 13 * SUPER, DMAP_PTE + 14 * SUPER, DMAP_PTE + 15 * SUPER
+        .assert DMAP_SUPERS == 16, "the boot mid table lists 16 direct-map entries"
         .word KLEAF_PTR                            # mid 0: the kernel
 
 # The kernel's leaf table, shared by every address space: kernel pages are

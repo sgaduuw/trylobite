@@ -196,25 +196,23 @@ spawn_page:
         j     0b
 5:
 
-        # Root entries -4 to -1 the direct map, 0 -> the mid table.
+        # Root entry 0 -> the mid table.
         mv    a0, s2
         call  kva
-        li    t2, DMAP_PTE
-        li    t1, ROOT_SUPER
-        sw    t2, -12(a0)
-        add   t2, t2, t1
-        sw    t2, -9(a0)
-        add   t2, t2, t1
-        sw    t2, -6(a0)
-        add   t2, t2, t1
-        sw    t2, -3(a0)
         li    t1, PAGE
         mul   t2, s3, t1
         addi  t2, t2, PTE_PTR
         sw    t2, 0(a0)
-        # Mid entries: 0 the kernel, +1 the process.
+        # Mid entries: -16 to -1 the direct map, 0 the kernel, +1 the process.
         mv    a0, s3
         call  kva
+        li    t2, DMAP_PTE
+        li    t1, SUPER
+        addi  t3, a0, -3 * DMAP_SUPERS
+0:      sw    t2, 0(t3)
+        add   t2, t2, t1
+        addi  t3, t3, 3
+        blt   t3, a0, 0b
         li    t2, KLEAF_PTR
         sw    t2, 0(a0)
         li    t1, PAGE
