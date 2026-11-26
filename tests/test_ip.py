@@ -5,6 +5,8 @@ and its reply, an echo request and its reply, each sent and taken in."""
 
 import re
 
+import pytest
+
 from tests.kernel import ROOT, assemble_file, bin_disk, run_image
 from tests.kernel import run as run_kernel
 from tests.test_files import L, report, said
@@ -459,20 +461,25 @@ def connect_retrying(port: int) -> str:
         mv    s1, a0"""
 
 
-SENT = 5000  # octets: more than a buffer, so more than one segment
+SENT = 7000  # octets: more than a buffer of three segments, so the window slides
 
 
-def test_a_stream_longer_than_the_buffers_arrives_whole_and_in_order():
+@pytest.mark.parametrize("pause", [0, 700_000], ids=["reading", "pausing"])
+def test_a_stream_longer_than_the_buffers_arrives_whole_and_in_order(pause):
     # Init connects to program 1 and sends SENT octets, octet i being
     # i mod 251, then closes; the child reads to the end and exits with
     # the sum of each octet times its position, or minus the count if
     # not all came: a lost, repeated, reordered or damaged segment
-    # changes it.
+    # changes it. A child that pauses before reading lets its window
+    # close for longer than the sender's timeout, so the sender probes it.
     child = f"""
         .gp   USER_GP
         {ip_call("IP_LISTEN", 9000)}
         {ip_call("IP_ACCEPT")}
         mv    s1, a0
+        li    s4, {pause + 1}
+5:      addi  s4, s4, -1
+        bnez  s4, 5b
         li    s2, 0                    # s2: octets
         li    s3, 0                    # s3: their sum, weighted by position
 1:      {io("SYS_READ", "s1", "rbuf", 700)}
@@ -521,7 +528,7 @@ def test_a_stream_longer_than_the_buffers_arrives_whole_and_in_order():
         sys
 out:    .zero {SENT}
 """
-    result = run(init, child)
+    result = run(init, child, max_steps=8_000_000)
     assert result.code_of(0) == SENT, result.console
     weighted = sum((i % 251) * (i + 1) for i in range(SENT))
     assert result.code_of(3) == weighted, result.console

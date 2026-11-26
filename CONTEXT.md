@@ -1515,3 +1515,38 @@ name server at 10.0.0.3 that answers from the host's resolver.
   loopback link it serves on the machine's own address while the
   program after it in a pipe resolves (`dnsd | host example.test`).
   `bin_disk(programs=...)` puts test-only programs on the disk.
+
+### 2026-11-26 · A sliding TCP window
+
+Eelco picked a sliding window as the next network step, after names.
+
+- **Three segments each way per connection (4,380 octets).** The
+  buffers moved to four block windows of their own (1 and 2 send, 3
+  and 4 receive, four connections to a window); the frames moved into
+  window 0 beside the UDP slots, which went from twelve to ten to make
+  room. The IP server now has five windows, two pages more than before.
+- **Go-back-N, not selective repeat.** The receiver still drops what
+  comes out of order, so the sender sends everything from the oldest
+  octet out again on a timeout. With a three-segment window that
+  costs little, keeps the receiver simple, and matches detrytus's
+  `--net user`, which does the same. No fast retransmit: three
+  duplicate acknowledgements cannot happen in a window of three.
+- **Measured timeouts (RFC 6298, Karn's rule).** The fixed 300,000
+  ticks was shorter than a full window's round trip on the emulated
+  link, where one segment costs the IP server about 50,000 rounds
+  (checksums and copies in software), so a burst timed out before its
+  acknowledgements came. Now 1,000,000 until measured, then SRTT +
+  4 x RTTVAR, between 100,000 and 2,400,000, doubling on each timeout.
+- **A persist timer instead of probing at once.** Probing a closed
+  window the moment it closed raced the receiver's own window update:
+  the receiver took the probe octet, the sender sent it again, and
+  the receiver dropped the overlap as a repeat. Now the sender waits
+  for the update and probes only after a timeout, a probe the other
+  end did not take goes again with what follows it, and a segment
+  that is partly a repeat keeps its new part.
+- **Measured over `--net user --live`** against a host server: 60,000
+  octets down took 11.5 s (22.8 s before), 32,000 up 2.2 s (2.9 s,
+  where `cat` and the pipe are most of it). Through a proxy dropping a
+  quarter of the frames between two machines, 11,400 octets through
+  the echo service arrived whole. On the loopback link it is no
+  faster, as one CPU plays both ends.

@@ -368,7 +368,7 @@ address and port it goes to, four octets and two, then the data, up to
 1,472 octets. `IP_RECEIVE` fills a buffer the same way with the
 sender's address and port, waiting up to a time limit in ticks, or for
 ever with 0. A datagram that comes while its process is not receiving
-is kept, in one of twelve slots in the server's block window, for its
+is kept, in one of ten slots in the server's block window, for its
 next receive; when the slots are full it is dropped, as UDP may. A
 datagram to port 7 that nobody has bound is sent straight back: the
 echo service. A port goes with its process. A send to a host whose
@@ -392,13 +392,22 @@ the connection once what was written has been delivered. A listener
 that ends resets what it had not accepted. A connection to port 7 that
 nobody listens on is the echo service.
 
-Each connection holds 1,460 octets each way, one segment (the MSS the
-server asks for), in two more block windows of the server's. One
-segment is in flight at a time: the next goes once the last is
-acknowledged, and it is sent again after 300,000 ticks without, six
-times before the connection gives up. A closed window is probed one
-octet at a time, and probing does not count as a try. Sequence numbers
-start from the clock. There is no TIME-WAIT: a connection is forgotten
+Each connection holds 4,380 octets each way, three segments of 1,460
+(the MSS the server asks for), in four more block windows of the
+server's, and that is the window it offers. The window slides: as many
+segments go as the other end's window takes, and each acknowledgement
+makes room for more. If the oldest octet out is not acknowledged in
+time, everything from it is sent again (go-back-N: segments that come
+out of order are dropped, and a segment partly received before keeps
+only its new part), the timeout doubles, and after six tries the
+connection gives up. The timeout comes from measured round trips, as
+RFC 6298 has it: 1,000,000 ticks until one is measured, then the
+smoothed round trip plus four times its variation, from 100,000 to
+2,400,000 ticks; one segment at a time is timed, and never one sent
+again. A closed window is waited for, since the other end says when it
+opens; if it stays closed past the timeout, one octet probes it, and
+probing does not count as a try. Sequence numbers start from the
+clock. There is no TIME-WAIT: a connection is forgotten
 once both ends have closed, so a late copy of the other end's FIN
 gets a reset.
 
