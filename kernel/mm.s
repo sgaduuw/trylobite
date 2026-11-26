@@ -313,6 +313,53 @@ sys_window:
 8:      li    a0, E_NOMEM
         j     sys_return
 
+# brk(end): make the caller's heap reach end, a page at a time from
+# HEAP_START (leaf entries HEAP_LEAF on), and give back the break. It
+# never shrinks: an end inside it, or BRK_QUERY, only asks. All the
+# pages it needs, or none.
+sys_brk:
+        lw    s2, PCB_HEAP(s0)         # s2: pages it has
+        beqz  a1, 8f                   # BRK_QUERY
+        li    t0, HEAP_START
+        sub   t1, a1, t0               # trytes from the heap's start
+        bltz  t1, 7f
+        li    t0, HEAP_MAX * PAGE
+        bgt   t1, t0, 7f
+        li    t0, PAGE - 1
+        add   t1, t1, t0
+        li    t0, PAGE
+        div   s3, t1, t0               # s3: pages it needs
+        ble   s3, s2, 8f
+        sub   t1, s3, s2
+        lw    t0, free_count
+        blt   t0, t1, 9f
+        lw    a0, PCB_LEAFPG(s0)
+        call  kva
+        li    t0, 3 * HEAP_LEAF
+        add   s4, a0, t0               # s4: the heap's first leaf entry
+1:      bge   s2, s3, 8f
+        call  alloc_page               # zeroed, as a new page should be
+        li    t1, PAGE
+        mul   t2, a0, t1
+        li    t1, USER_FLAGS
+        add   t2, t2, t1
+        li    t1, 3
+        mul   t1, s2, t1
+        add   t1, t1, s4
+        sw    t2, 0(t1)
+        addi  s2, s2, 1
+        sw    s2, PCB_HEAP(s0)
+        j     1b
+8:      li    t0, PAGE                 # the break
+        mul   a0, s2, t0
+        li    t0, HEAP_START
+        add   a0, a0, t0
+        j     sys_return
+7:      li    a0, E_INVAL
+        j     sys_return
+9:      li    a0, E_NOMEM
+        j     sys_return
+
 # release: end the process in s0, return its pages, and bury it (wait.s).
 # Its saved a0 and a1 say how it ended. Does not return.
 release:
@@ -321,6 +368,22 @@ release:
         # while that table is live, the next walk would read garbage.
         li    t0, PTBR_BOOT
         csrw  ptbr, t0
+        lw    s1, PCB_HEAP(s0)         # its heap, while its leaf table,
+        beqz  s1, 3f                   # which says where, is still there
+        lw    a0, PCB_LEAFPG(s0)
+        call  kva
+        li    t0, 3 * HEAP_LEAF
+        add   s2, a0, t0
+0:      lw    a0, 0(s2)
+        li    t0, USER_FLAGS
+        sub   a0, a0, t0
+        li    t0, PAGE
+        div   a0, a0, t0
+        call  free_page
+        addi  s2, s2, 3
+        addi  s1, s1, -1
+        bnez  s1, 0b
+3:
         lw    a0, PCB_ROOTPG(s0)
         call  free_page
         lw    a0, PCB_MIDPG(s0)

@@ -76,6 +76,15 @@ read:   li    t0, SYS_READ
         band  a0, a0, t0
         ret
 
+# brk(end): the break, the first address past the heap, once it reaches
+# end (SYS_BRK; BRK_QUERY asks), or a negative error, as an isize.
+brk:    mv    a1, a0
+        li    a0, SYS_BRK
+        sys
+        li    t0, I32_MASK
+        band  a0, a0, t0
+        ret
+
 # strlen(s)
 strlen: mv    t0, a0
 1:      lt    t1, 0(t0)
@@ -116,7 +125,8 @@ memset: mv    t0, a0
 2:      ret
 
 # memcmp(a, b, n) and bcmp(a, b, n): below, at or above 0 as the first
-# byte that differs is lower, the same or higher in a.
+# byte that differs is lower, the same or higher in a, an i32 held as
+# its unsigned value, as the translated code holds every i32.
 bcmp:
 memcmp: add   t2, a0, a2
 1:      bge   a0, t2, 2f
@@ -129,4 +139,6 @@ memcmp: add   t2, a0, a2
 2:      li    a0, 0
         ret
 3:      sub   a0, t0, t1
+        li    t0, I32_MASK
+        band  a0, a0, t0
         ret

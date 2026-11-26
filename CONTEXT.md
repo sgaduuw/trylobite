@@ -1560,3 +1560,34 @@ fit. Now:
   in `f64`, each as Rust's shortest round-trip decimal and as an
   `f32`. It is 21,755 trytes, two blocks, and its image takes one
   page above the process's own.
+
+### 2026-11-26 · A heap, and Rust's alloc
+
+Eelco asked for a heap allocator, so that Rust programs can use
+`Vec`, `String` and `Box`.
+
+- **`brk` (41), Unix's oldest heap call, in whole pages.** The heap
+  sits past the devices' pages, from `HEAP_START`, so nothing that is
+  there now moves. It grows only: nothing a Rust allocator does needs
+  pages back before the process ends, and unmapping would need every
+  hart that ran the process to drop its translations. `mmap` can come
+  if a program ever wants memory back.
+- **The kernel keeps only a count** (`PCB_HEAP`, in the word the old
+  `PCB_WINS` left free); the pages are in the leaf table, which `uva`
+  and `release` read, so the record did not grow by `HEAP_MAX` words.
+- **The allocator is Rust, in `lib/rust/heap.rs`, not the kernel's:**
+  a free list in address order, first fit, merged on free, units of 8
+  bytes (a free block's size and link), with `realloc` in place when
+  the block ends the heap or a free block follows it, so a `Vec`
+  growing at the top is never copied. A program brings it in with
+  `#[path]`, as `sys.rs`; a program without it carries none of it.
+- **`rsort`** is the demo: Unix's `sort` with `-r` and `-u`. On the
+  81-page shell build it sorts 3,000 lines; past that the machine runs
+  out of pages, and the file server cannot make a window to write the
+  answer, which `rsort` now reports.
+- **Two bugs it found on the way:** `memcmp` in `lib/rust/start.s`
+  gave a negative `i32` as it was, so core's sort, which tests the
+  sign bit, ran off the slice (detrytus's `bare.s` had it too); and
+  `sys::put` wrote once, so a line that crossed a block's end in a file
+  lost its tail. `put` now writes until all is taken.
+

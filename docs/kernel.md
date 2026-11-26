@@ -60,7 +60,12 @@ pages above it, which `spawnw` makes as it needs them: `rsqrt`, whose
 float formatting comes to about 22,000 trytes, takes one. Block
 windows take up to nine more pages, as a process asks for them, from
 `V_BLOCK`, past those; a driver also has its device's registers mapped
-past them, at `V_DEVICE`.
+past them, at `V_DEVICE`. Past the devices' pages is the **heap**, from
+`HEAP_START` (the first tryte of page `V_HEAP`): `brk` maps zeroed pages
+there, up to `HEAP_MAX` (243), as the process asks, never takes one back
+before the process ends, and records only how many it has
+(`PCB_HEAP`); the leaf table says which they are. `lib/rust/heap.rs`
+is Rust's allocator over it.
 
 The binary floating point coprocessor (detrytus platform.md, page −15)
 is mapped for every process at its physical address, `V_FPU`, where
@@ -126,6 +131,7 @@ is as it was, since the trap entry saves them all. Trice relies on this
 | 38 | `sleep(until)` | waits until the `time` CSR reaches `until`: 0 |
 | 39 | `notify(pid)` | tells process `pid`, without waiting, that the caller wants its attention: its `receive` gives a `NOTE_SIGNAL` notice naming the caller, once however often it was notified since: 0; −2 no such process, −3 `pid` is the caller |
 | 40 | `alarm(until)` | when the `time` CSR reaches `until`, the caller's `receive` gives a `NOTE_ALARM` notice; a later alarm replaces an earlier one, and `NO_ALARM` (−1) cancels it: 0 |
+| 41 | `brk(end)` | makes the caller's heap reach `end`, in whole zeroed pages from `HEAP_START`: the break, the first address past the heap; an `end` inside the heap, or `BRK_QUERY` (0), only asks, since the heap never shrinks; −10 (`E_INVAL`) for an `end` below `HEAP_START` or past `HEAP_MAX` pages, −3 (`E_NOMEM`) when the pages are not there, and then it maps none |
 
 Numbers 9, 11, 12 and 14 are free: console input, blocks and
 files are not system calls but calls to the console server, the disk
@@ -173,7 +179,8 @@ so times are in ticks.
 
 **Processes.** `proc` fills, for one process, `PI_STATE` (an `ST_`
 value), `PI_PARENT` (`NO_PARENT`, −1, for none), `PI_PAGES` (its four,
-its image's pages above its own and its block windows; 0 once ended), `PI_CPU` (the ticks it has run in
+its image's pages above its own, its block windows and its heap; 0
+once ended), `PI_CPU` (the ticks it has run in
 user mode: the kernel adds the time from `resume` to the next trap) and
 its name, 8 code points and a 0 from `PI_NAME`. A process's name is the
 last part of the first argument `spawnw` gave it (`/bin/ps` is `ps`), or

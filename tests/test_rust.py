@@ -7,6 +7,7 @@ import struct
 import pytest
 
 from tests.kernel import ROOT, assemble_file, bin_disk, run_image
+from tools.fs import Filesystem
 
 
 @pytest.fixture(scope="module")
@@ -113,3 +114,28 @@ def test_floats_print_with_braces(shell):
         + "$ rsqrt 100\nusage: rsqrt [N], N from 1 to 99\nsh: exit 1\n$ \n"
     )
     assert "sqrt(2) = 1.414213562373095 (1.4142135)\n" in out
+
+
+def test_sort_in_rust_on_the_heap(shell):
+    # Vec<u8>, Vec<String> and core's sort, with memory from brk
+    # (lib/rust/heap.rs). 600 lines take the heap past a page.
+    fruit = "pear\napple\nfig\napple\n"
+    words = [f"line {(k * 7919) % 1000}" for k in range(600)]
+    on = bin_disk(48, fruit=fruit, many="".join(f"{w}\n" for w in words))
+    result = run_image(
+        shell,
+        input="rsort < fruit\nrsort -r -u < fruit\nrsort -x\nrsort < many > sorted\n",
+        disk=on,
+        max_steps=200_000_000,
+    )
+    assert result.exit_code == 0, result.console
+    out = re.sub(r"trylobite: [^\n]*\n", "", result.after_boot)
+    assert out == (
+        "$ rsort < fruit\napple\napple\nfig\npear\n"
+        "$ rsort -r -u < fruit\npear\nfig\napple\n"
+        "$ rsort -x\nusage: rsort [-r] [-u]\nsh: exit 1\n"
+        "$ rsort < many > sorted\n$ \n"
+    )
+    assert Filesystem.load(on[0]).read("sorted") == "".join(
+        f"{w}\n" for w in sorted(words)
+    )

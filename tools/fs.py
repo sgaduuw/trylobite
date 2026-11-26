@@ -792,7 +792,7 @@ def rust_ir(source: Path) -> list[Path]:
     # Cleaned first, so its IR is written afresh: a build cargo thinks is
     # up to date writes none.
     clean = ["clean", "--quiet", "-p", name]
-    build = ["build", "--quiet", "-Zbuild-std=core"]
+    build = ["build", "--quiet", "-Zbuild-std=core,alloc"]
     for command in (clean, build):
         done = subprocess.run(
             [cargo, *command, *target_args],
@@ -812,7 +812,8 @@ def rust_ir(source: Path) -> list[Path]:
     if not program or not core:
         found = ", ".join(sorted(p.name for p in release.rglob("*.ll"))) or "none"
         raise FsError(f"cargo left no LLVM IR for {source} (in {release}: {found})")
-    return [program[-1], core[-1]]
+    alloc = newest("alloc-*.ll")
+    return [program[-1], core[-1], *alloc[-1:]]
 
 
 def assemble(source: Path) -> bytes:
