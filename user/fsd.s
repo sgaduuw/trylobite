@@ -445,33 +445,86 @@ fs_statfs:
         j     fs_reply                 # 0, or E_FAULT
 
 # spawnf(path, args, n): start the program file path names, as the
-# caller's child, from its first block in one of the server's windows,
-# with the n trytes of arguments at args in the caller's memory. The
-# child starts in the caller's current directory. (Should the slot it takes be
-# freed while this call runs, by another hart, the notice of that ends
-# comes after and sends the child to the root: harmless, and rare, since
-# the kernel hands slots out round the table.)
+# caller's child, with the n trytes of arguments at args in the caller's
+# memory. Its blocks are read into the server's windows, each in the
+# window after the one before, where spawnw finds them: the first stays
+# in the window the cache read it into if the rest fit after it, else
+# goes to window 0. The cache keeps them, so nothing is lost but what
+# they replace.
+# The child starts in the caller's current directory. (Should the slot
+# it takes be freed while this call runs, by another hart, the notice of
+# that ends comes after and sends the child to the root: harmless, and
+# rare, since the kernel hands slots out round the table.)
 fs_spawn:
         call  fs_enter
         lw    a0, fs_a1
         call  fs_namei
+        mv    s4, a0                   # s4: its inode
         call  fs_iget
         lw    t0, I_TYPE(a0)
         li    t1, T_FILE
         bne   t0, t1, 9f
-        lw    t0, I_SIZE(a0)
-        li    t1, 3
-        blt   t0, t1, 9f               # no room for the magic word
+        lw    s5, I_SIZE(a0)           # s5: the file's size
+        li    t1, EXEC_HEAD
+        blt   s5, t1, 9f               # no room for the magic word and size
         lw    a0, I_DIRECT(a0)
         beqz  a0, 9f
         call  fs_bget
+        li    t0, V_BLOCK              # s8: the window it is in, where the
+        sub   s8, a0, t0               # rest follow if there is room
+        li    t0, PAGE
+        div   s8, s8, t0
         lw    t0, BLOCK_W0(a0)
         li    t1, EXEC_MAGIC
         bne   t0, t1, 9f
-        li    t0, V_BLOCK              # its window
-        sub   a1, a0, t0
-        li    t0, PAGE
-        div   a1, a1, t0
+        lw    t0, EXEC_SIZE(a0)        # the image the file says it has
+        bltz  t0, 9f
+        li    t1, EXEC_MAX
+        bgt   t0, t1, 9f
+        addi  t0, t0, EXEC_HEAD
+        bgt   t0, s5, 9f               # more than the file holds
+        li    t1, PAGE - 1             # s5: the blocks it takes
+        add   t0, t0, t1
+        li    t1, PAGE
+        div   s5, t0, t1
+        add   t0, s8, s5               # no room after it: from window 0
+        li    t1, NWIN
+        ble   t0, t1, 0f
+        li    s8, 0
+0:      li    s6, 0                    # s6: the next one to find
+        la    s7, fs_xblk
+1:      bge   s6, s5, 2f
+        mv    a0, s4
+        call  fs_iget
+        mv    a1, s6
+        call  fs_bmap
+        beqz  a0, 9f                   # a hole: not one fs.py makes
+        sw    a0, 0(s7)
+        addi  s6, s6, 1
+        addi  s7, s7, 3
+        j     1b
+2:      li    s6, 0                    # read block s6 into window s8 + s6
+        la    s7, fs_xblk
+3:      bge   s6, s5, 4f
+        lw    a0, 0(s7)
+        addi  t2, a0, 1                # what a window holding it says
+        add   t4, s8, s6               # t4: the window it goes in
+        la    t1, fs_wblk              # no other window may keep it: one
+        li    t0, 0                    # copy, so a change is not lost
+0:      beq   t0, t4, 5f
+        lw    t3, 0(t1)
+        bne   t3, t2, 5f
+        sw    zero, 0(t1)
+5:      addi  t1, t1, 3
+        addi  t0, t0, 1
+        li    t3, NWIN
+        blt   t0, t3, 0b
+        mv    a1, t4
+        call  fs_wread
+        addi  s6, s6, 1
+        addi  s7, s7, 3
+        j     3b
+4:      mv    a1, s8                   # the first block's window
         mv    a2, s0                   # the caller is the parent,
         lw    a3, fs_a2                # and its arguments are in its memory,
         lw    a4, fs_a3                # where the kernel reads them
@@ -1615,6 +1668,43 @@ fs_bget:
 9:      li    a0, E_NOFS
         j     fs_reply
 
+# fs_wread: make window a1 hold block a0, reading it unless it holds it
+# already, and mark it used now. Its old block is dropped, so it must
+# not be dirty: spawnf, which uses this, runs with none dirty. Replies
+# as fs_bget. Clobbers a0..a4 and t0..t6.
+fs_wread:
+        lw    t3, fs_clock
+        addi  t3, t3, 1
+        sw    t3, fs_clock             # t3: now
+        li    t0, 3
+        mul   t0, a1, t0
+        la    t6, fs_wblk
+        add   t6, t6, t0               # t6: its fs_wblk entry
+        addi  t5, a0, 1                # t5: what it says once it holds it
+        lw    t0, 0(t6)
+        beq   t0, t5, 1f
+        sw    zero, 0(t6)              # holds nothing, unless the read works
+        mv    t4, a1
+        li    a0, SYS_WINDOW           # made on first use
+        sys
+        bnez  a0, 8f
+        li    t0, PAGE
+        mul   a4, t4, t0
+        li    t0, V_BLOCK
+        add   a4, a4, t0
+        addi  a3, t5, -1
+        li    a2, DK_READ
+        lw    a1, fs_disk
+        li    a0, SYS_CALL
+        sys
+        bnez  a0, fs_eio
+        sw    t5, 0(t6)
+1:      sw    t3, NWIN * 3(t6)         # fs_wuse
+        ret
+8:      li    t0, E_NOMEM
+        beq   a0, t0, fs_reply
+        j     fs_eio
+
 # fs_iget: a0 = the address of inode a0's first word, in the inode
 # table's window. Replies E_IO for a number no inode has. Clobbers a0..a3
 # and t0..t6.
@@ -1881,6 +1971,7 @@ fs_rold: .word 0                       # and a file it replaces, or 0
 fs_wblk: .words NWIN                   # the block each window holds, plus 1;
 fs_wuse: .words NWIN                   # 0 for none. When each was last used,
 fs_wdirty: .words NWIN                 # and 1 if it was changed since read
+fs_xblk: .words NWIN                   # spawnf: the program file's blocks
 fs_statbuf: .words STAT / 3
 fs_sfbuf: .words STATFS / 3             # what statfs says
 fs_files: .words NFILE * FD / 3        # open files, by handle

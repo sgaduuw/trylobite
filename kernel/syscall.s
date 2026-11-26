@@ -199,10 +199,12 @@ sys_spawn:
         call  do_spawn                 # a1: the program
         j     sys_return
 
-# spawnw(window, for, args, n): start the program file whose first
-# block the caller has read into block window a1. The window must hold
-# one: it starts with EXEC_MAGIC, so a text file is refused, as is a
-# window the caller does not have. The new process is the caller's
+# spawnw(window, for, args, n): start the program file the caller has
+# read into its block windows, its first block in window a1 and the rest
+# in the windows after it. Window a1 must hold one: it starts with
+# EXEC_MAGIC, so a text file is refused, as is a window the caller does
+# not have, and the windows from it on must hold all EXEC_SIZE trytes of
+# its image. The new process is the caller's
 # child, or with a2 not FOR_SELF the child of process a2, whose call the
 # caller holds: so the file server starts a program for the process that
 # asked. Its arguments are the a4 trytes at a3 in the parent's memory,
@@ -215,13 +217,40 @@ sys_spawnw:
         li    t0, 3
         mul   t0, a1, t0
         add   t0, t0, s0
-        lw    s5, PCB_WINS(t0)         # s5: the window's page
-        beqz  s5, 1f
-        mv    a0, s5
+        lw    a0, PCB_WINS(t0)         # the window's page
+        beqz  a0, 1f
         call  kva
         lw    t0, BLOCK_W0(a0)
         li    t1, EXEC_MAGIC
         bne   t0, t1, 1f
+        lw    s5, EXEC_SIZE(a0)        # s5: the image's size
+        bltz  s5, 1f
+        li    t0, EXEC_MAX
+        bgt   s5, t0, 1f
+        lw    t0, PCB_A1(s0)           # the whole file in the windows
+        li    t1, PAGE
+        mul   t0, t0, t1
+        li    t1, V_BLOCK - 9841
+        add   s3, t0, t1               # s3: the next tryte to look for
+        addi  s4, s5, EXEC_HEAD        # s4: trytes still to find
+6:      blez  s4, 0f
+        mv    a0, s0
+        mv    a1, s3
+        call  uva
+        beqz  a0, 1f
+        add   s3, s3, a1
+        sub   s4, s4, a1
+        j     6b
+0:      li    t0, EXEC_LOW             # s5: the pages it takes above the
+        sub   s5, s5, t0               # process's own
+        bgtz  s5, 0f
+        li    s5, 0
+        j     6f
+0:      li    t0, PAGE - 1
+        add   s5, s5, t0
+        li    t0, PAGE
+        div   s5, s5, t0
+6:
         lw    a1, PCB_A2(s0)
         li    t0, FOR_SELF
         beq   a1, t0, 2f
@@ -249,7 +278,7 @@ sys_spawnw:
         bne   a2, t0, 0f
         call  current_pid
         mv    a2, a0
-0:      li    s6, 1                    # from a program file
+0:      li    s6, 1                    # from a program file, s5 pages above
         call  spawn_page
         bltz  a0, sys_return
         j     spawn_args

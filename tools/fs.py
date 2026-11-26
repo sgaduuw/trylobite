@@ -163,10 +163,10 @@ def read_dti(data: bytes) -> list[tuple[int, list[int]]]:
 
 
 def program_file(data: bytes) -> list[int]:
-    """A program file's trytes, from an assembled image: EXEC_MAGIC, then
-    the image, from V_USER - 1 to its last tryte, with any gap between its
-    segments zero. It must be assembled to load where it runs, and fit
-    between V_USER - 1 and the top of the page."""
+    """A program file's trytes, from an assembled image: EXEC_MAGIC, the
+    image's size, then the image, from V_USER - 1 to its last tryte, with
+    any gap between its segments zero. It must be assembled to load where
+    it runs, and have at most EXEC_MAX trytes from V_USER - 1."""
     low, high = L["V_USER"] - 1, L["V_USER"] - 1 + L["EXEC_MAX"]
     image: list[int] = []
     for start, trytes in read_dti(data):
@@ -179,11 +179,11 @@ def program_file(data: bytes) -> list[int]:
         at = start - low
         image += [0] * (at + len(trytes) - len(image))
         image[at : at + len(trytes)] = trytes
-    return split_word(L["EXEC_MAGIC"]) + image
+    return split_word(L["EXEC_MAGIC"]) + split_word(len(image)) + image
 
 
 def is_program(trytes: list[int]) -> bool:
-    return len(trytes) >= 3 and join_word(trytes[:3]) == L["EXEC_MAGIC"]
+    return len(trytes) >= L["EXEC_HEAD"] and join_word(trytes[:3]) == L["EXEC_MAGIC"]
 
 
 # --- the disk file -------------------------------------------------------------

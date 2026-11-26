@@ -88,25 +88,6 @@ copy_page:
         ble   t4, t5, 1b
         ret
 
-# copy_exec: copy the image of the program file in physical page a1 (its
-# first block, from EXEC_IMAGE) into physical page a0 at V_USER, as far as
-# the page's top word. Clobbers t0..t2, t5.
-copy_exec:
-        li    t0, PAGE
-        mul   t1, a0, t0
-        mul   t2, a1, t0
-        li    t0, DMAP
-        add   t1, t1, t0               # the page's centre word: V_USER
-        add   t2, t2, t0
-        addi  t5, t1, 9840
-        addi  t2, t2, EXEC_IMAGE
-1:      lw    t0, 0(t2)
-        sw    t0, 0(t1)
-        addi  t2, t2, 3
-        addi  t1, t1, 3
-        ble   t1, t5, 1b
-        ret
-
 # do_spawn: start program a1 in a free slot, as a child of process a2 (or
 # NO_PARENT). a0 = its process number, or E_NOSLOT, E_NOPROG or E_NOMEM.
 # Clobbers a0..a2, s1..s6 and every t register; keeps s0.
@@ -120,10 +101,11 @@ do_spawn:
 1:      li    a0, E_NOPROG
         ret
 
-# spawn_page: start the program in physical page s5, as do_spawn does,
-# from a whole page image when s6 is 0 and from a program file's first
-# block (copy_exec) when s6 is 1. a0 = its process number, or E_NOSLOT or
-# E_NOMEM. Clobbers as do_spawn.
+# spawn_page: start a program, as do_spawn does: when s6 is 0, the whole
+# page image in physical page s5; when s6 is 1, the program file in the
+# caller's block windows from window PCB_A1 on (spawnw has checked it),
+# whose image takes s5 pages above the process's own. a0 = its process
+# number, or E_NOSLOT or E_NOMEM. Clobbers as do_spawn.
 spawn_page:
         addi  sp, sp, -3
         sw    ra, 0(sp)
@@ -146,8 +128,10 @@ spawn_page:
         li    a0, E_NOSLOT
         j     7f
 
-2:      lw    t0, free_count           # check memory before taking any
-        li    t1, PAGES_PER_PROCESS
+2:      li    t1, PAGES_PER_PROCESS    # check memory before taking any
+        beqz  s6, 0f
+        add   t1, t1, s5               # and the image's pages above its own
+0:      lw    t0, free_count
         blt   t0, t1, 9f
 
         mv    t0, s1                   # clear the slot's record
@@ -182,10 +166,16 @@ spawn_page:
         mv    a1, s5
         call  copy_page                # the program, into its own page
         j     5f
-4:      call  alloc_page               # below V_USER it stays 0
+4:      call  alloc_page               # zeroed: copy_mem fills in the image
         sw    a0, PCB_USERPG(s1)
-        mv    a1, s5
-        call  copy_exec
+        mv    a1, s5                   # a1: pages above it still to make
+        addi  a2, s1, PCB_XPAGES
+0:      blez  a1, 5f
+        call  alloc_page
+        sw    a0, 0(a2)
+        addi  a2, a2, 3
+        addi  a1, a1, -1
+        j     0b
 5:
 
         # Root entry 0 -> the mid table.
@@ -215,8 +205,43 @@ spawn_page:
         li    t1, USER_FLAGS
         add   t2, t2, t1
         sw    t2, 0(a0)
+        addi  t3, s1, PCB_XPAGES       # entries 1 to NXPAGE: its image's
+        li    t4, NXPAGE               # pages above it, if any
+0:      lw    t2, 0(t3)
+        beqz  t2, 1f
+        li    t1, PAGE
+        mul   t2, t2, t1
+        li    t1, USER_FLAGS
+        add   t2, t2, t1
+        sw    t2, 3(a0)
+1:      addi  a0, a0, 3
+        addi  t3, t3, 3
+        addi  t4, t4, -1
+        bnez  t4, 0b
 
-        la    t0, procs                # a0 = the process number
+        beqz  s6, 0f                   # a program file: copy its image in,
+        addi  sp, sp, -3               # from the caller's windows (copy_mem
+        sw    s7, 0(sp)                # takes s7, which spawnw keeps)
+        lw    t0, PCB_A1(s0)           # the first window
+        li    t1, 3
+        mul   t1, t0, t1
+        add   t1, t1, s0
+        lw    a0, PCB_WINS(t1)
+        li    t1, PAGE
+        mul   t0, t0, t1
+        li    t1, V_BLOCK + EXEC_IMAGE - 1
+        add   s3, t0, t1               # s3: the image's first tryte there
+        call  kva
+        lw    s6, EXEC_SIZE(a0)        # s6: its size
+        mv    s2, s0
+        mv    s4, s1
+        li    s5, V_USER - 1           # where it runs from
+        call  copy_mem
+        lw    s7, 0(sp)
+        addi  sp, sp, 3
+        lw    s2, PCB_ROOTPG(s1)       # copy_mem left s1, but not s2
+
+0:      la    t0, procs                # a0 = the process number
         sub   t0, s1, t0
         li    t1, PCB_SIZE
         div   a0, t0, t1
@@ -270,7 +295,7 @@ sys_window:
         beqz  t0, 8f
         call  alloc_page
         sw    a0, PCB_WINS(s1)
-        li    t1, PAGE                 # leaf entry k + 1: the window
+        li    t1, PAGE                 # leaf entry NXPAGE + 1 + k: the window
         mul   t2, a0, t1
         li    t1, USER_FLAGS
         add   t2, t2, t1
@@ -280,7 +305,7 @@ sys_window:
         li    t1, 3
         mul   t0, t0, t1
         add   a0, a0, t0
-        sw    t2, 3(a0)
+        sw    t2, 3 * (NXPAGE + 1)(a0)
 6:      li    a0, 0
         j     sys_return
 7:      li    a0, E_INVAL
@@ -304,9 +329,9 @@ release:
         call  free_page
         lw    a0, PCB_USERPG(s0)
         call  free_page
-        li    s1, NWIN                 # and its block windows
-        mv    s2, s0
-1:      lw    a0, PCB_WINS(s2)
+        li    s1, NXPAGE + NWIN        # and its image's pages above its own
+        mv    s2, s0                   # and its block windows
+1:      lw    a0, PCB_XPAGES(s2)
         beqz  a0, 2f
         call  free_page
 2:      addi  s2, s2, 3
