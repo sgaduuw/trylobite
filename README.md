@@ -181,7 +181,10 @@ detrytus run shell.s --ram-pages 81 --disk disk.img
 (`make run` does the same with `--net user`, the network below,
 building `disk.img` first if a program changed; `make run NET=` leaves
 the network out. A rebuilt disk starts afresh, without what earlier
-sessions wrote to it.)
+sessions wrote to it. `make benchmark` times the emulator on a fixed
+job, `rsort < words | tee sorted | rsort -r -u | wc` over 10,000 lines,
+and prints the step count, which only changes if what the machine does
+changes, and the steps a second; `BENCH=--no-jit` passes options on.)
 
 ```text
 trylobite: version 0.1.0, a microkernel for detrytus, the balanced-ternary machine
@@ -414,7 +417,7 @@ emulator, so trylobite has never run on hardware.
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
 | `shell.s` | an 81-page machine starting the shell and its servers |
 | `docs/` | the kernel and the filesystem, described |
-| `Makefile` | `make` builds `disk.img` with the programs of `bin/`; `make run` boots the shell with it |
+| `Makefile` | `make` builds `disk.img` with the programs of `bin/`; `make run` boots the shell with it; `make benchmark` times the emulator |
 | `tools/fs.py` | makes and reads filesystem images on the host |
 | `tools/install-detrytus` | installs the pinned `detrytus` command |
 | `tests/` | the tests, and a harness that builds the kernel with test programs |

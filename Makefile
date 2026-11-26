@@ -2,6 +2,7 @@
 #
 #   make           disk.img: a filesystem with every program of bin/ in /bin
 #   make run       boot shell.s with disk.img (NET=user by default)
+#   make benchmark time the emulator sorting 10,000 lines on disk.img
 #   make clean     remove disk.img
 #
 # The kernel itself is not on the disk: detrytus loads shell.s, and the
@@ -9,6 +10,7 @@
 # scratch when a program or library changes, losing what sessions wrote
 # to it; copy it first to keep that.
 #
+# BENCH passes options to the benchmark's detrytus run (BENCH=--no-jit).
 # BLOCKS sets the disk's size in blocks, DISK its file name, and NET the
 # network (user, loop, udp:LOCAL,PEER, or empty for none). Building the
 # Rust programs needs a Rust toolchain with rust-src and the
@@ -23,7 +25,7 @@ PROGRAMS := $(sort $(wildcard bin/*.s bin/*.tc bin/*.rs))
 # What a program can include, import or link against.
 SOURCES := $(shell find lib include -type f -not -path '*/target/*')
 
-.PHONY: all disk run clean
+.PHONY: all disk run benchmark clean
 
 all: disk
 
@@ -35,6 +37,9 @@ $(DISK): $(PROGRAMS) $(SOURCES) tools/fs.py
 
 run: $(DISK)
 	detrytus run shell.s --ram-pages $(RAM_PAGES) --disk $(DISK) $(if $(NET),--net $(NET))
+
+benchmark: $(DISK)
+	tools/benchmark.py $(DISK) $(BENCH)
 
 clean:
 	rm -f $(DISK) $(DISK).tmp
