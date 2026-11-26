@@ -64,7 +64,7 @@ different because of it:
 
 ## Try it
 
-You need a Rust toolchain (1.88 or later) for the `detrytus` command;
+You need a Rust toolchain (1.97 or later) for the `detrytus` command;
 this installs it at the commit [`detrytus.rev`](detrytus.rev) pins:
 
 ```bash
