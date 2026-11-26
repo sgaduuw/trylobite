@@ -172,7 +172,7 @@ def test_labels_are_the_addresses_code_runs_at():
 
 
 def test_the_kernel_alone_says_how_to_build_it():
-    # include/kernel.s has no RAM_PAGES and no programs: assembled on its
+    # include/kernel.s has no NPROG and no programs: assembled on its
     # own, the first error should point at a file to run instead.
     done = detrytus("asm", "include/kernel.s")
     assert done.returncode != 0

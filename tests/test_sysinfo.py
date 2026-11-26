@@ -57,6 +57,32 @@ def test_info_says_memory_the_process_table_and_harts():
     assert "0.1.0" in result.console
 
 
+def test_memory_is_what_the_machine_has():
+    # The kernel reads the RAM size register at boot: a build runs on a
+    # machine of any size, and boot touches none of the free pages.
+    program = report(
+        info(),
+        word("info", "SI_PAGES"),
+        f"""{word("info", "SI_FREE")}
+        lw    t0, info + SI_PAGES
+        sub   a0, t0, a0""",
+        data=WORDS,
+    )
+    used = said(run(program))[2]
+    for pages in (RAM_PAGES + 1, 1_000_000):
+        assert said(run(program, ram_pages=pages)) == [0, pages, used]
+
+
+def test_ram_past_the_direct_map_goes_unused():
+    # The direct map takes the four negative root entries and reaches page
+    # MEM_MAX; the machine may have more (detrytus allows every positive
+    # page), which the kernel leaves alone.
+    program = report(info(), word("info", "SI_PAGES"), data=WORDS)
+    biggest = (3**18 - 1) // 2
+    assert said(run(program, ram_pages=biggest)) == [0, L["MEM_MAX"]]
+    assert said(run(program, ram_pages=L["MEM_MAX"])) == [0, L["MEM_MAX"]]
+
+
 def test_info_wants_a_whole_aligned_buffer_of_its_own():
     program = report(
         info("info + 1"),

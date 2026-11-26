@@ -5,9 +5,11 @@
 #
 #   tools/fs.py new disk.img 20 bin/*.s
 #   printf 'hello\nfail\npingpong\n' > session.txt
-#   detrytus run shell.s --ram-pages 81 --input session.txt --disk disk.img
+#   detrytus run shell.s --input session.txt --disk disk.img
+#
+# The kernel asks the machine how much RAM it has, so any --ram-pages
+# works, from enough for the programs to the most the emulator allows.
 
-        .equ  RAM_PAGES, 81            # the machine this build is for
         .equ  NPROG, 11                # init, ping, pong, pingpong, the file
                                        # server, the disk server, the console
                                        # server, the pipe server, the shell,

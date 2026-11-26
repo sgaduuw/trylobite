@@ -1,14 +1,14 @@
 # The firmware and the kernel, without programs: not something to run on
-# its own. Include it from a file that first defines RAM_PAGES and NPROG,
+# its own. Include it from a file that first defines NPROG,
 # then adds NPROG programs in sections prog0, prog1 and so on, program n
 # loaded at (P_PROG0 + n) * PAGE and run at V_USER (see demo.s). The kernel starts
 # program 0; programs start others with SYS_SPAWN.
 
-        .assert defined(RAM_PAGES) * defined(NPROG), "include/kernel.s is not run on its own: run a file that sets RAM_PAGES and NPROG and includes it, such as demo.s or shell.s"
+        .assert defined(NPROG), "include/kernel.s is not run on its own: run a file that sets NPROG and includes it, such as demo.s or shell.s"
         .assert (NPROG >= 1) * (NPROG <= NPROG_MAX), "NPROG says how many programs the build adds, from 1 to NPROG_MAX (27)"
 
         .include "layout.s"
-        .equ  P_FREE, P_PROG0 + NPROG     # pages from here to RAM_PAGES are free
+        .equ  P_FREE, P_PROG0 + NPROG     # pages from here to the end of RAM are free
         .include "../firmware/boot.s"            # the boot page, from address 0
 
         # Code from the bottom of its page: loaded at a physical address, run

@@ -209,7 +209,6 @@ def test_a_build_may_add_up_to_nprog_max_programs():
     image = _assemble(
         ["-"],
         stdin=f"""
-        .equ  RAM_PAGES, {fs.L["P_PROG0"] + last + 1 + 3 * PAGES_PER_PROCESS}
         .equ  NPROG, {last + 1}
         .include "include/kernel.s"
         .section prog0, P_PROG0 * PAGE, V_USER
@@ -221,5 +220,6 @@ def test_a_build_may_add_up_to_nprog_max_programs():
         {EXIT}
 {progs}""",
     )
-    result = run_image(image)
+    pages = fs.L["P_PROG0"] + last + 1 + 3 * PAGES_PER_PROCESS
+    result = run_image(image, ram_pages=pages)
     assert result.code_of(0) == last + fs.L["E_NOPROG"]

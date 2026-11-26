@@ -1,9 +1,12 @@
 # Physical pages and address spaces.
 #
-# Free pages form a list threaded through the pages themselves: each free
-# page's centre word holds the next free page's number. The kernel reaches
-# any physical page through the direct map. Page 0 is the boot page and is
-# never free, so 0 also means "none".
+# Free pages are those never handed out, fresh_page up to ram_pages, and
+# a list of those given back, threaded through the pages themselves: each
+# free page's centre word holds the next free page's number. Boot touches
+# no page, so a machine of any size starts at once and costs the emulator
+# only the pages used. The kernel reaches any physical page through the
+# direct map. Page 0 is the boot page and is never free, so 0 also means
+# "none".
 
         .compress
 # kva: a0 = the kernel virtual address of physical page a0's centre.
@@ -15,17 +18,23 @@ kva:
         add   a0, a0, t0
         ret
 
-# page_init: put pages P_FREE .. RAM_PAGES on the free list.
+# page_init: read how much RAM the machine has, as much of it as the
+# direct map reaches, and make pages P_FREE on free. Clobbers t0, t1.
 page_init:
-        mv    t6, ra                   # free_page leaves t4..t6 alone
-        li    t5, P_FREE
-1:      li    t4, RAM_PAGES
-        bgt   t5, t4, 2f
-        mv    a0, t5
-        call  free_page
-        addi  t5, t5, 1
-        j     1b
-2:      jalr  zero, 0(t6)
+        li    t0, V_POWER
+        lw    t0, POWER_RAM(t0)
+        li    t1, MEM_MAX
+        ble   t0, t1, 1f
+        mv    t0, t1
+1:      sw    t0, ram_pages
+        li    t1, P_FREE
+        sw    t1, fresh_page
+        sub   t0, t0, t1
+        addi  t0, t0, 1                # pages P_FREE to ram_pages
+        bgez  t0, 2f
+        li    t0, 0                    # a machine too small to have any
+2:      sw    t0, free_count
+        ret
 
 # free_page: return physical page a0 to the free list. Clobbers a0, t0..t3.
 free_page:
@@ -54,18 +63,27 @@ alloc_page:
         ble   t4, t3, 1b
         jalr  zero, 0(t5)
 
-# take_page: a0 = a page from the free list, not cleared, and t2 = its
-# centre's kernel virtual address. For a page about to be overwritten
-# whole. Clobbers t0..t2.
+# take_page: a0 = a free page, not cleared, and t2 = its centre's kernel
+# virtual address: one given back if there is one, else the next never
+# used. For a page about to be overwritten whole. Clobbers t0..t2.
 take_page:
         lw    a0, free_head
+        beqz  a0, 1f
         li    t1, PAGE
         mul   t2, a0, t1
         li    t1, DMAP
         add   t2, t2, t1               # t2: the page's centre
         lw    t1, 0(t2)
         sw    t1, free_head            # unlink it
-        lw    t1, free_count
+        j     2f
+1:      lw    a0, fresh_page
+        addi  t1, a0, 1
+        sw    t1, fresh_page
+        li    t1, PAGE
+        mul   t2, a0, t1
+        li    t1, DMAP
+        add   t2, t2, t1               # t2: the page's centre
+2:      lw    t1, free_count
         addi  t1, t1, -1
         sw    t1, free_count
         ret
@@ -178,18 +196,25 @@ spawn_page:
         j     0b
 5:
 
-        # Root entry 0 -> the mid table.
+        # Root entries -4 to -1 the direct map, 0 -> the mid table.
         mv    a0, s2
         call  kva
+        li    t2, DMAP_PTE
+        li    t1, ROOT_SUPER
+        sw    t2, -12(a0)
+        add   t2, t2, t1
+        sw    t2, -9(a0)
+        add   t2, t2, t1
+        sw    t2, -6(a0)
+        add   t2, t2, t1
+        sw    t2, -3(a0)
         li    t1, PAGE
         mul   t2, s3, t1
         addi  t2, t2, PTE_PTR
         sw    t2, 0(a0)
-        # Mid entries: -1 the direct map, 0 the kernel, +1 the process.
+        # Mid entries: 0 the kernel, +1 the process.
         mv    a0, s3
         call  kva
-        li    t2, DMAP_PTE
-        sw    t2, -3(a0)
         li    t2, KLEAF_PTR
         sw    t2, 0(a0)
         li    t1, PAGE

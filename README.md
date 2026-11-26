@@ -322,8 +322,13 @@ library: files, standard I/O, processes and sockets with std's names,
 over the kernel's calls, in Rust alone. Building them needs `rustup component add
 rust-src` and `rustup target add riscv32imac-unknown-none-elf`.
 
-`--ram-pages` must match the `RAM_PAGES` the build declares (40 for
-`demo.s`, 81 for `shell.s`). Without `--harts` the machine has one hart;
+The kernel asks the machine how much RAM it has (detrytus' RAM size
+register), so `--ram-pages` can be anything from enough for the
+programs (about 40 pages for `demo.s`, 81 for a few programs at a time
+in `shell.s`) up to 150,663,523, the most its direct map reaches; boot
+touches none of the free pages, so a large machine starts at once and
+costs the emulator only the pages programs use. `make run` gives the
+shell 6,561 pages (`RAM_PAGES=N` changes it). Without `--harts` the machine has one hart;
 `--plug TIME:HART` and `--unplug TIME:HART` add one or ask one to go
 while it runs, and the kernel reports each.
 

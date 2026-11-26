@@ -1,11 +1,13 @@
 # Constants shared by the firmware, the kernel and user programs.
 # Everything that has to agree on an address or a number lives here.
 #
-# RAM_PAGES is not here: it describes the machine the kernel is built
-# for, so the build defines it before including include/kernel.s (see demo.s).
+# How much RAM the machine has is not here: the kernel reads it at boot
+# from the platform's RAM size register (V_POWER + POWER_RAM).
 
         .equ  PAGE, 19683                 # trytes in a page (3^9)
         .equ  SUPER, 129140163            # trytes in a mid-level superpage (3^17)
+        .equ  ROOT_SUPER, 847288609443    # trytes in a root-level superpage (3^25)
+        .equ  ROOT_PAGES, 43046721        # ... and its pages (3^16)
 
 # --- physical memory -----------------------------------------------------------
 # Page 0 is the boot page; positive pages are RAM; negative ones devices.
@@ -23,15 +25,23 @@
                                           # is include/kernel.s's: it needs NPROG)
         .equ  NPROG_MAX, 27               # programs a build may add
         .equ  POWER_PA, -2 * PAGE         # power-off register, for firmware
+        .equ  POWER_RAM, 3                # with the power-off register: reads
+                                          # how many RAM pages the machine has
 
 # --- virtual memory ------------------------------------------------------------
-# Every address space has the same three regions, by mid-table entry:
-#   -1  the direct map: kernel virtual = physical + DMAP, every page
+# Every address space has the same regions. Root entries -4 to -1 are the
+# direct map: kernel virtual = physical + DMAP, four root-level superpages
+# of physical pages centred on 0, ROOT_PAGES, 2 * ROOT_PAGES and
+# 3 * ROOT_PAGES, so every page up to MEM_MAX. Root entry 0 is a mid table:
 #    0  the kernel, through the shared leaf table; page 0 left unmapped
 #   +1  the process's own leaf table
 # so a new address space shares everything but its mid table entry +1.
 
-        .equ  DMAP, -SUPER                # direct map offset
+        .equ  DMAP, -4 * ROOT_SUPER       # direct map offset
+        .equ  DMAP_ROOTS, 4               # root entries it takes: -4 to -1
+        .equ  MEM_MAX, 150663523          # the last page the direct map reaches:
+                                          # RAM past it goes unused
+        .assert MEM_MAX == (DMAP_ROOTS - 1) * ROOT_PAGES + (ROOT_PAGES - 1) / 2, "MEM_MAX is not the direct map's last page"
         .equ  KOFF, 4 * PAGE              # kernel code and data: physical - KOFF
         .equ  V_DISK,    -9 * PAGE        # block device
         .equ  V_IRQ,     -8 * PAGE        # interrupt controller
@@ -77,7 +87,9 @@
         .equ  PTE_A,    729
         .equ  PTE_D,    2187
 
-        .equ  DMAP_PTE, PTE_LEAF + PTE_R + PTE_W + PTE_G + PTE_A + PTE_D   # PPN 0
+        .equ  DMAP_PTE, PTE_LEAF + PTE_R + PTE_W + PTE_G + PTE_A + PTE_D   # PPN 0:
+                                          # root entry -4; entry -4 + k adds
+                                          # k * ROOT_SUPER, physical page k * ROOT_PAGES
         .equ  KLEAF_PTR, PTE_PTR + P_KLEAF * PAGE
         .equ  USER_FLAGS, PTE_LEAF + PTE_R + PTE_W + PTE_X + PTE_U + PTE_A + PTE_D
 
@@ -389,7 +401,7 @@
                                           # 0, E_FAULT
         .equ  SI_TIME,    0               # the time CSR: the clock, in ticks
         .equ  SI_TICKS,   3               # timer interrupts taken since boot
-        .equ  SI_PAGES,   6               # pages of memory (RAM_PAGES)
+        .equ  SI_PAGES,   6               # pages of memory the kernel uses
         .equ  SI_FREE,    9               # ... of them free
         .equ  SI_NPROC,  12               # slots in the process table
         .equ  SI_PROCS,  15               # ... of them in use, zombies included
@@ -763,7 +775,8 @@
         .equ  HEAP_LEAF, NXPAGE + NWIN + NSRC + 1   # the heap's first leaf entry,
         .equ  V_HEAP, V_USER + PAGE * HEAP_LEAF     # past the devices' pages:
         .equ  HEAP_START, V_HEAP - 9841   # its first tryte, where brk starts
-        .equ  HEAP_MAX, 243               # pages a heap may have
+        .equ  HEAP_MAX, 3281 - HEAP_LEAF  # pages a heap may have: the rest
+                                          # of the process's leaf table
         .equ  PCB_HEAP,   132             # pages of heap it has (brk), from
                                           # V_HEAP: their leaf entries say where
         .equ  PCB_SERVES, 159             # 1 once it has called receive: it is told

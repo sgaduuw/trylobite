@@ -157,3 +157,22 @@ pinfo:  .words PROCINFO / 3
 """
     result = run(init, prog1=child)
     assert result.code_of(0) == (L["PAGES_PER_PROCESS"] + 3) * 1000
+
+
+def test_a_heap_may_fill_the_rest_of_its_leaf_table():
+    # HEAP_MAX pages, to the last entry of the process's leaf table, on a
+    # machine with the RAM for them; its last word is writable.
+    program = f"""
+        {brk("HEAP_START + HEAP_MAX * PAGE")}
+        li    t0, HEAP_START + HEAP_MAX * PAGE - 2
+        li    t1, 7
+        sw    t1, 0(t0)
+        lw    a1, 0(t0)
+        li    t0, HEAP_START + HEAP_MAX * PAGE
+        sub   a0, a0, t0               # 0: the break is where it asked
+        add   a1, a1, a0
+        {exit_with("a1")}
+"""
+    assert L["HEAP_LEAF"] + L["HEAP_MAX"] - 1 == (3**8 - 1) // 2
+    result = run(program, ram_pages=L["HEAP_MAX"] + 100, max_steps=200_000_000)
+    assert result.code_of(0) == 7
