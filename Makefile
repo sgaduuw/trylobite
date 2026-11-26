@@ -17,7 +17,7 @@
 BLOCKS ?= 100
 DISK ?= disk.img
 NET ?= user
-RAM_PAGES = 81
+RAM_PAGES ?= 6561
 
 PROGRAMS := $(sort $(wildcard bin/*.s bin/*.tc bin/*.rs))
 # What a program can include, import or link against.

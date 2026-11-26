@@ -67,7 +67,7 @@ sys_info:
         sw    t0, SI_TIME(s1)
         lw    t0, ticks
         sw    t0, SI_TICKS(s1)
-        li    t0, RAM_PAGES
+        lw    t0, ram_pages
         sw    t0, SI_PAGES(s1)
         lw    t0, free_count
         sw    t0, SI_FREE(s1)

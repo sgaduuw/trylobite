@@ -31,6 +31,7 @@ uv run ruff format --check tests tools
 detrytus run demo.s --ram-pages 40
 make BLOCKS=64   # disk.img: every program of bin/ (Makefile)
 printf 'hello\nls bin\necho a b | upper\nexit\n' | detrytus run shell.s --ram-pages 81 --input - --disk disk.img
+make run         # the shell on 6,561 pages with that disk and the network
 ```
 
 `demo.s` is the multi-hart demo (init starts ping and pong); `shell.s`
@@ -97,10 +98,13 @@ pipe.
   is its slot number plus 1. Spawning into a slot starts a new epoch for
   it, and each hart flushes the ASID in `resume` the first time it runs
   that slot in the new epoch.
-- **`RAM_PAGES` and `NPROG` belong to the build**, not to
-  `include/layout.s`: each top-level file (demo, shell, tests) states the
-  machine it targets and how many programs it adds. Program images sit
-  in pages from `P_PROG0`, and the free pages start after the last.
+- **`NPROG` belongs to the build**, not to `include/layout.s`: each
+  top-level file (demo, shell, tests) states how many programs it adds.
+  Program images sit in pages from `P_PROG0`, and the free pages start
+  after the last. **RAM size belongs to the machine**: the kernel reads
+  it at boot (`page_init`), so no build names one; tests choose it with
+  `ram_pages=` (`build()`'s default, 40, or `SHELL_RAM_PAGES`, 81, for an
+  assembled file such as `shell.s`).
 - **Program 0 is init.** The kernel starts it and nothing else. In
   `demo.s` it is `user/demo-init.s`; in `shell.s` it is `user/init.s`,
   which starts the servers (console, pipe, disk, file, network, IP, in
@@ -126,7 +130,7 @@ pipe.
   program is assembled on its own, including
   `include/layout.s` and loading where it runs, at `V_USER`
   (docs/filesystem.md, Program files); `include/layout.s` must
-  therefore assemble without `NPROG` or `RAM_PAGES`. It starts with
+  therefore assemble without `NPROG`. It starts with
   `a0` = argc and `a1` = `V_ARGV`, a list of string addresses ended by
   a 0 word, the command first (`spawnw`; `bin/echo.tc` is the smallest
   example), and with descriptors 0, 1 and 2 inherited from its parent.

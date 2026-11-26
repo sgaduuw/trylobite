@@ -1688,3 +1688,41 @@ Eelco asked for std-style bindings for Rust programs, after the heap:
   (`rhello` 442 to 3,261, mostly core's formatting and the stdio
   buffers); `fetch` and `httpd` take two blocks. The test disk grew
   from 40 blocks to 56.
+
+### 2026-11-26 · RAM of any size: the machine says, the kernel listens
+
+Eelco wanted the amount of memory to be arbitrary instead of the
+shell build's 81 pages, which three Rust programs at once, or sorting
+4,000 lines, ran out of. Three things fixed the size, none of them the
+ISA's (a physical page number is 18 trits: every positive page up to
+193,710,244 may be RAM):
+
+- **`RAM_PAGES` was built in** (2026-11-19's "RAM size is a build
+  parameter"), because the kernel could not ask. detrytus now has a
+  read-only RAM size register beside power off (`V_POWER + POWER_RAM`),
+  and `page_init` reads it. Builds no longer name a size; tests pass
+  `ram_pages=` to the emulator, which is all they ever varied.
+- **The direct map was one mid-level superpage**, physical pages
+  −3,280 to 3,280, so the kernel could never have used more than 3,280
+  pages whatever the build said. It is now four root-level superpages in
+  root entries −4 to −1 (`DMAP = −4·3²⁵`), reaching page 150,663,523
+  (`MEM_MAX`). Root entry 0 keeps the kernel (mid 0) and the process
+  (mid +1), and mid −1 is free. RAM past `MEM_MAX` goes unused, said
+  in docs/kernel.md: the negative half of the address space is no
+  bigger than positive physical memory, so not all of it can be mapped
+  at once. 150 million pages is about 6 TB of host memory in detrytus,
+  so it is not a limit anyone will meet in the emulator.
+- **`page_init` wrote every free page**, threading the free list
+  through them, which in detrytus allocates each page's host memory at
+  boot (40 KB a page). Free pages are now a counter of pages never used
+  (`fresh_page`) plus the list of pages given back; `take_page` takes
+  from the list first. Boot on 150 million pages is as quick as on 81.
+
+`HEAP_MAX` grew from 243 to 3,259 pages, the rest of the process's leaf
+table, since the machine's memory was the limit before and is not now.
+A process bigger than that needs more leaf tables (mid entries +2 on),
+a separate change. `make run` gives the shell 6,561 pages; there, a
+pipeline of three Rust programs (`rsort < words | tee sorted | rsort -r
+-u | wc`) over 10,000 lines works, which fails on 81 (about 837 million
+steps, 4.5 minutes: the emulator's speed, not memory, is now what such
+a job waits for).

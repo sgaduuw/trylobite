@@ -26,7 +26,9 @@ trylobite: process table: 27 slots, 9 programs in the image
 trylobite: starting init
 ```
 
-Memory is the RAM the build is for (`RAM_PAGES`), and free what is
+Memory is the RAM the machine has, read at boot from the platform's
+RAM size register (detrytus platform.md; `V_POWER + POWER_RAM`) up to
+`MEM_MAX`, the last page the direct map reaches, and free what is
 left after the kernel, the program images and the kernel's log (a page,
 System tools below), before init has any.
 Harts counts those present among the middle nine, which the kernel
@@ -62,7 +64,7 @@ windows take up to nine more pages, as a process asks for them, from
 `V_BLOCK`, past those; a driver also has its device's registers mapped
 past them, at `V_DEVICE`. Past the devices' pages is the **heap**, from
 `HEAP_START` (the first tryte of page `V_HEAP`): `brk` maps zeroed pages
-there, up to `HEAP_MAX` (243), as the process asks, never takes one back
+there, up to `HEAP_MAX` (3,259, the rest of the process's leaf table), as the process asks, never takes one back
 before the process ends, and records only how many it has
 (`PCB_HEAP`); the leaf table says which they are. trystd's heap
 (`lib/rust/trystd/src/heap.rs`) is Rust's allocator over it.
@@ -82,7 +84,24 @@ the hart's bank is still that process's (`fpu_owner`).
 | 1, 2 | kernel code; kernel data |
 | 3, 4, 5 | the boot address space; the kernel's shared leaf table |
 | 6 .. 5 + `NPROG` | program images 0 to `NPROG` − 1, at most 27 (`NPROG_MAX`; the demo has 3, the shell build 8) |
-| 6 + `NPROG` .. `RAM_PAGES` | free pages, handed out by the allocator |
+| 6 + `NPROG` .. the machine's last | free pages, handed out by the allocator |
+
+No kernel structure grows with memory. Free pages are those never yet
+handed out, counted by `fresh_page` up to `ram_pages`, plus a list of
+pages given back, threaded through their centre words; `take_page`
+uses the list first. So boot writes no free page, and any amount of RAM
+costs nothing until it is used.
+
+The kernel reaches every physical page through the **direct map**,
+kernel virtual address = physical + `DMAP`: root entries −4 to −1 of
+every address space are root-level superpages (3¹⁶ pages each) of
+physical pages centred on 0, 3¹⁶, 2·3¹⁶ and 3·3¹⁶. That reaches page
+150,663,523 (`MEM_MAX`). detrytus allows RAM up to page 193,710,244,
+the top of the address space, but the kernel half of virtual memory is
+the same size as all of positive physical memory, and root entry 0
+holds the kernel and the process, so the last 3¹⁶ pages' worth stays
+out of reach and goes unused (a 32-bit Linux's "high memory" problem).
+Using it would take mapping it in on demand rather than all the time.
 
 ## System calls
 

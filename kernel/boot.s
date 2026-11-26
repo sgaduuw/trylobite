@@ -19,11 +19,13 @@ boot_report:
 
         la    a0, msg_memory           # memory: N pages (T trytes), F free
         call  kputs
-        li    a0, RAM_PAGES
+        lw    a0, ram_pages
         call  kputn
         la    a0, msg_pages
         call  kputs
-        li    a0, RAM_PAGES * PAGE
+        lw    a0, ram_pages
+        li    t0, PAGE
+        mul   a0, a0, t0
         call  kputn
         la    a0, msg_trytes
         call  kputs

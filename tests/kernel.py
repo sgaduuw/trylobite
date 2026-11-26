@@ -18,7 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
-RAM_PAGES = 40
+RAM_PAGES = 40  # RAM of a machine build() makes, unless a test says
+SHELL_RAM_PAGES = 81  # ... and of one an assembled file (shell.s) runs on
 # Harts the machine has when a test does not say: the suite runs once
 # with each of these (tests/conftest.py sets it).
 HARTS = 1
@@ -53,6 +54,9 @@ class Image:
     symbols: dict[str, int]
     labels: dict[str, int]
     trytes: set[int]  # the addresses it fills
+    # The RAM to run it with when a run does not say: the kernel asks the
+    # machine how much it has, so this is the test's choice, not the build's.
+    ram_pages: int = SHELL_RAM_PAGES
 
 
 def read_image(path: Path) -> Image:
@@ -221,7 +225,6 @@ def build(
 """
     init = "".join(start(k) for k in range(3, 3 + len(servers))) + init
     source = f"""
-        .equ  RAM_PAGES, {ram_pages}
         .equ  NPROG, {3 + len(servers)}
         .include "include/kernel.s"
         .section prog0, P_PROG0 * PAGE, V_USER
@@ -232,7 +235,9 @@ def build(
 {prog2}
 {server}"""
     # On stdin, .include paths start from the working directory: the root.
-    return _assemble(["-"], stdin=source)
+    image = _assemble(["-"], stdin=source)
+    image.ram_pages = ram_pages
+    return image
 
 
 # The kernel's boot report ends with this line, and init in shell.s ends
@@ -345,9 +350,9 @@ def debug_session(
     what it printed: its replies and the program's output, in order.
     Unlike run, the console stays open until the script says eof, so
     `input` can type more while the program waits. The machine has the
-    RAM the build is for unless ram_pages says otherwise."""
+    RAM image.ram_pages names unless ram_pages says otherwise."""
     harts = HARTS if harts is None else harts
-    ram_pages = image.symbols["RAM_PAGES"] if ram_pages is None else ram_pages
+    ram_pages = image.ram_pages if ram_pages is None else ram_pages
     path = _WORK / f"session{next(_names)}.txt"
     path.write_text(script)
     done = detrytus(
@@ -425,9 +430,9 @@ def run_image(
     """Run an image; input, if given, is what the console has to read,
     disk, if given, is (file, blocks) for its block device, and link, if
     given, is the network device's link, as detrytus --net takes it. The
-    machine has the RAM the build is for unless ram_pages says otherwise."""
+    machine has the RAM image.ram_pages names unless ram_pages says otherwise."""
     harts = HARTS if harts is None else harts
-    ram_pages = image.symbols["RAM_PAGES"] if ram_pages is None else ram_pages
+    ram_pages = image.ram_pages if ram_pages is None else ram_pages
     hotplug = hotplug_options(plug, unplug)
     inputs = input_options(input)
     disks = disk_options(disk)
