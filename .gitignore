@@ -3,3 +3,5 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.dti
+disk.img
+disk.img.tmp

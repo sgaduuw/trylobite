@@ -101,12 +101,14 @@ trylobite: process 1 exited with code 0
 trylobite: all processes exited after 9 timer interrupts
 ```
 
-The shell build needs a disk. Make one with the programs from `bin/`
-and a note, and give the shell a session to read:
+The shell build needs a disk. `make` builds `disk.img`, 100 blocks
+with every program of `bin/` (assembly, Trice and Rust) in `/bin`;
+add a note to it and give the shell a session to read:
 
 ```bash
+make
 printf 'Ternary computers count in trits.\n' > notes.txt
-tools/fs.py new disk.img 100 notes.txt bin/*.s bin/*.tc
+tools/fs.py put disk.img notes.txt
 printf 'ls\ncat notes.txt\nfail\necho "one   arg" two\nhello | upper | wc\ncat notes.txt | upper > shout\ncat shout\nmkdir docs\ncd docs\npwd\nexit\n' > session.txt
 detrytus run shell.s --ram-pages 81 --input session.txt --disk disk.img
 ```
@@ -175,6 +177,11 @@ for you to type at:
 ```bash
 detrytus run shell.s --ram-pages 81 --disk disk.img
 ```
+
+(`make run` does the same with `--net user`, the network below,
+building `disk.img` first if a program changed; `make run NET=` leaves
+the network out. A rebuilt disk starts afresh, without what earlier
+sessions wrote to it.)
 
 ```text
 trylobite: version 0.1.0, a microkernel for detrytus, the balanced-ternary machine
@@ -397,6 +404,7 @@ emulator, so trylobite has never run on hardware.
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
 | `shell.s` | an 81-page machine starting the shell and its servers |
 | `docs/` | the kernel and the filesystem, described |
+| `Makefile` | `make` builds `disk.img` with the programs of `bin/`; `make run` boots the shell with it |
 | `tools/fs.py` | makes and reads filesystem images on the host |
 | `tools/install-detrytus` | installs the pinned `detrytus` command |
 | `tests/` | the tests, and a harness that builds the kernel with test programs |
