@@ -40,6 +40,8 @@ sys_proc:
 0:      addi  t2, t2, 3
         addi  t3, t3, -1
         bnez  t3, 1b
+        lw    t0, PCB_HEAP(s1)         # and its heap
+        add   t1, t1, t0
 2:      sw    t1, PI_PAGES(s2)
         lw    t0, PCB_CPU(s1)
         sw    t0, PI_CPU(s2)
