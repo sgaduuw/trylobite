@@ -54,11 +54,16 @@
         .equ  CTRL_C, 3                   # typed while the console has a
                                           # foreground process: kills it
         .equ  V_USER, SUPER               # every process runs from here
-        .equ  V_BLOCK, V_USER + PAGE      # its block windows, NWIN pages from here,
-                                          # each made by SYS_WINDOW
+        .equ  NXPAGE, 9                   # pages a program file's image may take
+                                          # above its own, V_USER + PAGE * k for
+                                          # k = 1 to NXPAGE, as spawnw makes them
+        .equ  V_BLOCK, V_USER + PAGE * (NXPAGE + 1)   # its block windows, NWIN
+                                          # pages from here, each made by SYS_WINDOW
         .equ  USER_GP, V_USER             # every process starts with gp here
-        .equ  USER_SP, V_USER + 9843      # just above its page; the first push
-                                          # lands at the page's top word
+        .equ  USER_SP, V_USER             # and sp here: the first push lands just
+                                          # below the image, which runs from
+                                          # V_USER - 1 up, and the stack grows down
+                                          # through the lower half of its page
 
 # --- page-table entries (detrytus isa.md 9.3), as values ----------------------
 
@@ -403,8 +408,9 @@
                                           # process: a free slot), E_FAULT
         .equ  PI_STATE,   0               # one of the ST_ values below
         .equ  PI_PARENT,  3               # its parent, or NO_PARENT
-        .equ  PI_PAGES,   6               # pages it holds: its four and its block
-                                          # windows; 0 once ended
+        .equ  PI_PAGES,   6               # pages it holds: its four, its image's
+                                          # above its own and its block windows;
+                                          # 0 once ended
         .equ  PI_CPU,     9               # ticks it has run in user mode
         .equ  PI_NAME,   11               # its name: PROC_NAME trytes from here
         .equ  PROC_NAME,  9               # PROC_NAME_MAX code points and a 0
@@ -741,9 +747,8 @@
                                           # since receive last told it
         .equ  PCB_RETRY,  129             # 1: run its system call again when it
                                           # next runs (ipc.s wakes a server so)
-        .equ  PCB_WINS,   132             # its block windows' pages, a word each,
-        .equ  NWIN,         9             # 0 for none: window k is at V_BLOCK + PAGE * k
-        .equ  PCB_BLOCKPG, PCB_WINS       # window 0
+        # 132 to 156 were its block windows' pages: PCB_WINS, below, now
+        .equ  NWIN,         9             # block windows: window k is at V_BLOCK + PAGE * k
         .equ  V_DEVICE, V_BLOCK + NWIN * PAGE   # a driver's device registers,
                                           # past its windows: source s's at
                                           # V_DEVICE + PAGE * (s - 1)
@@ -777,7 +782,14 @@
         .equ  PCB_SIGNALS, PCB_RANG + 2   # NPROC trytes (in the words from
                                           # PCB_RANG + 3): 1 for each process that
                                           # has notified it since receive last told it
-        .equ  PCB_SIZE,   PCB_SIGNALS + NPROC + 1
+        .equ  PCB_XPAGES, PCB_SIGNALS + NPROC + 1   # the pages of its image above
+                                          # its own, NXPAGE words, 0 for none: page
+                                          # k at V_USER + PAGE * k is word k - 1
+        .equ  PCB_WINS,   PCB_XPAGES + 3 * NXPAGE   # its block windows' pages,
+                                          # NWIN words, 0 for none; so the page
+                                          # at V_USER + PAGE * k is word k - 1 of
+                                          # PCB_XPAGES for k = 1 to NXPAGE + NWIN
+        .equ  PCB_SIZE,   PCB_WINS + 3 * NWIN
         .assert PCB_SIZE % 3 == 0, "PCB_SIZE is not whole words"
         .assert PCB_NOTES + NPROC <= PCB_TURN - 1, "PCB_NOTES runs into PCB_TURN's trytes"
         .assert (PCB_SIGNALS + 1) % 3 == 0, "receive reads PCB_SIGNALS a word at a time"
@@ -849,15 +861,24 @@
         .equ  NO_INO, 0
         .equ  NAME_MAX, 17                # code points in a name; one is left for 0
 
-# A program file: EXEC_MAGIC, then the program's image, as assembled to
-# run from V_USER (its first word there, so its first tryte at V_USER - 1).
-# spawnw copies the image into a fresh page at V_USER; the rest stays 0.
-# The magic word's low tryte, its first, is negative, which no text file's
+# A program file: EXEC_MAGIC, the image's size, then the program's image,
+# as assembled to run from V_USER (its first word there, so its first
+# tryte at V_USER - 1). The file runs on through as many blocks as it
+# needs; the caller of spawnw reads them into consecutive block windows.
+# spawnw copies the image into a fresh page at V_USER, and the pages
+# above it as far as it reaches (NXPAGE at most); the rest stays 0. The
+# magic word's low tryte, its first, is negative, which no text file's
 # first tryte is.
-        .equ  EXEC_MAGIC, -20261121       # word 0 of a program file's first block
-        .equ  EXEC_IMAGE, BLOCK_W0 + 3    # word 1: the image's first word
-        .equ  EXEC_MAX, 9843              # trytes an image may have: V_USER - 1
-                                          # to the top of the page, stack included
+        .equ  EXEC_MAGIC, -20261125       # word 0 of a program file's first block
+        .equ  EXEC_SIZE, BLOCK_W0 + 3     # word 1: the image's size, in trytes
+        .equ  EXEC_IMAGE, BLOCK_W0 + 6    # word 2: the image's first word
+        .equ  EXEC_HEAD, 6                # trytes before the image
+        .equ  EXEC_MAX, NWIN * PAGE - EXEC_HEAD   # trytes an image may have:
+                                          # what NWIN windows hold
+        .equ  EXEC_ONE, PAGE - EXEC_HEAD  # ... and what one block holds
+        .equ  EXEC_LOW, 9842              # trytes of it in the process's own page,
+                                          # from V_USER - 1 to the page's top
+        .assert EXEC_MAX <= EXEC_LOW + NXPAGE * PAGE, "an image of EXEC_MAX trytes runs into the block windows"
 
 # A program's arguments (spawnw). The parent gives a block of strings,
 # each ended by a 0 (the last may end at the block's end instead): the

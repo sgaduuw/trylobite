@@ -44,7 +44,7 @@ sys_drive:
         sw    s0, 0(t0)
         lw    a0, PCB_LEAFPG(s0)
         call  kva
-        li    t0, 3                    # leaf entry NWIN + a1
+        li    t0, 3                    # leaf entry NXPAGE + NWIN + a1
         mul   t0, a1, t0
         add   a0, a0, t0
         la    t1, dev_pages - 3
@@ -54,7 +54,7 @@ sys_drive:
         mul   t1, t1, t2
         li    t2, PTE_LEAF + PTE_R + PTE_W + PTE_U + PTE_A + PTE_D
         add   t1, t1, t2
-        sw    t1, 3 * NWIN(a0)
+        sw    t1, 3 * (NXPAGE + NWIN)(a0)
 6:      li    a0, 0
         j     sys_return
 7:      li    a0, E_INVAL

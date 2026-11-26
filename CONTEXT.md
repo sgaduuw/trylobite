@@ -1516,6 +1516,51 @@ name server at 10.0.0.3 that answers from the host's resolver.
   program after it in a pipe resolves (`dnsd | host example.test`).
   `bin_disk(programs=...)` puts test-only programs on the disk.
 
+### 2026-11-25 · Programs of several blocks
+
+A program file was one block, so a program had at most 9,843 trytes,
+stack included, and core's float formatting (about 20,000) did not
+fit. Now:
+
+- **The image runs on into the pages above the process's own.**
+  Programs are still assembled to run from `V_USER − 1` up, with no
+  relocation; `spawnw` maps up to `NXPAGE` (9) more pages above
+  `V_USER`'s, as many as the image reaches, recorded in the process
+  record (`PCB_XPAGES`, followed by `PCB_WINS` so that `uva` reads both
+  as one list). The block windows moved up past them, to
+  `V_USER + PAGE × 10`, and the device registers with them; programs
+  name both by `V_BLOCK` and `V_DEVICE`, so only a rebuild noticed.
+- **The stack moved below `V_USER`.** It used to start at the top of
+  the page, above the image; a larger image would run over it. `USER_SP`
+  is now `V_USER`, and the stack grows down through the lower half of
+  the page, which held only the arguments at its bottom: about 8,800
+  trytes, for every program, built-in ones too, where a one-block
+  program had what its image left.
+- **The caller reads every block, into consecutive windows.** `spawnw`
+  keeps its arguments: window `a1` holds the first block, and the
+  following windows the rest. They are consecutive in the caller's
+  memory, so the kernel copies the image with `copy_mem` as from any
+  buffer and checks with `uva` that it is all there. The file server
+  reads a program's blocks into consecutive windows, from the one its
+  cache already read the first into when the rest fit after it (so a
+  one-block program costs no extra read), else from window 0, dropping
+  any other copy of the same block from its cache; it has no dirty window between
+  calls, so nothing is lost. Nine windows make the limit: `EXEC_MAX`
+  is 9 × `PAGE` less the header, 177,141 trytes. Rejected: a call per
+  block into a process not yet started (more kernel states for no gain
+  while nine blocks is plenty), and the kernel reading the filesystem
+  itself (rejected for `spawnw` already).
+- **The file says its size.** A program file is now `EXEC_MAGIC`, the
+  image's size in trytes (`EXEC_SIZE`), then the image. The kernel
+  copies exactly that much; the file server checks it against the
+  file's size, so a file cannot make the kernel copy whatever else
+  is in the server's windows. The magic word changed (−20261125), so
+  a program file of the old format is refused rather than misread.
+- **`rsqrt` prints floats with `{}`**: square roots by Newton's method
+  in `f64`, each as Rust's shortest round-trip decimal and as an
+  `f32`. It is 21,755 trytes, two blocks, and its image takes one
+  page above the process's own.
+
 ### 2026-11-26 · A sliding TCP window
 
 Eelco picked a sliding window as the next network step, after names.

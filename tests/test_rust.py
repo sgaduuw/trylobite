@@ -2,6 +2,7 @@
 `detrytus ll` (docs/rust.md), running in the shell."""
 
 import re
+import struct
 
 import pytest
 
@@ -69,3 +70,46 @@ def test_mandelbrot_in_floating_point(shell):
     picture += picture[-2::-1]
     out = said(shell, "rmandel\n", max_steps=60_000_000)
     assert out == "$ rmandel\n" + "".join(f"{line}\n" for line in picture) + "$ \n"
+
+
+def shortest(x: float, single: bool = False) -> str:
+    """x as Rust's `{}` prints it: the shortest decimal that reads back as
+    the same f64 (or f32), with no exponent and no `.0` on a whole one."""
+
+    def back(s: str) -> float:
+        return struct.unpack("f", struct.pack("f", float(s)))[0] if single else float(s)
+
+    if single:
+        x = struct.unpack("f", struct.pack("f", x))[0]  # r as f32
+    for digits in range(1, 18):
+        s = f"{x:.{digits}g}"
+        if back(s) == x:
+            break
+    assert "e" not in s
+    return s.removesuffix(".0")
+
+
+def newton_sqrt(x: float) -> float:
+    """bin/rsqrt.rs's square root, step for step: IEEE f64 is the same
+    here and in the coprocessor."""
+    r = x
+    while (step := (r + x / r) / 2) < r:
+        r = step
+    return r
+
+
+def test_floats_print_with_braces(shell):
+    # Core's float formatting makes rsqrt a program of more than one block.
+    lines = []
+    for k in range(1, 100):
+        r = newton_sqrt(float(k))
+        lines.append(f"sqrt({k}) = {shortest(r)} ({shortest(r, single=True)})\n")
+    out = said(shell, "rsqrt 99\nrsqrt\nrsqrt 100\n", max_steps=40_000_000)
+    assert out == (
+        "$ rsqrt 99\n"
+        + "".join(lines)
+        + "$ rsqrt\n"
+        + "".join(lines[:10])
+        + "$ rsqrt 100\nusage: rsqrt [N], N from 1 to 99\nsh: exit 1\n$ \n"
+    )
+    assert "sqrt(2) = 1.414213562373095 (1.4142135)\n" in out

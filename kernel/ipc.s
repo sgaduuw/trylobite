@@ -310,24 +310,24 @@ ipc_ended:
 
 # uva: a0 = the kernel address of address a1 in the process whose record
 # is in a0, and a1 = how many trytes its page has from there, or a0 = 0
-# when the process has nothing there: its own page, or a block window it
-# has. Clobbers t0..t2.
+# when the process has nothing there: its own page, a page of its image
+# above that, or a block window it has. Clobbers t0..t2.
 uva:
         li    t0, V_USER - 9841
         sub   t1, a1, t0               # t1: trytes from the page's first
         bltz  t1, 8f
         li    t0, PAGE
-        div   t2, t1, t0               # t2: 0 its page, k + 1 window k
+        div   t2, t1, t0               # t2: 0 its page, k the k-th above it
         mul   t0, t2, t0
         sub   t1, t1, t0               # t1: trytes into that page, 0 to PAGE - 1
         beqz  t2, 1f
-        li    t0, NWIN
+        li    t0, NXPAGE + NWIN        # image pages, then windows
         bgt   t2, t0, 8f
         li    t0, 3
         mul   t2, t2, t0
         add   t2, t2, a0
         addi  t2, t2, -3
-        lw    t2, PCB_WINS(t2)
+        lw    t2, PCB_XPAGES(t2)       # PCB_WINS follows on from it
         beqz  t2, 8f
         j     2f
 1:      lw    t2, PCB_USERPG(a0)
