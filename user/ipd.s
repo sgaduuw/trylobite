@@ -66,26 +66,35 @@
         .equ  IPD_EPHEMERAL, 49152     # bind(0) chooses from here up
         .equ  IPD_ARPWAIT, 100000      # ticks a send waits for ARP
         .equ  IPD_UMAX, 1472           # octets of data a datagram carries
-        .equ  IPD_SLOTS, 12            # datagrams kept for later receives,
+        .equ  IPD_SLOTS, 10            # datagrams kept for later receives,
         .equ  IPD_SLOT, 1600           # each in this many trytes of window 0
         .equ  IPD_QBASE, V_BLOCK + BLOCK_T0   # where slot 0 starts
         .assert IPD_SLOTS * IPD_SLOT <= PAGE, "the UDP slots overflow window 0"
         .assert IPD_UMAX + 6 <= IPD_SLOT, "a UDP slot holds a whole datagram"
-        .equ  IPD_TX, V_BLOCK + PAGE + BLOCK_T0   # window 1: the frame being sent,
-        .equ  IPD_RX, IPD_TX + FRAME_MAX   # the frame being looked at,
-        .equ  IPD_TBUFS, IPD_RX + FRAME_MAX   # and each connection's octets to send;
-        .equ  IPD_RBUFS, V_BLOCK + 2 * PAGE + BLOCK_T0   # window 2: those it has received
+        .equ  IPD_TX, IPD_QBASE + IPD_SLOTS * IPD_SLOT   # after them: the frame
+        .equ  IPD_RX, IPD_TX + FRAME_MAX   # being sent, and the one looked at
+        .assert IPD_RX + FRAME_MAX <= IPD_QBASE + PAGE, "window 0 overflows"
+        .equ  IPD_TBUFS, V_BLOCK + PAGE + BLOCK_T0   # windows 1 and 2: what
+                                       # connections send, IPD_PERWIN to a window;
+        .equ  IPD_RBUFS, IPD_TBUFS + 2 * PAGE   # windows 3 and 4: what they received
+        .equ  IPD_NWIN, 5              # block windows in all
         .equ  IPD_TCP, 6               # the IP protocol
         .equ  IPD_NTCP, 8              # connections, their handles 0 to 7
-        .equ  IPD_TBUF, 1460           # octets a connection holds each way: one
-                                       # segment, the most we take (our MSS)
+        .equ  IPD_SEG, 1460            # the most a segment carries: our MSS, and
+                                       # the most we send whatever theirs says
+        .equ  IPD_TBUF, 3 * IPD_SEG    # octets a connection holds each way: the
+                                       # window, three segments
+        .equ  IPD_PERWIN, 4            # connections' buffers to a window
         .equ  IPD_MSS, 536             # a segment, when the other end does not say
-        .equ  IPD_RTO, 300000          # ticks before a segment is sent again,
+        .equ  IPD_RTO, 1000000         # ticks before a segment is sent again, until
+                                       # a round trip has been measured,
+        .equ  IPD_RTOMIN, 100000       # and the least and most it can be
+        .equ  IPD_RTOMAX, 2400000
         .equ  IPD_TRIES, 6             # how many times, before giving up
         .equ  IPD_LINGER, 600000       # ticks a closed connection waits for the
                                        # other end's FIN
-        .assert 2 * FRAME_MAX + IPD_NTCP * IPD_TBUF <= PAGE, "window 1 overflows"
-        .assert IPD_NTCP * IPD_TBUF <= PAGE, "window 2 overflows"
+        .assert IPD_PERWIN * IPD_TBUF <= PAGE, "a window's buffers overflow it"
+        .assert IPD_NTCP <= 2 * IPD_PERWIN, "two windows hold every buffer"
         .assert IPD_NTCP <= NHANDLE, "a connection's handle is its number"
         # A connection's state (IT_STATE):
         .equ  IPD_TFREE, 0
@@ -134,7 +143,14 @@
         .equ  IT_WDONE, 69             # 1 once nothing more will be written: our
                                        # FIN follows what is
         .equ  IT_ECHO, 72              # 1 for the echo service's connection
-        .equ  IT_SIZE, 75
+        .equ  IT_RTO, 75               # ticks before sending again (0: IPD_RTO)
+        .equ  IT_SRTT, 78              # the round trip, smoothed (0: not measured),
+        .equ  IT_RTTVAR, 81            # and how much it varies
+        .equ  IT_RTSENT, 84            # when the segment being timed went (0: none),
+        .equ  IT_RTSEQ, 87             # and the sequence number past its end
+        .equ  IT_PROBE, 90             # 1 while an octet probes a closed window
+        .equ  IT_PERSIST, 93           # 1 when the time has come to probe one
+        .equ  IT_SIZE, 96
         # A TCP header, from its start.
         .equ  IPD_TSPORT, 0
         .equ  IPD_TDPORT, 2
@@ -214,13 +230,13 @@ ip_main:
         li    a2, NT_LISTEN
         sys
         bltz  a0, ip_quit
-        li    s1, 0                    # windows: 0 for the UDP slots, 1 for
-1:      li    a0, SYS_WINDOW           # frames and what connections send, 2
-        mv    a1, s1                   # for what they receive
+        li    s1, 0                    # windows: 0 for the UDP slots and
+1:      li    a0, SYS_WINDOW           # frames, 1 and 2 for what connections
+        mv    a1, s1                   # send, 3 and 4 for what they receive
         sys
         bltz  a0, ip_quit
         addi  s1, s1, 1
-        li    t0, 3
+        li    t0, IPD_NWIN
         blt   s1, t0, 1b
         li    a0, SYS_REGISTER
         la    a1, ip_name
@@ -1496,10 +1512,15 @@ ip_learn:
 # --- TCP ----------------------------------------------------------------
 # A connection is a record in ip_tcbs; its number is the handle its
 # descriptor names, and indexes its two buffers: IPD_TBUF octets to send
-# in window 1, from the oldest not yet acknowledged, and as many
-# received and not yet read in window 2. One segment is in flight at a
-# time: the next goes once the last is acknowledged, and it is sent
-# again after IPD_RTO ticks without. Sequence numbers are modulo 2^32
+# in window 1 or 2, from the oldest not yet acknowledged, and as many
+# received and not yet read in window 3 or 4. The window slides: as many
+# segments go as the other end's window takes, and what is acknowledged
+# makes room for more. Without an acknowledgement for the oldest
+# octet out for IT_RTO ticks, everything from it is sent again (go-back-
+# N, as received segments out of order are dropped), and IT_RTO doubles.
+# IT_RTO comes from measured round trips, as RFC 6298 has it: one
+# segment at a time is timed, never one sent again (Karn's rule).
+# Sequence numbers are modulo 2^32
 # (ip_tmod). There is no TIME-WAIT: a connection is forgotten once both
 # FINs are acknowledged and its descriptor has closed.
 #
@@ -1908,13 +1929,10 @@ ip_tsv3:
         lw    t0, IT_ECHO(s3)
         beqz  t0, 41f
         call  ip_techo
-41:        lw    t0, IT_UNA(s3)
-        lw    t1, IT_NXT(s3)
-        bne   t0, t1, ip_tsv4          # a segment is in flight
-        call  ip_tpush
+41:     call  ip_tpush                 # send what the window takes
         lw    t0, IT_UNA(s3)
         lw    t1, IT_NXT(s3)
-        bne   t0, t1, ip_tsv4          # it sent one
+        bne   t0, t1, ip_tsv4          # something is in flight
         lw    t0, IT_SHUT(s3)
         beqz  t0, ip_tsv4
         lw    t0, IT_FINACKED(s3)
@@ -1981,7 +1999,7 @@ ip_techo:
         ret
 
 # ip_ttimers: the alarm has gone off: for each connection whose time has
-# come, send its segment again, or give up on it after IPD_TRIES. A
+# come, send again what is in flight, or give up on it after IPD_TRIES. A
 # closed one that has lingered is forgotten. Clobbers s3, s4, s6,
 # a0..a5, t0..t5.
 ip_ttimers:
@@ -2002,13 +2020,28 @@ ip_tt1:
         lw    t0, IT_UNA(s3)
         lw    t1, IT_NXT(s3)
         bne   t0, t1, 1f
+        lw    t0, IT_FINACKED(s3)
+        beqz  t0, 8f
         sw    zero, IT_STATE(s3)       # lingered after closing: forget it
+        j     ip_tt2
+8:      li    t0, 1                    # a closed window stayed closed:
+        sw    t0, IT_PERSIST(s3)       # probe it
+        call  ip_tpush
+        sw    zero, IT_PERSIST(s3)
         j     ip_tt2
 1:      lw    t0, IT_TRIES(s3)
         addi  t0, t0, 1
         sw    t0, IT_TRIES(s3)
         li    t1, IPD_TRIES
         bgt   t0, t1, 5f
+        lw    t0, IT_RTO(s3)           # back off: twice as long next time
+        bnez  t0, 11f
+        li    t0, IPD_RTO
+11:     add   t0, t0, t0
+        li    t1, IPD_RTOMAX
+        ble   t0, t1, 12f
+        mv    t0, t1
+12:     sw    t0, IT_RTO(s3)
         call  ip_ttime
         li    t0, IPD_TARPW
         bne   s4, t0, 2f
@@ -2020,7 +2053,7 @@ ip_tt1:
         beq   s4, t0, 3f
         call  ip_tsyn
         j     ip_tt2
-3:      call  ip_tresend
+3:      call  ip_tgoback
         j     ip_tt2
 5:      li    t0, IPD_TSYNRCVD
         bne   s4, t0, 6f
@@ -2138,9 +2171,9 @@ ip_tcp:
         li    a1, 2
         call  ip_getn
         blez  a0, 3f
-        li    t0, IPD_TBUF
+        li    t0, IPD_SEG
         ble   a0, t0, 5f
-        mv    a0, t0                   # we never send more than we hold
+        mv    a0, t0                   # nor more than a frame carries
 5:      sw    a0, ip_gmss
 3:      add   s7, s7, s2
         j     1b
@@ -2279,10 +2312,38 @@ ip_tseg:
         bgt   s4, s5, 4f               # more than was sent: ignore that
         lw    t0, ip_gwnd
         sw    t0, IT_WND(s3)
-        bnez  t0, 6f
+        bnez  t0, 62f
         sw    zero, IT_TRIES(s3)       # a closed window: probing it is no
-6:      beqz  s4, 4f                   # sign the other end has gone
-        lw    t0, ip_gack
+        j     6f                       # sign the other end has gone
+62:     lw    t0, IT_PROBE(s3)         # an open one: a probe it did not take
+        beqz  t0, 6f                   # goes again, with what follows it
+        bne   s4, s5, 63f
+        sw    zero, IT_PROBE(s3)       # (it took it)
+        j     6f
+63:     beqz  s4, 64f
+        sw    zero, IT_PROBE(s3)
+        j     6f
+64:     lw    t0, IT_UNA(s3)
+        sw    t0, IT_NXT(s3)
+        sw    zero, IT_PROBE(s3)
+        sw    zero, IT_RTSENT(s3)
+        lw    t0, IT_FINACKED(s3)
+        bnez  t0, 6f
+        sw    zero, IT_FINSENT(s3)
+6:      beqz  s4, 4f
+        lw    t1, IT_RTSENT(s3)        # the segment timed: acknowledged?
+        beqz  t1, 61f
+        lw    a0, IT_RTSEQ(s3)
+        lw    t0, IT_UNA(s3)
+        sub   a0, a0, t0
+        call  ip_tmod
+        bgt   a0, s4, 61f
+        csrr  a0, time                 # a round trip measured
+        lw    t1, IT_RTSENT(s3)
+        sub   a0, a0, t1
+        sw    zero, IT_RTSENT(s3)
+        call  ip_trtt
+61:     lw    t0, ip_gack
         sw    t0, IT_UNA(s3)
         lw    t0, IT_FINSENT(s3)
         lw    t1, IT_FINACKED(s3)
@@ -2310,7 +2371,18 @@ ip_tseg:
         beqz  t0, ip_wait              # nothing to take
         lw    t0, ip_gseq
         lw    t1, IT_RCV(s3)
-        bne   t0, t1, 7f               # out of order, or again
+        beq   t0, t1, 9f
+        lw    a0, IT_RCV(s3)           # partly again (a probe's octet
+        sub   a0, a0, t0               # taken, say): drop what we have
+        call  ip_tmod
+        blez  a0, 7f
+        bge   a0, s4, 7f               # all of it again, or out of order
+        sub   s4, s4, a0
+        sw    s4, ip_glen
+        lw    t0, ip_gdata
+        add   t0, t0, a0
+        sw    t0, ip_gdata
+9:
         lw    t0, IT_FINRCVD(s3)
         bnez  t0, 7f
         lw    t0, IT_SHUT(s3)
@@ -2385,73 +2457,144 @@ ip_tdie:
         sw    zero, IT_DEAD(s3)
         j     ip_wait
 
-# ip_tpush: connection s3, established and with nothing in flight: send
-# what waits in its transmit buffer, as much as a segment and the other
-# end's window take, and its FIN after the last octet once nothing more
-# will be written. Clobbers a0..a5, t0..t5.
+# ip_tpush: connection s3, established: send what waits in its transmit
+# buffer past what is in flight, a segment at a time, as much as the
+# other end's window takes, and its FIN after the last octet once
+# nothing more will be written. A window that is closed with nothing
+# out is waited for: the other end says when it opens, and if that is
+# lost, a probe of one octet after IT_RTO (IT_PERSIST) asks again.
+# Clobbers a0..a5, t0..t5.
 ip_tpush:
         addi  sp, sp, -3
         sw    ra, 0(sp)
-        lw    a3, IT_LEN(s3)           # a3: how much
-        lw    t0, IT_MSS(s3)
-        ble   a3, t0, 1f
-        mv    a3, t0
-1:      lw    t0, IT_WND(s3)
-        bgtz  t0, 2f
-        li    t0, 1                    # a closed window: probe it with one
-2:      ble   a3, t0, 3f
-        mv    a3, t0
-3:      li    a4, 0                    # a4: 1 to send the FIN
-        lw    t0, IT_WDONE(s3)
-        beqz  t0, 4f
-        lw    t0, IT_FINSENT(s3)
-        bnez  t0, 4f
-        lw    t0, IT_LEN(s3)
-        bne   a3, t0, 4f
-        li    a4, 1
-        sw    a4, IT_FINSENT(s3)
-4:      add   t0, a3, a4
-        beqz  t0, 5f                   # nothing to send
-        lw    a0, IT_UNA(s3)
-        add   a0, a0, t0
-        call  ip_tmod
-        sw    a0, IT_NXT(s3)
-        sw    zero, IT_TRIES(s3)
-        call  ip_ttime
-        call  ip_tdata
-5:      lw    ra, 0(sp)
-        addi  sp, sp, 3
-        ret
-
-# ip_tresend: send connection s3's segment in flight again. Clobbers
-# a0..a5, t0..t5.
-ip_tresend:
+1:      lw    t0, IT_FINSENT(s3)
+        bnez  t0, 9f                   # everything has gone, the FIN too
         lw    a0, IT_NXT(s3)
         lw    t0, IT_UNA(s3)
         sub   a0, a0, t0
-        mv    t5, ra
         call  ip_tmod
-        mv    ra, t5
-        lw    a4, IT_FINSENT(s3)       # a4: 1 if that holds our FIN
-        lw    t0, IT_FINACKED(s3)
-        sub   a4, a4, t0
-        sub   a3, a0, a4               # a3: and its data
+        mv    a5, a0                   # a5: the octets in flight
+        lw    t2, IT_LEN(s3)
+        sub   t2, t2, a5               # t2: those not yet sent
+        mv    a3, t2                   # a3: how much: no more than that,
+        lw    t0, IT_MSS(s3)
+        ble   a3, t0, 2f
+        mv    a3, t0                   # a segment,
+2:      lw    t0, IT_WND(s3)
+        bgtz  t0, 3f
+        bnez  a5, 3f
+        beqz  t2, 3f                   # (a FIN alone needs no room)
+        lw    t1, IT_PERSIST(s3)       # a closed window, nothing out:
+        bnez  t1, 21f
+        lw    t1, IT_DEAD(s3)          # wait for it to open, and probe it
+        bnez  t1, 9f                   # if it has not after a while
+        call  ip_ttime
+        j     9f
+21:     li    t0, 1                    # (the probe)
+        sw    t0, IT_PROBE(s3)
+3:      sub   t0, t0, a5
+        bgez  t0, 4f
+        li    t0, 0
+4:      ble   a3, t0, 5f
+        mv    a3, t0                   # and the room left in its window
+5:      li    a4, 0                    # a4: 1 to send the FIN
+        lw    t0, IT_WDONE(s3)
+        beqz  t0, 6f
+        bne   a3, t2, 6f
+        li    a4, 1
+        sw    a4, IT_FINSENT(s3)
+6:      add   t3, a3, a4
+        beqz  t3, 9f                   # nothing to send
+        bnez  a5, 7f
+        call  ip_ttime                 # the first out: time it out
+7:      lw    a0, IT_UNA(s3)
+        add   a0, a0, a5
+        add   a0, a0, t3
+        call  ip_tmod
+        sw    a0, IT_NXT(s3)
+        lw    t0, IT_RTSENT(s3)
+        bnez  t0, 8f
+        sw    a0, IT_RTSEQ(s3)         # time this one's round trip
+        csrr  t0, time
+        sw    t0, IT_RTSENT(s3)
+8:      call  ip_tdata
+        j     1b
+9:      lw    ra, 0(sp)
+        addi  sp, sp, 3
+        ret
 
-# ip_tdata: send connection s3's segment at IT_UNA: a3 octets from its
-# transmit buffer, and its FIN if a4 is 1. Clobbers a0..a5, t0..t5.
+# ip_tgoback: connection s3's oldest octet out was not acknowledged in
+# time: send everything from it again. Clobbers a0..a5, t0..t5.
+ip_tgoback:
+        lw    t0, IT_UNA(s3)
+        sw    t0, IT_NXT(s3)
+        lw    t0, IT_FINACKED(s3)
+        bnez  t0, 1f
+        sw    zero, IT_FINSENT(s3)
+1:      sw    zero, IT_RTSENT(s3)      # nothing sent again is timed
+        sw    zero, IT_PROBE(s3)
+        j     ip_tpush
+
+# ip_tdata: send connection s3 a segment of a3 octets from its transmit
+# buffer, a5 past the oldest not acknowledged, and its FIN if a4 is 1.
+# Clobbers a0..a5, t0..t5.
 ip_tdata:
         addi  sp, sp, -3
         sw    ra, 0(sp)
         call  ip_tbuf
-        mv    a2, a0
+        add   a2, a0, a5
+        lw    a0, IT_UNA(s3)
+        add   a0, a0, a5
+        call  ip_tmod
+        mv    a1, a0
         li    a0, IPD_FACK
         add   a0, a0, a4
         beqz  a3, 1f
         addi  a0, a0, IPD_FPSH
-1:      lw    a1, IT_UNA(s3)
-        call  ip_tsend
+1:      call  ip_tsend
         lw    ra, 0(sp)
         addi  sp, sp, 3
+        ret
+
+# ip_trtt: connection s3's segment took a0 ticks there and back: update
+# its smoothed round trip and variance, and IT_RTO from them (RFC 6298).
+# Clobbers t0..t2.
+ip_trtt:
+        lw    t0, IT_SRTT(s3)
+        bnez  t0, 1f
+        sw    a0, IT_SRTT(s3)          # the first: variance half of it
+        li    t1, 2
+        div   t1, a0, t1
+        sw    t1, IT_RTTVAR(s3)
+        j     2f
+1:      sub   t1, t0, a0               # t1: how far it was off
+        bgez  t1, 11f
+        sub   t1, zero, t1
+11:     lw    t2, IT_RTTVAR(s3)        # variance: 3/4 of it and 1/4 of that
+        add   t1, t1, t2
+        add   t1, t1, t2
+        add   t1, t1, t2
+        li    t2, 4
+        div   t1, t1, t2
+        sw    t1, IT_RTTVAR(s3)
+        li    t1, 7                    # the round trip: 7/8 of it and 1/8
+        mul   t1, t0, t1               # of this one
+        add   t1, t1, a0
+        li    t2, 8
+        div   t1, t1, t2
+        sw    t1, IT_SRTT(s3)
+2:      lw    t0, IT_SRTT(s3)          # time out after it and four times
+        lw    t1, IT_RTTVAR(s3)        # its variance
+        li    t2, 4
+        mul   t1, t1, t2
+        add   t0, t0, t1
+        li    t1, IPD_RTOMIN
+        bge   t0, t1, 3f
+        mv    t0, t1
+3:      li    t1, IPD_RTOMAX
+        ble   t0, t1, 4f
+        mv    t0, t1
+4:      sw    t0, IT_RTO(s3)
         ret
 
 # ip_tsyn: send connection s3's SYN, or SYN+ACK if it answers one.
@@ -2555,7 +2698,7 @@ ip_tsend:
         li    t0, 4
         st    t0, IPD_TCPHDR + 1(s1)
         addi  a0, s1, IPD_TCPHDR + 2
-        li    a1, IPD_TBUF
+        li    a1, IPD_SEG
         li    a2, 2
         call  ip_putn
 3:      mv    a0, s6
@@ -2598,10 +2741,12 @@ ip_tisn:
         sw    a0, IT_NXT(s3)
         jalr  zero, 0(t5)
 
-# ip_ttime: connection s3 sends again IPD_RTO from now. Clobbers t0, t1.
+# ip_ttime: connection s3 sends again IT_RTO from now. Clobbers t0, t1.
 ip_ttime:
-        csrr  t0, time
+        lw    t1, IT_RTO(s3)
+        bnez  t1, 1f
         li    t1, IPD_RTO
+1:      csrr  t0, time
         add   t0, t0, t1
         sw    t0, IT_DEAD(s3)
         ret
@@ -2628,9 +2773,16 @@ ip_tbuf:
         la    t0, ip_tcbs
         sub   t0, s3, t0
         li    t1, IT_SIZE
-        div   t0, t0, t1
-        li    t1, IPD_TBUF
-        mul   t0, t0, t1
+        div   t0, t0, t1               # t0: its number
+        li    t1, IPD_PERWIN
+        rem   t1, t0, t1
+        li    a0, IPD_TBUF
+        mul   t1, t1, a0               # t1: where in its window,
+        li    a0, IPD_PERWIN
+        div   t0, t0, a0
+        li    a0, PAGE
+        mul   t0, t0, a0               # t0: which window
+        add   t0, t0, t1
         li    a0, IPD_TBUFS
         add   a0, a0, t0
         li    a1, IPD_RBUFS
