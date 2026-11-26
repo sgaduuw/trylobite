@@ -409,8 +409,8 @@
         .equ  PI_STATE,   0               # one of the ST_ values below
         .equ  PI_PARENT,  3               # its parent, or NO_PARENT
         .equ  PI_PAGES,   6               # pages it holds: its four, its image's
-                                          # above its own and its block windows;
-                                          # 0 once ended
+                                          # above its own, its block windows and
+                                          # its heap; 0 once ended
         .equ  PI_CPU,     9               # ticks it has run in user mode
         .equ  PI_NAME,   11               # its name: PROC_NAME trytes from here
         .equ  PROC_NAME,  9               # PROC_NAME_MAX code points and a 0
@@ -436,6 +436,14 @@
                                           # replaces an earlier one, and
                                           # NO_ALARM cancels it: 0
         .equ  NO_ALARM, -1
+        .equ  SYS_BRK,   41               # brk(end): make the caller's heap reach
+                                          # end, in whole pages from HEAP_START;
+                                          # it never shrinks, and end BRK_QUERY
+                                          # only asks: the break, the first
+                                          # address past the heap; E_INVAL (end
+                                          # outside HEAP_START .. HEAP_START +
+                                          # HEAP_MAX * PAGE), E_NOMEM
+        .equ  BRK_QUERY, 0
 
 # Files (docs/filesystem.md) come from the file server, which registers
 # as "fs" with protocol FS_PROTOCOL; a program looks it up once, and
@@ -747,11 +755,17 @@
                                           # since receive last told it
         .equ  PCB_RETRY,  129             # 1: run its system call again when it
                                           # next runs (ipc.s wakes a server so)
-        # 132 to 156 were its block windows' pages: PCB_WINS, below, now
+        # 135 to 156 were its block windows' pages: PCB_WINS, below, now
         .equ  NWIN,         9             # block windows: window k is at V_BLOCK + PAGE * k
         .equ  V_DEVICE, V_BLOCK + NWIN * PAGE   # a driver's device registers,
                                           # past its windows: source s's at
                                           # V_DEVICE + PAGE * (s - 1)
+        .equ  HEAP_LEAF, NXPAGE + NWIN + NSRC + 1   # the heap's first leaf entry,
+        .equ  V_HEAP, V_USER + PAGE * HEAP_LEAF     # past the devices' pages:
+        .equ  HEAP_START, V_HEAP - 9841   # its first tryte, where brk starts
+        .equ  HEAP_MAX, 243               # pages a heap may have
+        .equ  PCB_HEAP,   132             # pages of heap it has (brk), from
+                                          # V_HEAP: their leaf entries say where
         .equ  PCB_SERVES, 159             # 1 once it has called receive: it is told
                                           # of every process that ends (of its
                                           # children's, it is told from the start)

@@ -21,9 +21,18 @@ pub const STDIN: i32 = 0;
 pub const STDOUT: i32 = 1;
 pub const STDERR: i32 = 2;
 
-/// Write all of `bytes` to descriptor `fd`: false if that fails.
-pub fn put(fd: i32, bytes: &[u8]) -> bool {
-    unsafe { write(fd, bytes.as_ptr(), bytes.len()) >= 0 }
+/// Write all of `bytes` to descriptor `fd`: false if that fails. A
+/// write may take fewer than it is given (a file takes no more than the
+/// rest of a block), so it writes again until all are taken.
+pub fn put(fd: i32, mut bytes: &[u8]) -> bool {
+    while !bytes.is_empty() {
+        let n = unsafe { write(fd, bytes.as_ptr(), bytes.len()) };
+        if n <= 0 {
+            return false;
+        }
+        bytes = &bytes[n as usize..];
+    }
+    true
 }
 
 /// Read into `buf` from descriptor `fd`: how many bytes (0 at the end),
