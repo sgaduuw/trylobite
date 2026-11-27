@@ -4,8 +4,8 @@
 # result there.
 
         .compress
-# read, write and iocall go on as sys_call when the Rust says 1: it has
-# rewritten the saved registers into a call to the descriptor's server.
+# read, write and iocall become a call to the descriptor's server; the
+# Rust says 1 when the caller sleeps in it.
 sys_read:
         mv    a0, s0
         call  rk_sys_read
@@ -17,9 +17,8 @@ sys_write:
 sys_iocall:
         mv    a0, s0
         call  rk_sys_iocall
-1:      beqz  a0, resume
-        lw    a1, PCB_A1(s0)
-        j     sys_call
+1:      bnez  a0, schedule
+        j     resume
 
 sys_close:
         mv    a0, s0

@@ -21,8 +21,11 @@ sys_kill:
 # leaves it a zombie. Does not return.
 bury:
         call  current_pid
+        mv    a1, a0
+        mv    a0, s0
+        call  rk_ipc_ended             # servers learn of it (ipc.rs)
+        call  current_pid
         mv    t4, a0                   # t4: its number
-        call  ipc_ended                # servers learn of it (ipc.s)
         call  srv_ended                # its names go (names.s)
         call  drv_ended                # and its devices (devices.s)
         call  desc_ended               # and its descriptors (desc.s)

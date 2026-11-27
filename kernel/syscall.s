@@ -107,7 +107,7 @@ sys_hart:
 
 # puts(address): print a 0-terminated string from the caller's memory in
 # one go, so preemption cannot split it: its page, or a block window it
-# has. The kernel reads it through the direct map (uva, ipc.s), so a
+# has. The kernel reads it through the direct map (uva, mm.s), so a
 # process cannot make it print kernel memory, or fault inside it; the
 # string stops at the end of what the process has mapped.
 sys_puts:
@@ -130,51 +130,6 @@ sys_puts:
         j     sys_return
 2:      li    a0, E_RANGE
         j     sys_return
-
-# send(pid, value): deliver straight to a receiver that is waiting, else
-# leave the value in its one-slot mailbox, else report the mailbox full.
-sys_send:
-        bltz  a1, 1f
-        li    t0, NPROC
-        bge   a1, t0, 1f
-        li    t0, PCB_SIZE
-        mul   t1, a1, t0
-        la    s1, procs
-        add   s1, s1, t1               # s1: the receiver
-        lw    t0, PCB_STATE(s1)
-        beqz  t0, 1f                   # it has exited
-        li    t1, ST_ZOMBIE
-        beq   t0, t1, 1f               # ended, only its exit code left
-        li    t1, ST_RECV
-        beq   t0, t1, 2f
-        lw    t0, PCB_FULL(s1)
-        bnez  t0, 3f
-        sw    a2, PCB_MAIL(s1)
-        li    t0, 1
-        sw    t0, PCB_FULL(s1)
-        li    a0, 0
-        j     sys_return
-1:      li    a0, E_NOPROC
-        j     sys_return
-2:      sw    a2, PCB_A0(s1)           # its recv returns the value
-        li    t0, ST_READY
-        sw    t0, PCB_STATE(s1)
-        call  wake_one                 # a hart waiting for work can run it
-        li    a0, 0
-        j     sys_return
-3:      li    a0, E_FULL
-        j     sys_return
-
-# recv(): take the waiting message, or block until send delivers one.
-sys_recv:
-        lw    t0, PCB_FULL(s0)
-        beqz  t0, 1f
-        lw    a0, PCB_MAIL(s0)
-        sw    zero, PCB_FULL(s0)
-        j     sys_return
-1:      li    t0, ST_RECV
-        sw    t0, PCB_STATE(s0)
-        j     schedule
 
 sys_yield:
         sw    zero, PCB_A0(s0)
@@ -342,4 +297,24 @@ spawn_args:
         call  proc_name
         mv    a0, s2
         j     sys_return
+
+# client_of: s1 = the record of process a1 and a0 = 0 if it is alive and
+# waits for the caller's reply, else a0 = E_NOPROC (ipc::client_of).
+# Clobbers the a and t registers.
+client_of:
+        bltz  a1, 8f                   # Rust takes an i32 as its unsigned value
+        li    t0, NPROC
+        bge   a1, t0, 8f
+        addi  sp, sp, -3
+        sw    ra, 0(sp)
+        mv    a0, s0
+        call  rk_client_of
+        lw    ra, 0(sp)
+        addi  sp, sp, 3
+        beqz  a0, 8f
+        mv    s1, a0
+        li    a0, 0
+        ret
+8:      li    a0, E_NOPROC
+        ret
         .nocompress

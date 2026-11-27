@@ -177,6 +177,19 @@ drv_ended:
         li    t2, NSRC
         ble   t1, t2, 1b
         ret
+
+# rouse: wake process s1 if it sleeps in receive, to run it again
+# (Proc::retry_if in Rust). Clobbers t0..t2.
+rouse:
+        lw    t0, PCB_STATE(s1)
+        li    t1, ST_RECEIVE
+        bne   t0, t1, 9f
+        li    t0, 1
+        sw    t0, PCB_RETRY(s1)
+        li    t0, ST_READY
+        sw    t0, PCB_STATE(s1)
+        j     wake_one                 # returns to our caller
+9:      ret
         .nocompress
 
 # Each source's register page, physical, by source from 1.

@@ -609,8 +609,10 @@ with every test passing at each step. The Rust part is one crate,
 subsystem as `kernel/` has a file per subsystem; so far `info` (the
 `log` and `info` calls above), `names` (`register` and `lookup`),
 `desc` (descriptors), `procinfo` (`proc`, `name`, `sleep`, `alarm`),
-`wait` (`wait`, `kill`, and burying a process) and `sched` (which
-process runs next, and the sleepers the clock wakes), with `mem` (where a process's address is in the
+`wait` (`wait`, `kill`, and burying a process), `sched` (which
+process runs next, and the sleepers the clock wakes) and `ipc` (`send`,
+`recv`, `call`, `receive`, `reply`, `copyin`, `copyout`, `notify`, and
+what servers hear when a process ends), with `mem` (where a process's address is in the
 kernel), `proc` (a process's record), `kdata` (the kernel's globals),
 `trytes` (strings of trytes, which Rust's bytes are not) and `word`
 under them. `make kernel` (`tools/kernel.py`) builds

@@ -9,6 +9,7 @@
 
 mod desc;
 mod info;
+mod ipc;
 mod kdata;
 mod mem;
 mod names;
