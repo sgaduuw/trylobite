@@ -14,6 +14,7 @@ unsafe extern "C" {
     static sleepers: u8;
     static next_wake: u8;
     static nready: u8;
+    static nidle: u8;
     static irq_armed: u8;
     static drivers: u8;
     static free_head: u8;
@@ -28,6 +29,7 @@ unsafe extern "C" {
 
 macro_rules! word_of {
     ($($name:ident),*) => {$(
+        #[inline(always)]
         pub fn $name() -> Word {
             load(unsafe { &raw const super::$name })
         }
@@ -39,12 +41,13 @@ pub mod read {
     use crate::word::{Word, load};
     word_of!(
         ticks, ram_pages, free_count, log_base, log_pos, sleepers, next_wake, irq_armed, free_head,
-        fresh_page, next_slot, nprog, nready
+        fresh_page, next_slot, nprog, nready, nidle
     );
 }
 
 macro_rules! set_word_of {
     ($($name:ident),*) => {$(
+        #[inline(always)]
         pub fn $name(w: Word) {
             store(unsafe { &raw const super::$name }.cast_mut(), w)
         }
@@ -56,7 +59,7 @@ pub mod write {
     use crate::word::{Word, store};
     set_word_of!(
         sleepers, next_wake, ram_pages, free_count, free_head, fresh_page, next_slot, irq_armed,
-        nready
+        nready, nidle
     );
 }
 

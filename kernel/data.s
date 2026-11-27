@@ -22,6 +22,7 @@ nready:     .word 0                    # how many processes are ST_READY (rk_pic
 
 klock:  .word 0                        # the kernel lock: 1 while a hart holds it
 idle_harts: .words NHART               # 1: the hart waits for work, by index
+nidle:  .word 0                        # how many idle_harts entries are 1
 leaving: .words NHART                  # 1: the platform asked the hart to go
 
 irq_armed: .word 0                     # sources armed by their drivers

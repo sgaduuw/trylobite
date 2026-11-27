@@ -60,6 +60,9 @@ idle:
         add   s1, t0, t1               # s1: this hart's entry
         li    t0, 1
         sw    t0, 0(s1)
+        lw    t0, nidle
+        addi  t0, t0, 1
+        sw    t0, nidle
         li    t0, IE_SOFT
         bnez  tp, 2f
         li    t0, IE_SOFT + IE_EXT     # hart 0 also wakes for hot-plug events
@@ -72,7 +75,13 @@ idle:
         call  klock_give
         wfi
         call  klock_take
-        sw    zero, 0(s1)              # in case nobody woke it on purpose
+        lw    t0, 0(s1)                # in case nobody woke it on purpose
+        beqz  t0, 4f
+        sw    zero, 0(s1)
+        lw    t0, nidle
+        addi  t0, t0, -1
+        sw    t0, nidle
+4:
         li    t0, V_HART
 1:      lw    t1, HC_RECEIVE(t0)       # empty the mailbox: no wake-up can
         bgez  t1, 1b                   # arrive now, with the entry cleared
