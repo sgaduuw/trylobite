@@ -5,3 +5,4 @@ __pycache__/
 *.dti
 disk.img
 disk.img.tmp
+kernel/trykern.s

@@ -25,7 +25,8 @@ unclear, that is a detrytus change, made there, not worked around here.
 ```sh
 tools/install-detrytus
 uv sync
-uv run pytest
+make kernel      # kernel/trykern.s, the kernel's Rust part (tools/kernel.py)
+uv run pytest    # builds kernel/trykern.s itself first
 uv run ruff check tests tools
 uv run ruff format --check tests tools
 detrytus run demo.s --ram-pages 40
@@ -195,8 +196,9 @@ pipe.
   kernel code prints only through `kout` (`kernel/console.s`), never by
   storing to `V_CONSOLE` itself.
 - **System tools read the kernel, the kernel only reports**
-  (`kernel/info.s`, `kernel/proc.s`): `SYS_INFO`, `SYS_PROC` and
-  `SYS_LOG` fill a caller's buffer, and the bin/ tools format. A
+  (`kernel/rust/trykern/src/info.rs`, `kernel/proc.s`): `SYS_INFO`,
+  `SYS_PROC` and `SYS_LOG` fill a caller's buffer, and the bin/ tools
+  format. A
   program of the kernel image calls `SYS_NAME` first thing, so ps can
   name it (a disk program is named after its argv[0]); a new one should
   too. `PCB_CPU` counts user-mode ticks, from `resume` to the next trap.
@@ -222,6 +224,29 @@ pipe.
   (`PCB_RETRY`, `kernel/ipc.s`), so `receive` must change nothing
   before it finds work. Arguments are read from the saved registers,
   `a3` to `a5` included (`PCB_A3`..`PCB_A5`).
+- **The kernel is being ported to Rust**, a subsystem at a time
+  (CONTEXT.md, 2026-11-27). The Rust part is one crate,
+  `kernel/rust/trykern`, with a module per subsystem, as `kernel/` has a
+  file per subsystem. `tools/kernel.py` builds it with cargo and
+  `detrytus ll --signed-pointers --sections kernel,kdata`, rooted at
+  every `rk_*` function, into `kernel/trykern.s` (not committed), which
+  `include/kernel.s` includes after `kernel/data.s`; the tests build it
+  once per run (`tests/conftest.py`). The assembly calls an `rk_*`
+  function with the current record as its argument (`kernel/info.s`
+  is the pattern: `mv a0, s0; call rk_sys_info; j resume`), and the
+  Rust leaves a system call's result in the record itself. Rust keeps
+  `s0` to `s8`, `gp` and `tp`, so the kernel's registers survive a
+  call. Rust reaches the kernel's data as words (`word.rs`: a word is
+  an `i64`, loaded and stored with detrytus' `lw`/`sw` builtins),
+  records by `PCB_` offset (`proc.rs`: the layout stays in
+  `include/layout.s`), globals by name (`kdata.rs`), and every number
+  through `layout` (trystd's `build.rs`, every one an `i64` here). A
+  routine still in assembly that Rust needs is declared `extern "C"`
+  and must keep the ABI (only `a0`..`a5`, `t0`..`t6` and `ra` changed);
+  one Rust needs that the assembly also calls with its own register
+  rules (such as `uva`) is written again in Rust until its file is
+  ported. The crate is built with `opt-level = "z"`: the kernel's code
+  has one page, and `include/kernel.s` checks that it fits.
 - **Writing zero to a CSR needs a register holding 0.** A CSR
   instruction whose source is `r0` only reads (detrytus isa.md 7.12), so
   `csrw sie, zero` changes nothing: `li t0, 0` first.

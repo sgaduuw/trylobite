@@ -31,6 +31,15 @@
         .include "../kernel/names.s"
         .include "../kernel/info.s"
         .include "../kernel/proc.s"
+        .include "../kernel/rt.s"
 
         .include "../kernel/data.s"
+        # The Rust part (tools/kernel.py builds it): its code goes on in the
+        # kernel section, its data at the end of the data section.
+        .include "../kernel/trykern.s"
+kcode_end:
+        .assert kcode_end <= P_KCODE * PAGE + 9842 - KOFF, "the kernel's code runs off its page"
+        .section kdata
+kdata_end:
+        .assert kdata_end + KSTACK_ROOM <= kstack_top, "kernel data runs into the kernel stack: shrink the process table (NPROC)"
         .include "../kernel/pagetables.s"

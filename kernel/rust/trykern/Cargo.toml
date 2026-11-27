@@ -1,0 +1,17 @@
+[package]
+name = "trykern"
+version = "0.1.0"
+edition = "2024"
+description = "The Rust part of the trylobite kernel, one module per subsystem (tools/kernel.py builds it into the kernel section)"
+# The same constants from include/layout.s as trystd's, each an i64:
+# the kernel works in words (src/word.rs).
+build = "../../../lib/rust/trystd/build.rs"
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["staticlib"]
+
+[profile.release]
+panic = "abort"
+# Small over fast: the kernel's code has one page (include/kernel.s).
+opt-level = "z"

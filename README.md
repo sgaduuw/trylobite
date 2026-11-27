@@ -71,6 +71,16 @@ this installs it at the commit [`detrytus.rev`](detrytus.rev) pins:
 tools/install-detrytus
 ```
 
+Part of the kernel is Rust, which needs the same toolchain with
+`rust-src` and the `riscv32imac-unknown-none-elf` target (`rustup
+component add rust-src`, `rustup target add
+riscv32imac-unknown-none-elf`). Build it once, and again after
+changing it:
+
+```bash
+make kernel
+```
+
 The demo boots the kernel on three harts and starts two processes that
 pass messages:
 
@@ -407,7 +417,9 @@ emulator, so trylobite has never run on hardware.
 | `kernel/devices.s` | device interrupts, and the drivers that take them |
 | `kernel/harts.s` | starting the other harts, waking an idle one |
 | `kernel/console.s` | the kernel's own log on the console, kept in a page for `dmesg` |
-| `kernel/info.s` | the log and the machine, for system tools: `log`, `info` |
+| `kernel/info.s` | the log and the machine, for system tools: `log`, `info`, calling Rust |
+| `kernel/rust/trykern` | the kernel's Rust part, a crate with a module per subsystem; `tools/kernel.py` builds it into `kernel/trykern.s` |
+| `kernel/rt.s` | what the Rust part calls that Rust does not write: `abort`, `memcpy` and the rest |
 | `kernel/proc.s` | processes, for system tools: `proc`, `name`, `sleep`; and `alarm` |
 | `kernel/lock.s` | the kernel lock |
 | `kernel/data.s` | the process table, buffers, messages |
@@ -417,8 +429,9 @@ emulator, so trylobite has never run on hardware.
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
 | `shell.s` | an 81-page machine starting the shell and its servers |
 | `docs/` | the kernel and the filesystem, described |
-| `Makefile` | `make` builds `disk.img` with the programs of `bin/`; `make run` boots the shell with it; `make benchmark` times the emulator |
+| `Makefile` | `make` builds `disk.img` with the programs of `bin/`, and the kernel's Rust part; `make run` boots the shell with it; `make benchmark` times the emulator |
 | `tools/fs.py` | makes and reads filesystem images on the host |
+| `tools/kernel.py` | builds the kernel's Rust part (`make kernel`) |
 | `tools/install-detrytus` | installs the pinned `detrytus` command |
 | `tests/` | the tests, and a harness that builds the kernel with test programs |
 
