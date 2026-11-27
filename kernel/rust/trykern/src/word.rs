@@ -43,6 +43,13 @@ pub fn store_at(p: *mut u8, off: Word, w: Word) {
     store(p.wrapping_offset(off as isize), w)
 }
 
+/// A word to choose among small numbers with: itself as an i32 when it
+/// fits, else i32::MIN. LLVM turns a match on a word into a 64-bit
+/// switch, which detrytus ll does not translate; one on this is 32-bit.
+pub fn small(w: Word) -> i32 {
+    i32::try_from(w).unwrap_or(i32::MIN)
+}
+
 /// The wall clock in ticks.
 pub fn time() -> Word {
     unsafe { csrr(CSR_TIME) }

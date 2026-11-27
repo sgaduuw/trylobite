@@ -412,8 +412,8 @@ emulator, so trylobite has never run on hardware.
 | `kernel/mm.s` | the page allocator, spawning and releasing processes |
 | `kernel/wait.s` | `wait`, `kill`, and what happens to a process once it has ended |
 | `kernel/ipc.s` | messages for servers: `call`, `receive`, `reply`, `copyin`, `copyout`, `notify` |
-| `kernel/names.s` | the server name registry: `register`, `lookup` |
-| `kernel/desc.s` | descriptors: `read`, `write`, `iocall`, `close`, `dup2`, `give` |
+| `kernel/names.s` | the server name registry: `register`, `lookup`, calling Rust |
+| `kernel/desc.s` | descriptors: `read`, `write`, `iocall`, `close`, `dup2`, `give`, calling Rust |
 | `kernel/devices.s` | device interrupts, and the drivers that take them |
 | `kernel/harts.s` | starting the other harts, waking an idle one |
 | `kernel/console.s` | the kernel's own log on the console, kept in a page for `dmesg` |

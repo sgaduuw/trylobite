@@ -1790,3 +1790,42 @@ machine has 29 free pages instead of 31. Kernel addresses stay well
 within ±2³¹ (code near −364,000). Three pages should hold the port for
 a while; raising `NKCODE` later means remapping the kernel's leaf table,
 which `kernel/pagetables.s` asserts.
+
+### 2026-11-27 · Names and descriptors in Rust
+
+Stage 3 of the port: `register` and `lookup` (`names.rs`) and the
+descriptor calls (`desc.rs`: read, write, iocall, close, dup2, give,
+fdflags, and what spawn and bury do with descriptors) are Rust;
+`kernel/names.s` and `kernel/desc.s` keep stubs. Along the way:
+
+- **Calls from assembly with their own rules get wrappers.** bury keeps
+  `t4` and spawn most registers across `srv_ended`, `desc_ended` and
+  `desc_inherit`, which Rust would change; each wrapper saves them and
+  ends in `rk_restore`. A negative argument is tested in the wrapper,
+  since Rust reads an `i32` held in a register as its unsigned value.
+- **A call that does not resume says so.** `lookup` that sleeps returns
+  1 and the stub jumps to `schedule`; `read`, `write` and `iocall`
+  rewrite the saved registers and return 1 for the stub to go on as
+  `sys_call`, which stays assembly until `ipc.s` is ported.
+- **Names are trytes.** A name's code points go up to 9,841, which a Rust
+  `u8` cannot hold, so names are copied and compared by `kernel/rt.s`'s
+  `memcpy` and `memcmp`, which move trytes untouched, and a single tryte
+  only through a volatile access, which `ll` makes one `lt` or `st`.
+  `srv_key` in kernel/data.s went: the name is on the Rust stack.
+- **`rouse` and `proc_of` exist twice**, as `uva` does, until `ipc.s`
+  is ported (`Proc::retry_if`, `Proc::alive`).
+- **No `match` on a word**: LLVM makes it a 64-bit `switch`, which
+  `detrytus ll` does not translate yet; `word::small` narrows it first.
+
+- **Plain loops over `flat_map`.** Written as
+  `Proc::table().flat_map(Desc::all).any(...)`, the scan for a handle
+  still named never found the server's notice due: closed files were
+  never closed in the file server. The same scan as nested loops works.
+  That points at a translation bug in `detrytus ll` for the flattening
+  iterator, not yet found; until it is, kernel Rust avoids `flat_map`.
+
+The kernel's code grew from about 9,000 trytes to 13,000. Descriptor
+calls cost more steps: fifteen shell pipelines take 12.0 million steps
+instead of 8.3 million (the test's budget went from 10 to 15 million),
+and the benchmark 819.8 million instead of 810.0 million (+1.2%), left for the
+speed pass after the port (Eelco).

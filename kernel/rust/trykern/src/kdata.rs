@@ -10,6 +10,7 @@ unsafe extern "C" {
     static log_pos: u8;
     static procs: u8;
     static kversion: u8;
+    static names: u8;
 }
 
 macro_rules! word_of {
@@ -34,4 +35,9 @@ pub fn procs_base() -> *mut u8 {
 /// The kernel's version, a 0-ended string of trytes.
 pub fn version() -> *const u8 {
     &raw const kversion
+}
+
+/// The server names' first record (names.rs).
+pub fn names_base() -> *mut u8 {
+    (&raw const names).cast_mut()
 }

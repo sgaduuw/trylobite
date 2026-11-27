@@ -162,7 +162,7 @@ pipe.
   entry `sys`, `brk`, `memcpy` and the rest). `bin_disk` in
   `tests/kernel.py` makes room for every program; a test that writes
   much asks for more blocks.
-- **Servers are found by name** (`kernel/names.s`): a server calls
+- **Servers are found by name** (`kernel/rust/trykern/src/names.rs`): a server calls
   `register` once it is ready, and a client calls `lookup`, with
   `LOOKUP_WAIT` when it may start before its server, and checks the
   version. Never give a server a fixed process number.
@@ -205,7 +205,7 @@ pipe.
   A process in `SYS_SLEEP` is `ST_SLEEP` until its saved a1; `pick`
   wakes sleepers while `sleepers` is set, and `idle` sets the timer for
   the earliest, so a sleeper is never counted as a deadlock.
-- **Descriptors are capabilities** (`kernel/desc.s`). A descriptor is
+- **Descriptors are capabilities** (`kernel/rust/trykern/src/desc.rs`). A descriptor is
   (server, handle) in the process record, put there only by that server
   (`SYS_GIVE`, to a process whose call it holds); `SYS_READ`,
   `SYS_WRITE` and `SYS_IOCALL` become a `SYS_CALL` with an `IO_`
@@ -245,7 +245,16 @@ pipe.
   and must keep the ABI (only `a0`..`a5`, `t0`..`t6` and `ra` changed);
   one Rust needs that the assembly also calls with its own register
   rules (such as `uva`) is written again in Rust until its file is
-  ported. The crate is built with `opt-level = "z"`: the kernel's code
+  ported. Assembly that calls Rust with its own register rules goes
+  through a wrapper that saves what its callers keep (`srv_ended`,
+  `desc_ended`, `desc_inherit`, ending in `rk_restore` in
+  `kernel/rt.s`), and passes no negative number: Rust reads an `i32` as
+  its unsigned value. A system call that may not resume says so in its
+  result (`rk_sys_lookup`: 1 to schedule; `rk_sys_read`: 1 to go on as
+  `sys_call`). A `match` on a word becomes a 64-bit switch, which `ll`
+  refuses: match on `word::small(w)`. Name strings are trytes, not
+  bytes (`trytes.rs`). Avoid `flat_map` (CONTEXT.md, 2026-11-27).
+  The crate is built with `opt-level = "z"`: the kernel's code
   has `NKCODE` pages (`include/layout.s`), and `include/kernel.s`
   checks that it fits: when it does not, raise `NKCODE` and remap the
   kernel's leaf table (`kernel/pagetables.s`), which keeps data and
