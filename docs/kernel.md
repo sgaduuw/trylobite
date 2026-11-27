@@ -607,9 +607,11 @@ The kernel is being moved from assembly to Rust a subsystem at a time,
 with every test passing at each step. The Rust part is one crate,
 [`kernel/rust/trykern`](../kernel/rust/trykern), a module per
 subsystem as `kernel/` has a file per subsystem; so far `info` (the
-`log` and `info` calls above), with `mem` (where a process's address is
-in the kernel), `proc` (a process's record), `kdata` (the kernel's
-globals) and `word` under it. `make kernel` (`tools/kernel.py`) builds
+`log` and `info` calls above), `names` (`register` and `lookup`) and
+`desc` (descriptors), with `mem` (where a process's address is in the
+kernel), `proc` (a process's record), `kdata` (the kernel's globals),
+`trytes` (strings of trytes, which Rust's bytes are not) and `word`
+under them. `make kernel` (`tools/kernel.py`) builds
 it with cargo for detrytus' Rust target and translates it with `detrytus
 ll` (detrytus docs/rust.md) into `kernel/trykern.s`, which
 `include/kernel.s` includes: its code in the kernel's code page, its

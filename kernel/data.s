@@ -34,8 +34,7 @@ seen:   .words NHART * NPROC           # the epoch each hart last flushed, by sl
 fpu_owner: .words NHART                # whose bank each hart's coprocessor
                                        # holds: a record, or 0 (see resume)
 
-names:  .words NSRV * SRV / 3          # server names (names.s)
-srv_key: .zero SRV_NAME_MAX + 1        # the name a call gave, zero-padded
+names:  .words NSRV * SRV / 3          # server names (rust/trykern/src/names.rs)
 
 
 numbuf: .zero 16

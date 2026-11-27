@@ -18,7 +18,9 @@ def shell():
 def said(shell, typed: str, on=None) -> str:
     """What the shell printed between booting and its exit, without the
     kernel's lines."""
-    result = run_image(shell, input=typed, disk=on or bin_disk(), max_steps=10_000_000)
+    # 15 pipelines take about 12 million steps with the descriptor calls
+    # in Rust (8.3 million in assembly), before the port's speed pass.
+    result = run_image(shell, input=typed, disk=on or bin_disk(), max_steps=15_000_000)
     assert result.exit_code == 0, result.console
     console = result.after_boot
     return re.sub(r"trylobite: [^\n]*\n", "", console)
