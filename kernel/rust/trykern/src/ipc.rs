@@ -88,6 +88,7 @@ pub fn call(p: Proc) -> i32 {
     }
     p.set(PCB_PEER, pid);
     p.set(PCB_STATE, ST_CALL);
+    q.set(PCB_CALLERS, q.get(PCB_CALLERS) + 1); // Proc::ready takes it off
     q.retry_if(ST_RECEIVE);
     SCHEDULE
 }
@@ -109,8 +110,13 @@ pub extern "C" fn rk_sys_receive(p: *mut u8) -> i32 {
         }
         p.set(PCB_PENDING, 0); // none left
     }
+    if load_small_at(p.0, PCB_CALLERS) == 0 {
+        p.set(PCB_STATE, ST_RECEIVE);
+        return SCHEDULE;
+    }
     // The next caller after the one it took last, that one's turn last:
-    // two plain walks, as in sched::rk_pick.
+    // two plain walks, as in sched::rk_pick. One is there, as
+    // PCB_CALLERS counts.
     let me = p.pid();
     let (base, end) = Proc::bounds();
     let after = Proc::of(p.get(PCB_TURN)).at(PCB_SIZE);
@@ -124,6 +130,7 @@ pub extern "C" fn rk_sys_receive(p: *mut u8) -> i32 {
     }
     let c = Proc(c);
     p.set(PCB_TURN, c.pid());
+    p.set(PCB_CALLERS, p.get(PCB_CALLERS) - 1);
     c.set(PCB_STATE, ST_REPLY);
     p.set(PCB_A1, c.get(PCB_A2));
     p.set(PCB_A2, c.get(PCB_A3));

@@ -18,6 +18,7 @@ log_base:   .word 0                    # the log page's first tryte, through the
 log_pos:    .word 0                    # code points ever printed (console.s)
 sleepers:   .word 0                    # 1 while a process may sleep or have an alarm set
 next_wake:  .word 0                    # ... and the earliest time one waits for
+nready:     .word 0                    # how many processes are ST_READY (rk_pick)
 
 klock:  .word 0                        # the kernel lock: 1 while a hart holds it
 idle_harts: .words NHART               # 1: the hart waits for work, by index

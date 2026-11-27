@@ -85,6 +85,15 @@ impl Proc {
 
     /// Make it ready and ring a hart for it.
     pub fn ready(self) {
+        if self.is(ST_CALL) {
+            // Its call is off (killed, or the server ended): the server
+            // counts one caller fewer.
+            let q = Proc::of(self.get(PCB_PEER));
+            q.set(PCB_CALLERS, q.get(PCB_CALLERS) - 1);
+        }
+        if !self.is(ST_READY) {
+            kdata::write::nready(kdata::read::nready() + 1);
+        }
         self.set(PCB_STATE, ST_READY);
         wake_one();
     }

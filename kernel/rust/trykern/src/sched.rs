@@ -18,28 +18,44 @@ pub extern "C" fn rk_pick(cur: *mut u8) -> *mut u8 {
     if read::sleepers() != 0 && time() >= read::next_wake() {
         wake_sleepers();
     }
+    // nready counts the ready: with none, or with only cur, no walk.
+    let n = read::nready();
+    if n == 0 {
+        return core::ptr::null_mut();
+    }
+    write::nready(n - 1);
+    let cur = Proc(cur);
+    if n == 1 && cur.is(ST_READY) {
+        cur.set(PCB_STATE, ST_RUNNING);
+        return cur.0;
+    }
     // The records after cur, then those up to cur: two plain walks, as a
-    // wrapping one costs twice the steps a slot, on every switch.
+    // wrapping one costs twice the steps a slot, on every switch. One is
+    // ready, as nready counts.
     let (base, end) = Proc::bounds();
-    let after = cur.wrapping_offset(PCB_SIZE as isize);
-    first_ready(after, end)
-        .or_else(|| first_ready(base, after))
-        .map_or(core::ptr::null_mut(), |q| {
-            q.set(PCB_STATE, ST_RUNNING);
-            q.0
-        })
+    let after = cur.at(PCB_SIZE);
+    let mut q = first_ready(after, end);
+    if q.is_null() {
+        q = first_ready(base, after);
+    }
+    if q.is_null() {
+        write::nready(0); // never so, while nready counts right
+        return q;
+    }
+    Proc(q).set(PCB_STATE, ST_RUNNING);
+    q
 }
 
-/// The first ready record from `at` up to `end`.
+/// The first ready record from `at` up to `end`, or null.
 #[inline(always)]
-fn first_ready(mut at: *mut u8, end: *mut u8) -> Option<Proc> {
+fn first_ready(mut at: *mut u8, end: *mut u8) -> *mut u8 {
     while at < end {
         if Proc(at).is(ST_READY) {
-            return Some(Proc(at));
+            return at;
         }
         at = at.wrapping_offset(PCB_SIZE as isize);
     }
-    None
+    core::ptr::null_mut()
 }
 
 /// Make ready each sleeper whose time has come, and ring each alarm

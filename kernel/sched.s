@@ -8,6 +8,9 @@ schedule:
         bne   t0, t1, pick             # it blocked or exited
         li    t0, ST_READY             # preempted or yielded: it can run again
         sw    t0, PCB_STATE(s0)
+        lw    t0, nready
+        addi  t0, t0, 1
+        sw    t0, nready
 
 # pick: run the next ready process after s0, any record: s0's turn last
 # (rk_pick, kernel/rust/trykern/src/sched.rs, which also wakes the

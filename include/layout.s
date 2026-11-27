@@ -779,7 +779,9 @@
                                           # (PCB_IRQS, PCB_RANG, PCB_CLOSED,
                                           # PCB_SIGNALS, PCB_NOTES): 0 lets it
                                           # skip looking (Proc::rouse sets it)
-        # 138 to 156 were its block windows' pages: PCB_WINS, below, now
+        .equ  PCB_CALLERS, 138            # how many processes wait in ST_CALL
+                                          # for it: 0 lets receive skip looking
+        # 141 to 156 were its block windows' pages: PCB_WINS, below, now
         .equ  NWIN,         9             # block windows: window k is at V_BLOCK + PAGE * k
         .equ  V_DEVICE, V_BLOCK + NWIN * PAGE   # a driver's device registers,
                                           # past its windows: source s's at
