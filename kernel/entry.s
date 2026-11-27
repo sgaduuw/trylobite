@@ -14,15 +14,11 @@ kentry:
         csrw  sscratch, t0             # zero while in the kernel (see ktrap)
         call  klock_take               # the other harts wait until init runs
         la    sp, kstack_top
-        call  page_init
+        call  rk_page_init             # the free pages (mm.rs)
         call  log_init                 # the log keeps the boot report too
         call  boot_report              # what it found, before init runs
-        la    t0, procs
-        sw    t0, next_slot            # spawn starts with slot 0
-        li    a1, 0
-        li    a2, NO_PARENT
-        call  do_spawn                 # init: everything else is its to start
-        bltz  a0, 1f
+        call  rk_spawn_init            # init: everything else is its to start
+        beqz  a0, 1f
         call  start_harts
         call  timer_on
         la    s0, procs

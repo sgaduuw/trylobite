@@ -88,34 +88,6 @@ sys_arm:
 8:      li    a0, E_PERM
         j     sys_return
 
-# phys(address): the physical address of the caller's address a1, which
-# only a driver needs: to give a device memory to move to or from.
-sys_phys:
-        call  drives_any
-        bltz  a0, sys_return
-        mv    a0, s0
-        call  uva
-        beqz  a0, 8f
-        li    t0, DMAP
-        sub   a0, a0, t0
-        j     sys_return
-8:      li    a0, E_FAULT
-        j     sys_return
-
-# drives_any: a0 = 0 if the process in s0 drives a device, else E_PERM.
-# Clobbers t0..t2.
-drives_any:
-        li    a0, 0
-        la    t0, drivers
-        li    t1, NSRC
-1:      lw    t2, 0(t0)
-        beq   t2, s0, 2f
-        addi  t0, t0, 3
-        addi  t1, t1, -1
-        bnez  t1, 1b
-        li    a0, E_PERM
-2:      ret
-
 # drv_slot: t0 = the address of source a1's entry in drivers; a1 is 1 to
 # NSRC. Clobbers t1.
 drv_slot:

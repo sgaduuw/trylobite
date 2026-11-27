@@ -273,14 +273,6 @@ pub fn client_of(p: Proc, pid: Word) -> Option<Proc> {
     (c.is(ST_REPLY) && Proc::of(c.get(PCB_PEER)) == p).then_some(c)
 }
 
-/// client_of for kernel/syscall.s (spawnw, for another process): the
-/// record of process `pid`, which the assembly checked is in range, or
-/// null.
-#[unsafe(no_mangle)]
-pub extern "C" fn rk_client_of(p: *mut u8, pid: i32) -> *mut u8 {
-    client_of(Proc(p), pid as Word).map_or(core::ptr::null_mut(), |c| c.0)
-}
-
 /// Process `pid`, in `p`, has ended (bury). Tell every process that
 /// receives, and its parent, whether it has received yet or not (so init
 /// hears of a server that ends before init first receives), and fail the
@@ -351,12 +343,4 @@ fn each_chunk(
         n -= k;
     }
     true
-}
-
-/// copy_mem for kernel/mm.s (a program's image, from the caller's block
-/// windows): the assembly's arguments are addresses and a length a
-/// program file's header gave, each within an i32.
-#[unsafe(no_mangle)]
-pub extern "C" fn rk_copy_mem(src: *mut u8, from: i32, dst: *mut u8, to: i32, n: i32) {
-    copy_mem(Proc(src), from as Word, Proc(dst), to as Word, n as Word);
 }

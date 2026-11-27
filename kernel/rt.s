@@ -84,9 +84,28 @@ memcpy: mv    t0, a0
         st    t1, 0(t0)
         j     4b
 
-# memset(dst, byte, n): dst.
+# memset(dst, byte, n): dst. Clearing from a word boundary, as a page or
+# a process record is cleared, goes nine words at a time.
 memset: mv    t0, a0
         add   t2, a0, a2
+        bnez  a1, 1f
+        addi  t1, a0, 1
+        li    t3, 3
+        rem   t1, t1, t3
+        bnez  t1, 1f
+        addi  t3, t2, -26              # t3: nine words fit while dst < t3
+5:      bge   t0, t3, 1f
+        sw    zero, 1(t0)
+        sw    zero, 4(t0)
+        sw    zero, 7(t0)
+        sw    zero, 10(t0)
+        sw    zero, 13(t0)
+        sw    zero, 16(t0)
+        sw    zero, 19(t0)
+        sw    zero, 22(t0)
+        sw    zero, 25(t0)
+        addi  t0, t0, 27
+        j     5b
 1:      bge   t0, t2, 2f
         st    a1, 0(t0)
         addi  t0, t0, 1

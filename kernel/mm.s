@@ -1,14 +1,46 @@
-# Physical pages and address spaces.
-#
-# Free pages are those never handed out, fresh_page up to ram_pages, and
-# a list of those given back, threaded through the pages themselves: each
-# free page's centre word holds the next free page's number. Boot touches
-# no page, so a machine of any size starts at once and costs the emulator
-# only the pages used. The kernel reaches any physical page through the
-# direct map. Page 0 is the boot page and is never free, so 0 also means
-# "none".
+# Physical pages and address spaces: the page allocator, spawn, spawnw,
+# window, brk, phys and release (kernel/rust/trykern/src/mm.rs). The
+# system calls hand the Rust the caller's record; it leaves the result
+# there.
 
         .compress
+sys_spawn:
+        mv    a0, s0
+        call  rk_sys_spawn
+        j     resume
+
+sys_spawnw:
+        mv    a0, s0
+        call  rk_sys_spawnw
+        j     resume
+
+sys_window:
+        mv    a0, s0
+        call  rk_sys_window
+        j     resume
+
+sys_brk:
+        mv    a0, s0
+        call  rk_sys_brk
+        j     resume
+
+sys_phys:
+        mv    a0, s0
+        call  rk_sys_phys
+        j     resume
+
+# release: end the process in s0, return its pages, and bury it (wait.s).
+# Its saved a0 and a1 say how it ended. It leaves its address space
+# first: freeing a page writes the free-list link into its centre word,
+# which in a root table is entry 0, and done while that table is live the
+# next walk would read garbage. Does not return.
+release:
+        li    t0, PTBR_BOOT
+        csrw  ptbr, t0
+        mv    a0, s0
+        call  rk_release
+        j     bury
+
 # kva: a0 = the kernel virtual address of physical page a0's centre.
 # Clobbers t0.
 kva:
@@ -18,416 +50,9 @@ kva:
         add   a0, a0, t0
         ret
 
-# page_init: read how much RAM the machine has, as much of it as the
-# direct map reaches, and make pages P_FREE on free. Clobbers t0, t1.
-page_init:
-        li    t0, V_POWER
-        lw    t0, POWER_RAM(t0)
-        li    t1, MEM_MAX
-        ble   t0, t1, 1f
-        mv    t0, t1
-1:      sw    t0, ram_pages
-        li    t1, P_FREE
-        sw    t1, fresh_page
-        sub   t0, t0, t1
-        addi  t0, t0, 1                # pages P_FREE to ram_pages
-        bgez  t0, 2f
-        li    t0, 0                    # a machine too small to have any
-2:      sw    t0, free_count
-        ret
-
-# free_page: return physical page a0 to the free list. Clobbers a0, t0..t3.
-free_page:
-        mv    t3, a0
-        li    t0, PAGE
-        mul   t1, t3, t0
-        li    t0, DMAP
-        add   t1, t1, t0               # t1: the page's centre
-        lw    t2, free_head
-        sw    t2, 0(t1)                # link it to the old head
-        sw    t3, free_head
-        lw    t2, free_count
-        addi  t2, t2, 1
-        sw    t2, free_count
-        ret
-
-# alloc_page: a0 = a zeroed page from the free list. The caller checks
-# free_count first. Clobbers t0..t5.
-alloc_page:
-        mv    t5, ra
-        call  take_page
-        addi  t4, t2, -9840            # the page's lowest word
-        addi  t3, t2, 9840             # and its highest
-1:      sw    zero, 0(t4)
-        addi  t4, t4, 3
-        ble   t4, t3, 1b
-        jalr  zero, 0(t5)
-
-# take_page: a0 = a free page, not cleared, and t2 = its centre's kernel
-# virtual address: one given back if there is one, else the next never
-# used. For a page about to be overwritten whole. Clobbers t0..t2.
-take_page:
-        lw    a0, free_head
-        beqz  a0, 1f
-        li    t1, PAGE
-        mul   t2, a0, t1
-        li    t1, DMAP
-        add   t2, t2, t1               # t2: the page's centre
-        lw    t1, 0(t2)
-        sw    t1, free_head            # unlink it
-        j     2f
-1:      lw    a0, fresh_page
-        addi  t1, a0, 1
-        sw    t1, fresh_page
-        li    t1, PAGE
-        mul   t2, a0, t1
-        li    t1, DMAP
-        add   t2, t2, t1               # t2: the page's centre
-2:      lw    t1, free_count
-        addi  t1, t1, -1
-        sw    t1, free_count
-        ret
-
-# copy_page: copy physical page a1 over physical page a0. Clobbers t0..t5.
-copy_page:
-        li    t0, PAGE
-        mul   t1, a0, t0
-        mul   t2, a1, t0
-        li    t0, DMAP
-        add   t1, t1, t0
-        add   t2, t2, t0
-        addi  t4, t1, -9840
-        addi  t5, t1, 9840
-        addi  t2, t2, -9840
-1:      lw    t0, 0(t2)
-        sw    t0, 0(t4)
-        addi  t2, t2, 3
-        addi  t4, t4, 3
-        ble   t4, t5, 1b
-        ret
-
-# do_spawn: start program a1 in a free slot, as a child of process a2 (or
-# NO_PARENT). a0 = its process number, or E_NOSLOT, E_NOPROG or E_NOMEM.
-# Clobbers a0..a2, s1..s6 and every t register; keeps s0.
-do_spawn:
-        bltz  a1, 1f
-        li    t0, NPROG
-        bge   a1, t0, 1f
-        addi  s5, a1, P_PROG0          # s5: the program image's page
-        li    s6, 0                    # copied whole
-        j     spawn_page
-1:      li    a0, E_NOPROG
-        ret
-
-# spawn_page: start a program, as do_spawn does: when s6 is 0, the whole
-# page image in physical page s5; when s6 is 1, the program file in the
-# caller's block windows from window PCB_A1 on (spawnw has checked it),
-# whose image takes s5 pages above the process's own. a0 = its process
-# number, or E_NOSLOT or E_NOMEM. Clobbers as do_spawn.
-spawn_page:
-        addi  sp, sp, -3
-        sw    ra, 0(sp)
-
-        # Find a free slot, starting after the last one handed out, so a
-        # process number is not reused until the table wraps: a message
-        # meant for a process that just exited should not reach a new one.
-        la    t2, procs
-        li    t0, NPROC * PCB_SIZE
-        add   t3, t2, t0               # t3: just past the table
-        lw    s1, next_slot
-        li    t4, NPROC
-1:      blt   s1, t3, 0f
-        mv    s1, t2                   # wrap around
-0:      lw    t0, PCB_STATE(s1)
-        beqz  t0, 2f
-        addi  s1, s1, PCB_SIZE
-        addi  t4, t4, -1
-        bnez  t4, 1b
-        li    a0, E_NOSLOT
-        j     7f
-
-2:      li    t1, PAGES_PER_PROCESS    # check memory before taking any
-        beqz  s6, 0f
-        add   t1, t1, s5               # and the image's pages above its own
-0:      lw    t0, free_count
-        blt   t0, t1, 9f
-
-        mv    t0, s1                   # clear the slot's record
-        addi  t1, s1, PCB_SIZE
-3:      sw    zero, 0(t0)
-        addi  t0, t0, 3
-        blt   t0, t1, 3b
-        sw    a2, PCB_PARENT(s1)
-        sw    s6, PCB_FILE(s1)         # a program file may not drive a device
-        la    t0, fpu_owner            # no hart's coprocessor bank is its yet:
-        li    t1, NHART                # it starts from its zeroed PCB_FPU, not
-5:      lw    t2, 0(t0)                # what the slot's last tenant left
-        bne   t2, s1, 6f
-        sw    zero, 0(t0)
-6:      addi  t0, t0, 3
-        addi  t1, t1, -1
-        bnez  t1, 5b
-        call  desc_inherit             # its parent's descriptors (desc.s)
-
-        call  alloc_page
-        sw    a0, PCB_ROOTPG(s1)
-        mv    s2, a0
-        call  alloc_page
-        sw    a0, PCB_MIDPG(s1)
-        mv    s3, a0
-        call  alloc_page
-        sw    a0, PCB_LEAFPG(s1)
-        mv    s4, a0
-        bnez  s6, 4f
-        call  take_page                # copied over whole: no need to clear it
-        sw    a0, PCB_USERPG(s1)
-        mv    a1, s5
-        call  copy_page                # the program, into its own page
-        j     5f
-4:      call  alloc_page               # zeroed: copy_mem fills in the image
-        sw    a0, PCB_USERPG(s1)
-        mv    a1, s5                   # a1: pages above it still to make
-        addi  a2, s1, PCB_XPAGES
-0:      blez  a1, 5f
-        call  alloc_page
-        sw    a0, 0(a2)
-        addi  a2, a2, 3
-        addi  a1, a1, -1
-        j     0b
-5:
-
-        # Root entry 0 -> the mid table.
-        mv    a0, s2
-        call  kva
-        li    t1, PAGE
-        mul   t2, s3, t1
-        addi  t2, t2, PTE_PTR
-        sw    t2, 0(a0)
-        # Mid entries: -16 to -1 the direct map, 0 the kernel, +1 the process.
-        mv    a0, s3
-        call  kva
-        li    t2, DMAP_PTE
-        li    t1, SUPER
-        addi  t3, a0, -3 * DMAP_SUPERS
-0:      sw    t2, 0(t3)
-        add   t2, t2, t1
-        addi  t3, t3, 3
-        blt   t3, a0, 0b
-        li    t2, KLEAF_PTR
-        sw    t2, 0(a0)
-        li    t1, PAGE
-        mul   t2, s4, t1
-        addi  t2, t2, PTE_PTR
-        sw    t2, 3(a0)
-        # Leaf entry 0: the process's page, at V_USER.
-        mv    a0, s4
-        call  kva
-        lw    t2, PCB_USERPG(s1)
-        li    t1, PAGE
-        mul   t2, t2, t1
-        li    t1, USER_FLAGS
-        add   t2, t2, t1
-        sw    t2, 0(a0)
-        addi  t3, s1, PCB_XPAGES       # entries 1 to NXPAGE: its image's
-        li    t4, NXPAGE               # pages above it, if any
-0:      lw    t2, 0(t3)
-        beqz  t2, 1f
-        li    t1, PAGE
-        mul   t2, t2, t1
-        li    t1, USER_FLAGS
-        add   t2, t2, t1
-        sw    t2, 3(a0)
-1:      addi  a0, a0, 3
-        addi  t3, t3, 3
-        addi  t4, t4, -1
-        bnez  t4, 0b
-
-        beqz  s6, 0f                   # a program file: copy its image in,
-        addi  sp, sp, -3               # from the caller's windows
-        sw    s7, 0(sp)
-        lw    t0, PCB_A1(s0)           # the first window
-        li    t1, 3
-        mul   t1, t0, t1
-        add   t1, t1, s0
-        lw    a0, PCB_WINS(t1)
-        li    t1, PAGE
-        mul   t0, t0, t1
-        li    t1, V_BLOCK + EXEC_IMAGE - 1
-        add   s3, t0, t1               # s3: the image's first tryte there
-        call  kva
-        lw    s6, EXEC_SIZE(a0)        # s6: its size
-        mv    s2, s0
-        mv    s4, s1
-        li    s5, V_USER - 1           # where it runs from
-        call  copy_mem
-        lw    s7, 0(sp)
-        addi  sp, sp, 3
-        lw    s2, PCB_ROOTPG(s1)       # copy_mem left s1, but not s2
-
-0:      la    t0, procs                # a0 = the process number
-        sub   t0, s1, t0
-        li    t1, PCB_SIZE
-        div   a0, t0, t1
-        addi  t2, a0, 1                # its ASID
-        li    t1, PAGE
-        mul   t3, s2, t1
-        li    t1, 3
-        mul   t4, t2, t1
-        add   t3, t3, t4
-        addi  t3, t3, 1                # mode +
-        sw    t3, PCB_PTBR(s1)
-        li    t0, V_USER
-        sw    t0, PCB_PC(s1)
-        li    t0, USER_SP
-        sw    t0, 0(s1)
-        li    t0, USER_GP              # programs address their data from gp
-        sw    t0, PCB_GP(s1)
-        li    t0, ST_READY
-        sw    t0, PCB_STATE(s1)
-        addi  t0, s1, PCB_SIZE         # the next spawn looks after this slot
-        sw    t0, next_slot
-        # The slot's last tenant had this ASID: a new epoch makes each hart
-        # drop its translations before running the new one (see resume).
-        la    t1, epochs
-        li    t3, 3
-        mul   t3, a0, t3
-        add   t1, t1, t3
-        lw    t3, 0(t1)
-        addi  t3, t3, 1
-        sw    t3, 0(t1)
-        call  wake_one                 # a hart waiting for work can run it
-        j     7f
-
-9:      li    a0, E_NOMEM
-7:      lw    ra, 0(sp)
-        addi  sp, sp, 3
-        ret
-
-# window(k): give the caller block window a1, a zeroed page at V_BLOCK +
-# PAGE * a1, unless it has one there already.
-sys_window:
-        bltz  a1, 7f
-        li    t0, NWIN
-        bge   a1, t0, 7f
-        li    t0, 3
-        mul   s1, a1, t0
-        add   s1, s1, s0               # s1: its PCB_WINS entry, less PCB_WINS
-        lw    t0, PCB_WINS(s1)
-        bnez  t0, 6f
-        lw    t0, free_count
-        beqz  t0, 8f
-        call  alloc_page
-        sw    a0, PCB_WINS(s1)
-        li    t1, PAGE                 # leaf entry NXPAGE + 1 + k: the window
-        mul   t2, a0, t1
-        li    t1, USER_FLAGS
-        add   t2, t2, t1
-        lw    a0, PCB_LEAFPG(s0)
-        call  kva
-        lw    t0, PCB_A1(s0)
-        li    t1, 3
-        mul   t0, t0, t1
-        add   a0, a0, t0
-        sw    t2, 3 * (NXPAGE + 1)(a0)
-6:      li    a0, 0
-        j     sys_return
-7:      li    a0, E_INVAL
-        j     sys_return
-8:      li    a0, E_NOMEM
-        j     sys_return
-
-# brk(end): make the caller's heap reach end, a page at a time from
-# HEAP_START (leaf entries HEAP_LEAF on), and give back the break. It
-# never shrinks: an end inside it, or BRK_QUERY, only asks. All the
-# pages it needs, or none.
-sys_brk:
-        lw    s2, PCB_HEAP(s0)         # s2: pages it has
-        beqz  a1, 8f                   # BRK_QUERY
-        li    t0, HEAP_START
-        sub   t1, a1, t0               # trytes from the heap's start
-        bltz  t1, 7f
-        li    t0, HEAP_MAX * PAGE
-        bgt   t1, t0, 7f
-        li    t0, PAGE - 1
-        add   t1, t1, t0
-        li    t0, PAGE
-        div   s3, t1, t0               # s3: pages it needs
-        ble   s3, s2, 8f
-        sub   t1, s3, s2
-        lw    t0, free_count
-        blt   t0, t1, 9f
-        lw    a0, PCB_LEAFPG(s0)
-        call  kva
-        li    t0, 3 * HEAP_LEAF
-        add   s4, a0, t0               # s4: the heap's first leaf entry
-1:      bge   s2, s3, 8f
-        call  alloc_page               # zeroed, as a new page should be
-        li    t1, PAGE
-        mul   t2, a0, t1
-        li    t1, USER_FLAGS
-        add   t2, t2, t1
-        li    t1, 3
-        mul   t1, s2, t1
-        add   t1, t1, s4
-        sw    t2, 0(t1)
-        addi  s2, s2, 1
-        sw    s2, PCB_HEAP(s0)
-        j     1b
-8:      li    t0, PAGE                 # the break
-        mul   a0, s2, t0
-        li    t0, HEAP_START
-        add   a0, a0, t0
-        j     sys_return
-7:      li    a0, E_INVAL
-        j     sys_return
-9:      li    a0, E_NOMEM
-        j     sys_return
-
-# release: end the process in s0, return its pages, and bury it (wait.s).
-# Its saved a0 and a1 say how it ended. Does not return.
-release:
-        # Leave its address space first. Freeing a page writes the free-list
-        # link into its centre word, which in a root table is entry 0: done
-        # while that table is live, the next walk would read garbage.
-        li    t0, PTBR_BOOT
-        csrw  ptbr, t0
-        lw    s1, PCB_HEAP(s0)         # its heap, while its leaf table,
-        beqz  s1, 3f                   # which says where, is still there
-        lw    a0, PCB_LEAFPG(s0)
-        call  kva
-        li    t0, 3 * HEAP_LEAF
-        add   s2, a0, t0
-0:      lw    a0, 0(s2)
-        li    t0, USER_FLAGS
-        sub   a0, a0, t0
-        li    t0, PAGE
-        div   a0, a0, t0
-        call  free_page
-        addi  s2, s2, 3
-        addi  s1, s1, -1
-        bnez  s1, 0b
-3:
-        lw    a0, PCB_ROOTPG(s0)
-        call  free_page
-        lw    a0, PCB_MIDPG(s0)
-        call  free_page
-        lw    a0, PCB_LEAFPG(s0)
-        call  free_page
-        lw    a0, PCB_USERPG(s0)
-        call  free_page
-        li    s1, NXPAGE + NWIN        # and its image's pages above its own
-        mv    s2, s0                   # and its block windows
-1:      lw    a0, PCB_XPAGES(s2)
-        beqz  a0, 2f
-        call  free_page
-2:      addi  s2, s2, 3
-        addi  s1, s1, -1
-        bnez  s1, 1b
-        j     bury
-
 # uva: a0 = the kernel address of address a1 in the process whose record
-# is in a0 (mem::uva in Rust, for the Rust), and a1 = how many trytes its page has from there, or a0 = 0
-# when the process has nothing there: its own page, a page of its image
+# is in a0, and a1 = how many trytes its page has from there, or a0 = 0
+# when the process has nothing there (mem::user_at in Rust, for puts): its own page, a page of its image
 # above that, a block window or a page of heap it has. Clobbers t0..t2.
 uva:
         li    t0, V_USER - 9841
@@ -476,15 +101,4 @@ uva:
 8:      li    a0, 0
         ret
 
-# copy_mem: copy s6 trytes from s3 in the process whose record is s2 to
-# s5 in the one whose record is s4, all or nothing (ipc::copy_mem). The
-# addresses and the length are a program file's, each within an i32.
-# Keeps the s registers.
-copy_mem:
-        mv    a0, s2
-        mv    a1, s3
-        mv    a2, s4
-        mv    a3, s5
-        mv    a4, s6
-        j     rk_copy_mem
         .nocompress

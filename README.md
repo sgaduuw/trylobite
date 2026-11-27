@@ -409,7 +409,7 @@ emulator, so trylobite has never run on hardware.
 | `kernel/trap.s` | trap entry and exit, faults, kills, panics |
 | `kernel/syscall.s` | the system calls: which routine each number goes to, and those still in assembly |
 | `kernel/sched.s` | round-robin scheduling (picking in Rust), idling, halting |
-| `kernel/mm.s` | the page allocator, spawning and releasing processes |
+| `kernel/mm.s` | the page allocator, `spawn`, `spawnw`, `window`, `brk`, `phys` and releasing a process's pages, calling Rust |
 | `kernel/wait.s` | `wait`, `kill`, and what happens to a process once it has ended, calling Rust |
 | `kernel/ipc.s` | messages: `send`, `recv`, and for servers `call`, `receive`, `reply`, `copyin`, `copyout`, `notify`, calling Rust |
 | `kernel/names.s` | the server name registry: `register`, `lookup`, calling Rust |

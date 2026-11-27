@@ -1914,3 +1914,34 @@ million steps instead of 25.0 million, under its test's 30 million; the
 word copies of `reply` and `receive` are the rest of it, each word split
 into limbs and joined again, for the speed pass after the port. No test
 budget changed.
+
+## Memory in Rust (2026-11-27)
+
+Stage 6 of the port moved kernel/mm.s into trykern's `mm` module: the
+page allocator (`page_init`, `take_page`, `alloc_page`, `free_page`),
+`spawn` and `spawnw` with their arguments, `window`, `brk`, `phys`, and
+giving a process's pages back when it ends (`rk_release`).
+
+- **What stays assembly is small.** mm.s keeps the stubs, `release`
+  (which leaves the dying process's address space before the Rust frees
+  its root table, then buries it), `kva` for devices.s's `drive`, and
+  `uva` for `puts`. syscall.s lost spawn, spawnw and the `client_of`
+  wrapper; devices.s lost `phys` and `drives_any`; ipc.rs lost
+  `rk_copy_mem` and `rk_client_of`, which only the assembly called.
+- **NPROG is a word now.** It is each build's (demo.s 3, shell.s 8), so
+  layout.rs cannot have it; kernel/data.s keeps it in `nprog` for
+  spawn's range check and the first free page.
+- **A 32-bit product that may wrap is ten instructions.** `ll` splits a
+  wrapping `mul i32` into 16-bit halves unless a factor is below 2⁹, and
+  page × `PAGE` is neither, which `mem::user_at` paid on every page it
+  looked at. `mem::pages` multiplies with `unchecked_mul` on `u32`, which
+  LLVM marks `nuw`, and `ll` makes that one `mul`.
+- **Clearing goes a word at a time.** `memset` in kernel/rt.s clears nine
+  words at a time from a word's first tryte, for pages and records.
+- **Page-table entries cost limbs.** Entries are words and so i64s; the
+  table-filling in `spawn` is most of its 600 instructions. A `sw32`
+  builtin for words that fit an i32 is a candidate for the speed pass.
+
+The kernel's code grew from 18,700 trytes to 22,700. The benchmark takes
+892.6 million steps instead of stage 5's 895.9 million (−0.4%, the
+cheaper `user_at`). No test budget changed.

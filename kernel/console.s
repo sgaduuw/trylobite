@@ -63,12 +63,12 @@ kputn:
         ret
 
 # log_init: give the log its page. Hart 0 calls it at boot, after
-# page_init and before the boot report, so the report is in the log.
+# rk_page_init and before the boot report, so the report is in the log.
 # Clobbers a0, t0..t5.
 log_init:
         addi  sp, sp, -3
         sw    ra, 0(sp)
-        call  take_page                # not cleared: log reads only what
+        call  rk_take_page             # not cleared: log reads only what
                                        # was printed
         li    t0, PAGE
         mul   t0, a0, t0
