@@ -1979,3 +1979,40 @@ kernel/console.s.
 The kernel's code grew from 22,700 trytes to 24,300. The benchmark takes
 895.1 million steps instead of stage 6's 892.6 million (+0.3%). No step
 budget changed.
+
+## The speed pass (2026-11-27)
+
+After the port, the remaining system calls (`putc`, `puts`, `getpid`,
+`hart`, `yield`, `exit`) and the dispatch moved to trykern's `syscall`
+module, and the hot paths the profile showed got cheaper. syscall.s is
+now only the trap: it calls `rk_syscall`, whose result says resume,
+schedule or release; the per-call stubs and the wrapper files (mm.s,
+wait.s, ipc.s, names.s, desc.s, devices.s, info.s, proc.s) are gone.
+
+- **The dispatch is a table of function pointers.** A `match` on the
+  call number becomes a chain of comparisons in `ll`; a table indexed
+  by number is one load (`ll$ldp`) and a call.
+- **Counts instead of walks.** The profile (the benchmark's 300-line
+  run, traced instruction by instruction) had the scheduler's pick and
+  receive walking the 27-slot table on most switches. Now `nready`
+  (ready processes) lets pick skip its walk when none is ready, or only
+  the process that stopped; `PCB_CALLERS` (processes waiting in a call
+  to a server) lets receive go to sleep without looking;
+  `PCB_PENDING` (a notice may wait: `Proc::rouse` sets it) lets receive
+  skip its notice scans; and `nidle` (harts waiting for work) lets
+  `wake_one` skip its walk. Each count is kept where the state changes
+  (`Proc::ready`, `schedule`, `call`, `receive`, `idle`); pick falls back
+  to "none ready" if a walk ever finds nothing, which no test did.
+- **memcpy moves 27 words a step**, then words, then trytes. Copies
+  between processes (`copy_mem`) are about a fifth of all steps in the
+  benchmark: the data a pipeline moves, each block copied by the file
+  server, the pipe server and the kernel.
+- **Smaller things.** The kernel globals' accessors are inlined (each
+  was a call that split a word into halves); `unref` walks descriptors
+  by pointer rather than through a `Map<Range>` iterator, comparing
+  them as small numbers.
+
+The benchmark takes 731.1 million steps instead of stage 7's 895.1
+million (−18%), and below the 810 million of the assembly kernel
+before the port. The kernel's code is 25,100 trytes (24,300 before).
+No test budget changed.

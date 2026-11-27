@@ -1,6 +1,6 @@
 # Kernel console output, which is also the kernel's log: every code point
 # the kernel prints is kept in a page of its own (log_base), the last
-# LOG_SIZE of them, for SYS_LOG (info.s) to read back, as Unix's dmesg
+# LOG_SIZE of them, for SYS_LOG (info.rs) to read back, as Unix's dmesg
 # reads the kernel's message buffer. Each helper clobbers only a0 and
 # t0..t5.
 

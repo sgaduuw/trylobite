@@ -3,8 +3,7 @@
 //! process in its record, which stays as ST_ZOMBIE until its parent
 //! waits for it. How a process ended is kept in its saved a0
 //! (WAIT_EXITED or WAIT_FAULTED) and a1 (the code or the cause): the
-//! very registers its parent's wait returns. kernel/wait.s keeps the
-//! stubs.
+//! very registers its parent's wait returns.
 
 use crate::kdata;
 use crate::layout::*;
@@ -100,7 +99,7 @@ fn kill(p: Proc) -> Word {
     }
 }
 
-/// Whether process `p` drives a device (drives_any in kernel/devices.s).
+/// Whether process `p` drives a device.
 pub fn drives_any(p: Proc) -> bool {
     let me = p.addr_word();
     (0..NSRC).any(|k| load_at(kdata::drivers_base(), 3 * k) == me)

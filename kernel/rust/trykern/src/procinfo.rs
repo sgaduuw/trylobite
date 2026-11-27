@@ -1,7 +1,6 @@
 //! Processes as system tools see them: what each is (proc, name), and
 //! waiting for the clock (sleep, alarm). The kernel keeps a name and a
 //! count of user-mode ticks in each record for this; the tools format.
-//! kernel/proc.s keeps the stubs.
 
 use crate::layout::*;
 use crate::mem::uva;

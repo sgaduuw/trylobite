@@ -78,7 +78,7 @@ pub fn names_base() -> *mut u8 {
     (&raw const names).cast_mut()
 }
 
-/// Each interrupt source's driver's record, or 0: NSRC words (devices.s).
+/// Each interrupt source's driver's record, or 0: NSRC words (devices.rs).
 pub fn drivers_base() -> *mut u8 {
     (&raw const drivers).cast_mut()
 }

@@ -19,7 +19,7 @@ impl Proc {
     }
 
     /// Process `pid`'s record if it is alive: neither a free slot nor
-    /// ended (proc_of in kernel/ipc.s).
+    /// ended.
     pub fn alive(pid: Word) -> Option<Proc> {
         if pid < 0 || pid >= NPROC {
             return None;
@@ -107,7 +107,7 @@ impl Proc {
     }
 
     /// Wake it if it sleeps in `state`, to run its system call again
-    /// (PCB_RETRY): rouse in kernel/ipc.s for ST_RECEIVE.
+    /// (PCB_RETRY): rouse, for ST_RECEIVE.
     pub fn retry_if(self, state: Word) {
         if self.is(state) {
             self.set(PCB_RETRY, 1);

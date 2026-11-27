@@ -75,7 +75,7 @@ fn register(p: Proc) -> Word {
 /// so it changes nothing before it finds the name. With LOOKUP_WHILE it
 /// stops waiting once process pid has ended, or if it never was: init
 /// waits so for a server it has just started, which may end before it
-/// registers. 1: it sleeps, and kernel/names.s schedules.
+/// registers. 1: it sleeps, and the dispatch schedules.
 #[unsafe(no_mangle)]
 pub extern "C" fn rk_sys_lookup(p: *mut u8) -> i32 {
     let p = Proc(p);

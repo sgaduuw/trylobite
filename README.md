@@ -406,20 +406,12 @@ emulator, so trylobite has never run on hardware.
 | `firmware/boot.s` | ring +1: delegate exceptions, enter the kernel |
 | `kernel/entry.s` | kernel start: traps, process table, timer |
 | `kernel/trap.s` | trap entry and exit, faults, kills, panics |
-| `kernel/syscall.s` | the system calls: which routine each number goes to, and those still in assembly |
+| `kernel/syscall.s` | the system-call trap: the Rust picks the routine (`syscall.rs`), then resume, schedule or release |
 | `kernel/sched.s` | round-robin scheduling (picking in Rust), idling, halting |
-| `kernel/mm.s` | the page allocator, `spawn`, `spawnw`, `window`, `brk`, `phys` and releasing a process's pages, calling Rust |
-| `kernel/wait.s` | `wait`, `kill`, and what happens to a process once it has ended, calling Rust |
-| `kernel/ipc.s` | messages: `send`, `recv`, and for servers `call`, `receive`, `reply`, `copyin`, `copyout`, `notify`, calling Rust |
-| `kernel/names.s` | the server name registry: `register`, `lookup`, calling Rust |
-| `kernel/desc.s` | descriptors: `read`, `write`, `iocall`, `close`, `dup2`, `give`, calling Rust |
-| `kernel/devices.s` | `drive` and `arm`, calling Rust, which also passes device interrupts to their drivers |
 | `kernel/harts.s` | a hart leaving; starting harts, hot-plug and waking an idle one are Rust |
 | `kernel/console.s` | the kernel's own log on the console, kept in a page for `dmesg` |
-| `kernel/info.s` | the log and the machine, for system tools: `log`, `info`, calling Rust |
 | `kernel/rust/trykern` | the kernel's Rust part, a crate with a module per subsystem (the boot report is its `boot`); `tools/kernel.py` builds it into `kernel/trykern.s` |
 | `kernel/rt.s` | what the Rust part calls that Rust does not write: `abort`, `memcpy` (a word at a time where it can) and the rest |
-| `kernel/proc.s` | processes, for system tools: `proc`, `name`, `sleep`; and `alarm`, calling Rust |
 | `kernel/lock.s` | the kernel lock |
 | `kernel/data.s` | the process table, buffers, messages |
 | `kernel/pagetables.s` | the boot address space and the kernel's shared leaf table |

@@ -774,7 +774,7 @@
                                           # s, which it drives, has interrupted
                                           # since receive last told it
         .equ  PCB_RETRY,  129             # 1: run its system call again when it
-                                          # next runs (ipc.s wakes a server so)
+                                          # next runs (ipc.rs wakes a server so)
         .equ  PCB_PENDING, 135            # 1 when a notice may wait for receive
                                           # (PCB_IRQS, PCB_RANG, PCB_CLOSED,
                                           # PCB_SIGNALS, PCB_NOTES): 0 lets it
