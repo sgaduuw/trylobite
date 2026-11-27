@@ -11,7 +11,7 @@
         .equ  P_FREE, P_PROG0 + NPROG     # pages from here to the end of RAM are free
         .include "../firmware/boot.s"            # the boot page, from address 0
 
-        # Code from the bottom of its page: loaded at a physical address, run
+        # Code from the bottom of its first page (NKCODE of them): loaded at a physical address, run
         # (and labelled) at the virtual one, KOFF lower.
         .section kernel, P_KCODE * PAGE - 9840, P_KCODE * PAGE - 9840 - KOFF
         .gp   kgp
@@ -38,7 +38,7 @@
         # kernel section, its data at the end of the data section.
         .include "../kernel/trykern.s"
 kcode_end:
-        .assert kcode_end <= P_KCODE * PAGE + 9842 - KOFF, "the kernel's code runs off its page"
+        .assert kcode_end <= (P_KCODE + NKCODE - 1) * PAGE + 9842 - KOFF, "the kernel's code runs off its NKCODE pages"
         .section kdata
 kdata_end:
         .assert kdata_end + KSTACK_ROOM <= kstack_top, "kernel data runs into the kernel stack: shrink the process table (NPROC)"

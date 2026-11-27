@@ -1776,3 +1776,17 @@ What was decided along the way:
   the kernel's code has one page; `include/kernel.s` now checks that it
   fits. No speed budget during the port (Eelco); the benchmark, which
   makes neither call, is unchanged at 810,004,668 steps.
+
+### 2026-11-27 · Kernel code over several pages
+
+Rust code is many times the size of the assembly it replaces, and the
+kernel's code had one page, 9,000 of its 19,683 trytes already used
+after the first module. The code now has `NKCODE` (3) physical pages
+from `P_KCODE`, with the data page moved first (page 1), and `KOFF`
+chosen so that they run just below the coprocessor's page: data at
+virtual page −19, code at −18 to −16. The boot tables, the program
+images and the free pages each start two pages later, so a 40-page
+machine has 29 free pages instead of 31. Kernel addresses stay well
+within ±2³¹ (code near −364,000). Three pages should hold the port for
+a while; raising `NKCODE` later means remapping the kernel's leaf table,
+which `kernel/pagetables.s` asserts.

@@ -13,5 +13,5 @@ crate-type = ["staticlib"]
 
 [profile.release]
 panic = "abort"
-# Small over fast: the kernel's code has one page (include/kernel.s).
+# Small over fast: the kernel's code has NKCODE pages (include/layout.s).
 opt-level = "z"

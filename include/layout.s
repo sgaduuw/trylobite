@@ -13,12 +13,13 @@
 # --- physical memory -----------------------------------------------------------
 # Page 0 is the boot page; positive pages are RAM; negative ones devices.
 
-        .equ  P_KCODE,    1               # kernel code
-        .equ  P_KDATA,    2               # kernel data and stack
-        .equ  P_BOOTROOT, 3               # the boot address space's root table
-        .equ  P_BOOTMID,  4               # ... and its mid table
-        .equ  P_KLEAF,    5               # the kernel's leaf table, shared by all
-        .equ  P_PROG0,    6               # program images, as loaded: program n's
+        .equ  P_KDATA,    1               # kernel data and stack
+        .equ  P_KCODE,    2               # kernel code, NKCODE pages from here
+        .equ  NKCODE,     3               # (include/kernel.s checks it fits)
+        .equ  P_BOOTROOT, P_KCODE + NKCODE   # the boot address space's root table
+        .equ  P_BOOTMID,  P_BOOTROOT + 1  # ... and its mid table
+        .equ  P_KLEAF,    P_BOOTROOT + 2  # the kernel's leaf table, shared by all
+        .equ  P_PROG0,    P_BOOTROOT + 3  # program images, as loaded: program n's
                                           # at page P_PROG0 + n, NPROG of them, as
                                           # the build declares. The kernel copies
                                           # one into a fresh page for each process
@@ -46,7 +47,10 @@
                                           # RAM past it goes unused
         .assert MEM_MAX == (DMAP_SUPERS - 1) * SUPER_PAGES + (SUPER_PAGES - 1) / 2, "MEM_MAX is not the direct map's last page"
         .assert DMAP - SUPER / 2 > -2147483648, "the direct map reaches below -2^31"
-        .equ  KOFF, 4 * PAGE              # kernel code and data: physical - KOFF
+        .equ  KOFF, (P_KCODE + NKCODE + 15) * PAGE   # kernel data and code: virtual =
+                                          # physical - KOFF, so pages -19 (data) and
+                                          # -18 to -16 (code), just below the
+                                          # coprocessor's -15
         .equ  V_DISK,    -9 * PAGE        # block device
         .equ  V_IRQ,     -8 * PAGE        # interrupt controller
         .equ  V_HARTS,   -7 * PAGE        # hart controller: every hart's slot

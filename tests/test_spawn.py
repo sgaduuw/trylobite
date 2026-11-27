@@ -62,14 +62,14 @@ count:  .word 0
 
 
 def test_spawn_fails_when_memory_runs_out():
-    # Pages 9..16 hold two processes of four pages: init and one child.
+    # Seven free pages, one for the log: room for init, not a child.
     init = f"""
         {spawn(1)}
         {spawn(1)}
         mv    a1, a0
         {EXIT}
     """
-    result = run(init, WAIT, ram_pages=16)
+    result = run(init, WAIT, ram_pages=P_FREE + 7)
     assert result.code_of(0) == -3
 
 
@@ -103,7 +103,8 @@ def test_exited_processes_give_their_memory_back():
         blt   s0, t0, 1b
         {DONE}
     """
-    result = run(init, DONE, ram_pages=17, max_steps=3_000_000)  # 16 + the log
+    pages = P_FREE + 2 * PAGES_PER_PROCESS  # init, one child and the log
+    result = run(init, DONE, ram_pages=pages, max_steps=3_000_000)
     assert result.exit_code == 0
     assert sum(1 for p, _ in result.exits() if p != 0) == 4  # every child exited
 
