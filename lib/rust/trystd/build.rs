@@ -3,7 +3,8 @@
 //! parentheses, as a Rust constant, so that the library repeats none of
 //! the kernel's numbers (AGENTS.md). One that fits an i32 is an i32, any
 //! other an i64; one that needs a name from a build (such as NPROG) is
-//! left out.
+//! left out. The kernel's crate (kernel/rust/trykern) shares this script
+//! and gets every one as an i64, since it works in words.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -13,6 +14,7 @@ fn main() {
     let layout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../include/layout.s");
     println!("cargo::rerun-if-changed={}", layout.display());
     let text = std::fs::read_to_string(&layout).expect("include/layout.s");
+    let words = std::env::var("CARGO_PKG_NAME").is_ok_and(|name| name == "trykern");
     let mut names: HashMap<String, i64> = HashMap::new();
     let mut out = String::from("// Written by build.rs from include/layout.s.\n");
     for line in text.lines() {
@@ -33,7 +35,7 @@ fn main() {
             continue;
         };
         names.insert(name.to_string(), value);
-        let ty = if i32::try_from(value).is_ok() {
+        let ty = if !words && i32::try_from(value).is_ok() {
             "i32"
         } else {
             "i64"

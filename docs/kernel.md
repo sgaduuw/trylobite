@@ -178,7 +178,7 @@ until the table of `NPROC` (27) wraps around.
 `bin/` has tools that look at the system as Unix's do: `ps`, `top`,
 `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep` and `df`. The kernel
 only reports; the tools read it with a few calls and format it
-(`kernel/info.s`, `kernel/proc.s`), and `df` asks the file server
+(`kernel/rust/trykern/src/info.rs`, `kernel/proc.s`), and `df` asks the file server
 (`FS_STATFS`, docs/filesystem.md).
 
 **The log.** Everything the kernel prints (its own lines, and `putc` and
@@ -599,3 +599,46 @@ tools/fs.py put disk.img README.md docs
 printf 'ls\nls bin\ncat docs/README.md\nwrite docs/motd hello\nhello > docs/hi\n' > session.txt
 detrytus run shell.s --ram-pages 81 --input session.txt --disk disk.img
 ```
+
+## Rust in the kernel
+
+The kernel is being moved from assembly to Rust a subsystem at a time,
+with every test passing at each step. The Rust part is one crate,
+[`kernel/rust/trykern`](../kernel/rust/trykern), a module per
+subsystem as `kernel/` has a file per subsystem; so far `info` (the
+`log` and `info` calls above), with `mem` (where a process's address is
+in the kernel), `proc` (a process's record), `kdata` (the kernel's
+globals) and `word` under it. `make kernel` (`tools/kernel.py`) builds
+it with cargo for detrytus' Rust target and translates it with `detrytus
+ll` (detrytus docs/rust.md) into `kernel/trykern.s`, which
+`include/kernel.s` includes: its code in the kernel's code page, its
+data after the kernel's own data. It is a build product, not kept in
+the repository; the tests build it before they start.
+
+Three things make kernel Rust different from a program's:
+
+- **Its addresses are below 0.** The kernel runs near −68,900, its
+  devices from page −9 to −1 and the direct map from `DMAP`, all within
+  ±2³¹; `ll --signed-pointers` makes Rust's pointers signed addresses
+  that reach them.
+- **It works in words.** Saved registers, records, page-table entries
+  and system-call arguments are 27-trit words, which Rust has no type
+  for. A word is an `i64` on the Rust side, read and written with
+  detrytus' `lw` and `sw` builtins (`word.rs`); records are reached by
+  their `PCB_` offsets, which stay defined in `include/layout.s`, and
+  every number comes from that file (trystd's `build.rs`).
+- **It has no `main`.** The assembly calls functions named `rk_*`, which
+  are the roots `ll` keeps with what they reach. A system call's stub
+  passes the caller's record, `mv a0, s0; call rk_sys_info; j resume`,
+  and the Rust leaves the result in the record for `resume` to return.
+  Rust keeps `s0` to `s8`, `gp` and `tp`, so the kernel's registers
+  survive, and calls the assembly routines it still needs, such as
+  `harts_present`, by name. A panic ends in `abort` (`kernel/rt.s`), a
+  kernel panic.
+
+Rust costs room: `info.s`'s two calls were about 180 trytes of
+assembly and are about 3,100 of Rust, mostly 64-bit arithmetic on words
+done 32 bits at a time (the 64-bit division and multiplication helpers
+among them, which later modules share). The kernel's code grew from
+about 5,900 trytes to 9,000 of its page's 19,683. Speed and size are
+left for a pass after the port.

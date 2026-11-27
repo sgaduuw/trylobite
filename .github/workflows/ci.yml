@@ -19,6 +19,8 @@ jobs:
       - name: Install detrytus
         run: tools/install-detrytus
       - run: uv sync
+      - name: Build the kernel's Rust
+        run: make kernel
       - name: Lint
         run: uv run ruff check tests tools
       - name: Format

@@ -76,11 +76,12 @@ msg_ticks:    .string " timer interrupts\n"
 msg_deadlock: .string "trylobite: deadlock, every process is waiting\n"
 msg_panic:    .string "trylobite: panic, trap in the kernel, cause "
 msg_noinit:   .string "trylobite: cannot start init\n"
+msg_rpanic:   .string "trylobite: panic in the kernel's Rust\n"
 msg_hart:     .string "trylobite: hart "
 msg_joined:   .string " joined\n"
 msg_left:     .string " left\n"
 
 # The stack grows down from kstack_top towards the data: keep it room.
         .equ  KSTACK_ROOM, 2187        # trytes, far more than the deepest call
-kdata_end:
-        .assert kdata_end + KSTACK_ROOM <= kstack_top, "kernel data runs into the kernel stack: shrink the process table (NPROC)"
+                                       # (include/kernel.s checks it, after the
+                                       # Rust part's data)

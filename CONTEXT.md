@@ -1742,3 +1742,37 @@ Eelco chose this over pointers a whole word wide, which every Rust
 program would pay for; reaching more RAM later means mapping it in on
 demand. Spawn writes sixteen mid entries instead of four root ones.
 
+
+### 2026-11-27 · The first Rust in the kernel
+
+The port to Rust (stage 2 of its plan) starts with the plumbing and one
+leaf: `log` and `info` (`kernel/info.s`) are now Rust, in
+`kernel/rust/trykern`, and `kernel/info.s` keeps only their stubs.
+What was decided along the way:
+
+- **One crate, a module per subsystem** (Eelco): subsystems call each
+  other in cycles, which crates cannot, and calls between crates are
+  not inlined.
+- **A word is an `i64`** in Rust (Eelco chose a word type), loaded and
+  stored with detrytus' `lw`/`sw` builtins; pointers are signed 32-bit
+  addresses (`ll --signed-pointers`, Eelco's option (c)), which reach
+  everything the kernel uses since the direct map moved within ±2³¹.
+- **The record layout stays in assembly.** Rust reads `PCB_` fields by
+  offset, so the assembly and the tests keep using the same numbers
+  while both languages share the record.
+- **The Rust leaves the result in the record.** A stub passes `s0`,
+  calls `rk_*` and jumps to `resume`, so no word has to cross back in
+  two 32-bit halves.
+- **`kernel/trykern.s` is built, not committed.** Its text depends on
+  the rustc version (CI installs the latest stable), so a committed
+  copy would go stale with every toolchain; `make kernel` and the tests
+  build it, and building the kernel now needs the Rust toolchain the
+  programs already did.
+- **`uva` exists twice for now.** The assembly callers keep values in
+  `t3`..`t5` across it, which a Rust function may change, so Rust has
+  its own (`mem.rs`) until `ipc.s` is ported.
+- **Small over fast** (`opt-level = "z"`): Rust code is about 17 times
+  the size of the assembly it replaces (180 trytes became 3,100), and
+  the kernel's code has one page; `include/kernel.s` now checks that it
+  fits. No speed budget during the port (Eelco); the benchmark, which
+  makes neither call, is unchanged at 810,004,668 steps.
