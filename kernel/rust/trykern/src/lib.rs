@@ -7,13 +7,16 @@
 
 #![no_std]
 
+mod desc;
 mod info;
 mod kdata;
 mod mem;
-mod proc;
 mod names;
-mod desc;
+mod proc;
+mod procinfo;
+mod sched;
 mod trytes;
+mod wait;
 mod word;
 
 /// Every `.equ` of include/layout.s that needs no build's names, each

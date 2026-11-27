@@ -86,9 +86,7 @@ fn info(p: Proc) -> Word {
     store_at(b, SI_PAGES, read::ram_pages());
     store_at(b, SI_FREE, read::free_count());
     store_at(b, SI_NPROC, NPROC);
-    let in_use = (0..NPROC)
-        .filter(|i| Proc(kdata::procs_base().wrapping_offset((i * PCB_SIZE) as isize)).get(PCB_STATE) != 0)
-        .count();
+    let in_use = Proc::table().filter(|q| q.state() != 0).count();
     store_at(b, SI_PROCS, in_use as Word);
     store_at(b, SI_HARTS, unsafe { harts_present() } as Word);
     // The version, 0-padded; the last is always the end.
