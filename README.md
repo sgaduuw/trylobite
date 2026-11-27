@@ -407,11 +407,11 @@ emulator, so trylobite has never run on hardware.
 | `kernel/entry.s` | kernel start: traps, process table, timer |
 | `kernel/boot.s` | the boot report: what the kernel found, before init starts |
 | `kernel/trap.s` | trap entry and exit, faults, kills, panics |
-| `kernel/syscall.s` | the system calls |
+| `kernel/syscall.s` | the system calls: which routine each number goes to, and those still in assembly |
 | `kernel/sched.s` | round-robin scheduling (picking in Rust), idling, halting |
 | `kernel/mm.s` | the page allocator, spawning and releasing processes |
 | `kernel/wait.s` | `wait`, `kill`, and what happens to a process once it has ended, calling Rust |
-| `kernel/ipc.s` | messages for servers: `call`, `receive`, `reply`, `copyin`, `copyout`, `notify` |
+| `kernel/ipc.s` | messages: `send`, `recv`, and for servers `call`, `receive`, `reply`, `copyin`, `copyout`, `notify`, calling Rust |
 | `kernel/names.s` | the server name registry: `register`, `lookup`, calling Rust |
 | `kernel/desc.s` | descriptors: `read`, `write`, `iocall`, `close`, `dup2`, `give`, calling Rust |
 | `kernel/devices.s` | device interrupts, and the drivers that take them |
@@ -419,7 +419,7 @@ emulator, so trylobite has never run on hardware.
 | `kernel/console.s` | the kernel's own log on the console, kept in a page for `dmesg` |
 | `kernel/info.s` | the log and the machine, for system tools: `log`, `info`, calling Rust |
 | `kernel/rust/trykern` | the kernel's Rust part, a crate with a module per subsystem; `tools/kernel.py` builds it into `kernel/trykern.s` |
-| `kernel/rt.s` | what the Rust part calls that Rust does not write: `abort`, `memcpy` and the rest |
+| `kernel/rt.s` | what the Rust part calls that Rust does not write: `abort`, `memcpy` (a word at a time where it can) and the rest |
 | `kernel/proc.s` | processes, for system tools: `proc`, `name`, `sleep`; and `alarm`, calling Rust |
 | `kernel/lock.s` | the kernel lock |
 | `kernel/data.s` | the process table, buffers, messages |

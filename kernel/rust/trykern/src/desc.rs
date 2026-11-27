@@ -10,6 +10,7 @@
 //! A descriptor is DESC trytes of the record from PCB_DESCS, three words:
 //! the server plus 1 (0: free), the handle, and its flags.
 
+use crate::ipc;
 use crate::layout::*;
 use crate::proc::Proc;
 use crate::word::{Word, load, load_at, store_at};
@@ -65,20 +66,16 @@ fn desc_of_any(p: Proc, fd: Word) -> Result<Desc, Word> {
     }
 }
 
-/// The two outcomes of a system call written here: resume the caller
-/// with its PCB_A0, or (1) go on as sys_call (kernel/desc.s).
-const RESUME: i32 = 0;
-const CALL: i32 = 1;
-
+/// Resume the caller with `r` as its result (ipc::RESUME).
 fn done(p: Proc, r: Word) -> i32 {
     p.set(PCB_A0, r);
-    RESUME
+    ipc::RESUME
 }
 
 /// read(fd, buffer, n), write(fd, buffer, n) and iocall(fd, op, x, y):
 /// call fd's server with the IO_ operation, the handle, and the two
-/// arguments. The call goes on as sys_call, from the rewritten saved
-/// registers, so the caller sees what a call leaves.
+/// arguments. The call goes on as ipc::call, from the rewritten saved
+/// registers, so the caller sees what a call leaves: 1, it sleeps.
 #[unsafe(no_mangle)]
 pub extern "C" fn rk_sys_read(p: *mut u8) -> i32 {
     let p = Proc(p);
@@ -111,7 +108,7 @@ fn io(p: Proc, op: Word, x: Word, y: Word) -> i32 {
     p.set(PCB_A3, d.handle());
     p.set(PCB_A2, op);
     p.set(PCB_A1, d.server() - 1);
-    CALL
+    ipc::call(p)
 }
 
 /// close(fd)
@@ -176,10 +173,7 @@ fn give(p: Proc) -> Word {
     if !(0..NHANDLE).contains(&handle) {
         return E_INVAL;
     }
-    // client_of in kernel/ipc.s: alive, and waiting for this one's reply.
-    let Some(client) =
-        Proc::alive(p.get(PCB_A1)).filter(|c| c.is(ST_REPLY) && c.get(PCB_PEER) == p.pid())
-    else {
+    let Some(client) = ipc::client_of(p, p.get(PCB_A1)) else {
         return E_NOPROC;
     };
     let Some(fd) = (0..NDESC).find(|&fd| Desc::of(client, fd).server() == 0) else {

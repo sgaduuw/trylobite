@@ -1873,3 +1873,44 @@ takes 870.3 million steps instead of stage 3's 819.8 million (+6.2%),
 left for the speed pass after the port. Test sessions take about as
 many steps as before: a shell session 1.84 million on one hart and 1.87
 million on three, and no test budget changed.
+
+## Messages in Rust (2026-11-27)
+
+Stage 5 of the port moved kernel/ipc.s into trykern's `ipc` module:
+`send` and `recv`, `call`, `receive`, `reply`, `copyin`, `copyout` and
+`notify`, what servers hear when a process ends (`rk_ipc_ended`, which
+bury now calls first), and copying between processes (`copy_mem`).
+
+- **A descriptor call no longer goes back through the assembly.** read,
+  write and iocall rewrite the saved registers and call `ipc::call`
+  themselves; their stubs schedule when it says the caller sleeps.
+- **What the assembly still calls stays where its callers are.** `uva`
+  moved to kernel/mm.s (spawnw and phys use it) and `rouse` to
+  kernel/devices.s (interrupts), each until its file is ported; `mem::uva`
+  and `Proc::retry_if` are the Rust's. mm.s's `copy_mem` and syscall.s's
+  `client_of` are now small wrappers around `rk_copy_mem` and
+  `rk_client_of`.
+- **The dispatch stays assembly.** syscall.s still chooses the routine
+  for each number: most are stubs into Rust, and the rest (putc, puts,
+  exit, spawn, spawnw, the device calls, brk) are mm, console and device
+  work for the later stages. A Rust dispatch can come when every call
+  is Rust.
+- **Copies are the hot path.** The first version took a 15-command
+  pipeline session from 7.0 million steps to 23.8 million. What fixed it:
+  `memcpy` in kernel/rt.s copies nine words at a time when both ends are
+  at a word's first tryte, as copy_mem did in assembly; a copy that fits
+  in one page on each side is one look and one copy; `mem::user_at`
+  returns only the address (an `Option` of an address and a length comes
+  back through memory, a limb at a time), with `page_left` beside it and
+  the process's own page found without a division; `client_of` compares
+  records instead of dividing for a process number; receive's flag scans
+  return an `i32` with NONE, not an `Option<Word>`, and walk pointers,
+  as pick does.
+
+The kernel's code grew from 15,500 trytes to 18,700. The benchmark takes
+895.9 million steps instead of stage 4's 870.3 million (+2.9%). Reading
+two files at once, which copies a few trytes at a time, takes 29.8
+million steps instead of 25.0 million, under its test's 30 million; the
+word copies of `reply` and `receive` are the rest of it, each word split
+into limbs and joined again, for the speed pass after the port. No test
+budget changed.

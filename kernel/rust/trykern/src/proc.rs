@@ -25,7 +25,7 @@ impl Proc {
     /// Process `pid`'s record if it is alive: neither a free slot nor
     /// ended (proc_of in kernel/ipc.s).
     pub fn alive(pid: Word) -> Option<Proc> {
-        if !(0..NPROC).contains(&pid) {
+        if pid < 0 || pid >= NPROC {
             return None;
         }
         let p = Proc::of(pid);

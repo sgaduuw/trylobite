@@ -221,7 +221,7 @@ pipe.
 - **Pipes are the pipe server's**, `user/piped.s` (labels `pp_`; tests
   pass `pipes=True` and write `CALL_PIPE`).
 - **A server asleep in `receive` runs it again when woken**
-  (`PCB_RETRY`, `kernel/ipc.s`), so `receive` must change nothing
+  (`PCB_RETRY`, `kernel/rust/trykern/src/ipc.rs`), so `receive` must change nothing
   before it finds work. Arguments are read from the saved registers,
   `a3` to `a5` included (`PCB_A3`..`PCB_A5`).
 - **The kernel is being ported to Rust**, a subsystem at a time

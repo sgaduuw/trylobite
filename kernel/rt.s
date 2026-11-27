@@ -30,11 +30,44 @@ rk_restore:
         addi  sp, sp, 30
         ret
 
-# memcpy(dst, src, n) and memmove(dst, src, n): dst.
+# memcpy(dst, src, n) and memmove(dst, src, n): dst. Both at a word's
+# first tryte (its centre a multiple of 3), nine words at a time while
+# that many are left, then trytes one by one: most of what servers copy
+# between processes is whole disk blocks (ipc::copy_mem).
 memmove:
         blt   a1, a0, 3f               # dst above src: copy from the end
 memcpy: mv    t0, a0
         add   t2, a1, a2
+        addi  t1, a0, 1
+        li    t3, 3
+        rem   t1, t1, t3
+        bnez  t1, 1f
+        addi  t1, a1, 1
+        rem   t1, t1, t3
+        bnez  t1, 1f
+        addi  t3, t2, -26              # t3: nine words fit while src < t3
+5:      bge   a1, t3, 1f
+        lw    t1, 1(a1)
+        sw    t1, 1(t0)
+        lw    t1, 4(a1)
+        sw    t1, 4(t0)
+        lw    t1, 7(a1)
+        sw    t1, 7(t0)
+        lw    t1, 10(a1)
+        sw    t1, 10(t0)
+        lw    t1, 13(a1)
+        sw    t1, 13(t0)
+        lw    t1, 16(a1)
+        sw    t1, 16(t0)
+        lw    t1, 19(a1)
+        sw    t1, 19(t0)
+        lw    t1, 22(a1)
+        sw    t1, 22(t0)
+        lw    t1, 25(a1)
+        sw    t1, 25(t0)
+        addi  a1, a1, 27
+        addi  t0, t0, 27
+        j     5b
 1:      bge   a1, t2, 2f
         lt    t1, 0(a1)
         st    t1, 0(t0)
