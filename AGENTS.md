@@ -196,7 +196,7 @@ pipe.
   kernel code prints only through `kout` (`kernel/console.s`), never by
   storing to `V_CONSOLE` itself.
 - **System tools read the kernel, the kernel only reports**
-  (`kernel/rust/trykern/src/info.rs`, `kernel/proc.s`): `SYS_INFO`,
+  (`kernel/rust/trykern/src/info.rs` and `procinfo.rs`): `SYS_INFO`,
   `SYS_PROC` and `SYS_LOG` fill a caller's buffer, and the bin/ tools
   format. A
   program of the kernel image calls `SYS_NAME` first thing, so ps can
@@ -251,8 +251,13 @@ pipe.
   `kernel/rt.s`), and passes no negative number: Rust reads an `i32` as
   its unsigned value. A system call that may not resume says so in its
   result (`rk_sys_lookup`: 1 to schedule; `rk_sys_read`: 1 to go on as
-  `sys_call`). A `match` on a word becomes a 64-bit switch, which `ll`
-  refuses: match on `word::small(w)`. Name strings are trytes, not
+  `sys_call`). Arithmetic on a word is 64-bit, done 32 bits at a time,
+  and a 64-bit multiplication, division or remainder is a helper call:
+  work out indices and offsets in `i32` (`Proc::of`, `Proc::pid`), as
+  the scheduler runs them on every pick. A word known to be small, such
+  as a state, is read with `word::load_small_at` (`detrytus.lw32`) and
+  compared as an `i32` (`Proc::is`); loops on every switch walk
+  pointers, without wrapping (`rk_pick`). Name strings are trytes, not
   bytes (`trytes.rs`). Avoid `flat_map` (CONTEXT.md, 2026-11-27).
   The crate is built with `opt-level = "z"`: the kernel's code
   has `NKCODE` pages (`include/layout.s`), and `include/kernel.s`

@@ -9,8 +9,10 @@ schedule:
         li    t0, ST_READY             # preempted or yielded: it can run again
         sw    t0, PCB_STATE(s0)
 
-# pick: run the next ready process after s0, any record: s0's turn last;
-# or leave, if the platform asked this hart to go.
+# pick: run the next ready process after s0, any record: s0's turn last
+# (rk_pick, kernel/rust/trykern/src/sched.rs, which also wakes the
+# sleepers whose time has come); or leave, if the platform asked this
+# hart to go.
 pick:
         addi  t0, tp, HART_MAX
         li    t1, 3
@@ -19,66 +21,16 @@ pick:
         add   t0, t0, t1
         lw    t1, 0(t0)
         bnez  t1, hart_leave
-        lw    t0, sleepers
-        beqz  t0, 0f
-        call  wake_sleepers
-0:      la    t2, procs
-        li    t0, NPROC * PCB_SIZE
-        add   t3, t2, t0               # t3: just past the table
-        mv    s1, s0
-        li    t4, NPROC                # look at every process, s0's turn last
-1:      addi  s1, s1, PCB_SIZE
-        blt   s1, t3, 2f
-        mv    s1, t2                   # wrap around
-2:      lw    t0, PCB_STATE(s1)
-        li    t1, ST_READY
-        beq   t0, t1, 3f
-        addi  t4, t4, -1
-        bnez  t4, 1b
-
-        # Nobody is ready. A process running on another hart can still
-        # send or spawn, and an armed device can still wake its driver:
-        # wait for work. A device is worth waiting for only while some
-        # process waits on something (a call, a child, a name, a message):
-        # servers all asleep in receive have nobody left to serve, so a
-        # network server listening for frames does not keep the machine
-        # on by itself.
-        lw    t0, irq_armed
-        beqz  t0, 8f
-        mv    s1, t2
-7:      lw    t0, PCB_STATE(s1)
-        bgez  t0, 9f                   # free, or running (checked below)
-        li    t1, ST_RECEIVE
-        beq   t0, t1, 9f
-        li    t1, ST_ZOMBIE
-        bne   t0, t1, idle             # it waits
-9:      addi  s1, s1, PCB_SIZE
-        blt   s1, t3, 7b
-8:
-        lw    t0, sleepers             # the clock will wake a sleeper
-        bnez  t0, idle
-        mv    s1, t2
-6:      lw    t0, PCB_STATE(s1)
-        li    t1, ST_RUNNING
-        beq   t0, t1, idle
-        addi  s1, s1, PCB_SIZE
-        blt   s1, t3, 6b
-
-        # Nothing runs anywhere. Someone still waiting means nobody will
-        # wake them.
-        mv    s1, t2
-4:      lw    t0, PCB_STATE(s1)
-        li    t1, ST_RECV
-        beq   t0, t1, 5f
-        li    t1, ST_CALL              # a server asleep in receive is not
-        beq   t0, t1, 5f               # stuck: it has nobody left to serve
-        li    t1, ST_REPLY
-        beq   t0, t1, 5f
-        li    t1, ST_LOOKUP            # a name nobody is left to register
-        beq   t0, t1, 5f
-        addi  s1, s1, PCB_SIZE
-        blt   s1, t3, 4b
-        la    a0, msg_done
+        mv    a0, s0                   # the Rust picks (sched.rs)
+        call  rk_pick
+        beqz  a0, 1f
+        mv    s0, a0                   # it is ST_RUNNING now
+        j     resume
+1:      call  rk_stuck                 # nobody is ready: why?
+        beqz  a0, idle                 # someone may yet wake
+        li    t0, 1
+        bne   a0, t0, 5f
+        la    a0, msg_done             # every process has ended
         call  kputs
         lw    a0, ticks
         call  kputn
@@ -86,15 +38,10 @@ pick:
         call  kputs
         li    a0, 0
         j     halt
-5:      la    a0, msg_deadlock
+5:      la    a0, msg_deadlock         # some wait, and nobody can wake them
         call  kputs
         li    a0, 1
         j     halt
-
-3:      li    t0, ST_RUNNING
-        sw    t0, PCB_STATE(s1)
-        mv    s0, s1
-        j     resume
 
 # idle: offer this hart for work (wake_one rings its doorbell), let the
 # lock go and wait. The doorbell stays rung while a word waits in this

@@ -179,7 +179,7 @@ until the table of `NPROC` (27) wraps around.
 `bin/` has tools that look at the system as Unix's do: `ps`, `top`,
 `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep` and `df`. The kernel
 only reports; the tools read it with a few calls and format it
-(`kernel/rust/trykern/src/info.rs`, `kernel/proc.s`), and `df` asks the file server
+(`kernel/rust/trykern/src/info.rs` and `procinfo.rs`), and `df` asks the file server
 (`FS_STATFS`, docs/filesystem.md).
 
 **The log.** Everything the kernel prints (its own lines, and `putc` and
@@ -607,8 +607,10 @@ The kernel is being moved from assembly to Rust a subsystem at a time,
 with every test passing at each step. The Rust part is one crate,
 [`kernel/rust/trykern`](../kernel/rust/trykern), a module per
 subsystem as `kernel/` has a file per subsystem; so far `info` (the
-`log` and `info` calls above), `names` (`register` and `lookup`) and
-`desc` (descriptors), with `mem` (where a process's address is in the
+`log` and `info` calls above), `names` (`register` and `lookup`),
+`desc` (descriptors), `procinfo` (`proc`, `name`, `sleep`, `alarm`),
+`wait` (`wait`, `kill`, and burying a process) and `sched` (which
+process runs next, and the sleepers the clock wakes), with `mem` (where a process's address is in the
 kernel), `proc` (a process's record), `kdata` (the kernel's globals),
 `trytes` (strings of trytes, which Rust's bytes are not) and `word`
 under them. `make kernel` (`tools/kernel.py`) builds

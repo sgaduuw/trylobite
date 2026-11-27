@@ -8,6 +8,8 @@ pub type Word = i64;
 unsafe extern "C" {
     #[link_name = "detrytus.lw"]
     fn lw(p: *const u8) -> Word;
+    #[link_name = "detrytus.lw32"]
+    fn lw32(p: *const u8) -> i32;
     #[link_name = "detrytus.sw"]
     fn sw(p: *mut u8, w: Word);
     #[link_name = "detrytus.csrr"]
@@ -28,6 +30,12 @@ pub fn load(p: *const u8) -> Word {
     unsafe { lw(p) }
 }
 
+/// The word `off` trytes from `p`, which must fit an i32 (a state, a
+/// small count): one instruction fewer than the four that split a word.
+pub fn load_small_at(p: *const u8, off: Word) -> i32 {
+    unsafe { lw32(p.wrapping_offset(off as isize)) }
+}
+
 /// Store `w` in the word at `p`, which must be aligned.
 pub fn store(p: *mut u8, w: Word) {
     unsafe { sw(p, w) }
@@ -41,13 +49,6 @@ pub fn load_at(p: *const u8, off: Word) -> Word {
 /// Store `w` in the word `off` trytes from `p`.
 pub fn store_at(p: *mut u8, off: Word, w: Word) {
     store(p.wrapping_offset(off as isize), w)
-}
-
-/// A word to choose among small numbers with: itself as an i32 when it
-/// fits, else i32::MIN. LLVM turns a match on a word into a 64-bit
-/// switch, which detrytus ll does not translate; one on this is 32-bit.
-pub fn small(w: Word) -> i32 {
-    i32::try_from(w).unwrap_or(i32::MIN)
 }
 
 /// The wall clock in ticks.

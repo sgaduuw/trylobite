@@ -4,7 +4,7 @@
 
 use crate::kdata;
 use crate::layout::*;
-use crate::word::{Word, load_at, store_at};
+use crate::word::{Word, load_at, load_small_at, store_at};
 
 unsafe extern "C" {
     /// kernel/harts.s: ring one idle hart, as something became ready.
@@ -18,7 +18,8 @@ pub struct Proc(pub *mut u8);
 impl Proc {
     /// Process `pid`'s record, which must be in the table's range.
     pub fn of(pid: Word) -> Proc {
-        Proc(kdata::procs_base().wrapping_offset((pid * PCB_SIZE) as isize))
+        // In 32 bits: a 64-bit multiplication is a helper call.
+        Proc(kdata::procs_base().wrapping_offset((pid as i32 * PCB_SIZE as i32) as isize))
     }
 
     /// Process `pid`'s record if it is alive: neither a free slot nor
@@ -28,23 +29,46 @@ impl Proc {
             return None;
         }
         let p = Proc::of(pid);
-        let state = p.get(PCB_STATE);
-        (state != ST_EXITED && state != ST_ZOMBIE).then_some(p)
+        (!p.is(ST_EXITED) && !p.is(ST_ZOMBIE)).then_some(p)
     }
 
     /// Every slot of the process table, free ones included.
-    pub fn table() -> impl Iterator<Item = Proc> {
-        (0..NPROC).map(Proc::of)
+    pub fn table() -> Table {
+        let (at, end) = Proc::bounds();
+        Table { at, end }
+    }
+
+    /// The process table's first record and the address just past it.
+    pub fn bounds() -> (*mut u8, *mut u8) {
+        let base = kdata::procs_base();
+        (base, base.wrapping_offset((NPROC * PCB_SIZE) as isize))
     }
 
     /// The process's number.
     pub fn pid(self) -> Word {
-        (self.0 as isize - kdata::procs_base() as isize) as Word / PCB_SIZE
+        ((self.0 as isize - kdata::procs_base() as isize) as i32 / PCB_SIZE as i32) as Word
+    }
+
+    /// The record's address as a word, as the assembly keeps records
+    /// in tables (such as drivers).
+    pub fn addr_word(self) -> Word {
+        self.0 as isize as Word
     }
 
     /// The record's PCB_ word at `field`.
     pub fn get(self, field: Word) -> Word {
         load_at(self.0, field)
+    }
+
+    /// The process's PCB_STATE, read as the small number every state
+    /// is: tables are scanned for states on every switch.
+    pub fn state(self) -> i32 {
+        load_small_at(self.0, PCB_STATE)
+    }
+
+    /// Whether the process is in `state`.
+    pub fn is(self, state: Word) -> bool {
+        self.state() == state as i32
     }
 
     /// Set the record's PCB_ word at `field`.
@@ -72,9 +96,31 @@ impl Proc {
     /// Wake it if it sleeps in `state`, to run its system call again
     /// (PCB_RETRY): rouse in kernel/ipc.s for ST_RECEIVE.
     pub fn retry_if(self, state: Word) {
-        if self.get(PCB_STATE) == state {
+        if self.is(state) {
             self.set(PCB_RETRY, 1);
             self.ready();
         }
+    }
+}
+
+/// The process table's slots in order (Proc::table). Its own iterator,
+/// stepping a pointer and inlined: a range mapped to records was a call
+/// for each slot, in loops pick and the idle check run on every switch.
+pub struct Table {
+    at: *mut u8,
+    end: *mut u8,
+}
+
+impl Iterator for Table {
+    type Item = Proc;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Proc> {
+        if self.at >= self.end {
+            return None;
+        }
+        let p = Proc(self.at);
+        self.at = self.at.wrapping_offset(PCB_SIZE as isize);
+        Some(p)
     }
 }

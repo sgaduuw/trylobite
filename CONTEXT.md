@@ -1814,8 +1814,9 @@ fdflags, and what spawn and bury do with descriptors) are Rust;
   `srv_key` in kernel/data.s went: the name is on the Rust stack.
 - **`rouse` and `proc_of` exist twice**, as `uva` does, until `ipc.s`
   is ported (`Proc::retry_if`, `Proc::alive`).
-- **No `match` on a word**: LLVM makes it a 64-bit `switch`, which
-  `detrytus ll` does not translate yet; `word::small` narrows it first.
+- **No `match` on a word** at first: LLVM makes it a 64-bit `switch`,
+  which `detrytus ll` did not translate, and `word::small` narrowed it.
+  detrytus#78 taught `ll` wide switches, and stage 4 dropped `small`.
 
 - **Plain loops over `flat_map`.** Written as
   `Proc::table().flat_map(Desc::all).any(...)`, the scan for a handle
@@ -1829,3 +1830,46 @@ calls cost more steps: fifteen shell pipelines take 12.0 million steps
 instead of 8.3 million (the test's budget went from 10 to 15 million),
 and the benchmark 819.8 million instead of 810.0 million (+1.2%), left for the
 speed pass after the port (Eelco).
+
+## Scheduling, waiting and processes in Rust (2026-11-27)
+
+Stage 4 of the port moved kernel/sched.s's pick, kernel/wait.s's
+`wait`, `kill` and bury, and kernel/proc.s's `proc`, `name`, `sleep` and
+`alarm` into trykern's `sched`, `wait` and `procinfo` modules.
+
+- **Assembly keeps the shape of the path.** `pick` is still entered and
+  left in assembly: the leaving check, the jump to `resume`, `idle` and
+  `halt` stay there, and `rk_pick` only chooses the next process (or
+  none). `rk_stuck` tells idle from all-done and deadlock, and the
+  assembly prints the message and halts. bury still calls the IPC,
+  server, driver and descriptor endings itself, then `rk_bury`.
+- **Indices in `i32`, not words.** A pid times the PCB size, or a pointer
+  divided back into a pid, is an `i64` multiply or divide in Rust, which
+  `ll` makes a helper call over two limbs. In pick, called on every
+  switch, that made a shell session take 6 to 14 times the steps. Table
+  arithmetic is done in `i32` and widened at the end.
+- **The sleepers are scanned only when one is due.** The assembly
+  walked the table for sleepers and alarms on every switch, at about 8
+  steps a slot. In Rust each slot's words are joined from limbs, and the
+  walk on every switch took most of a 500-tick quantum: a spinning
+  process got 35,000 of 300,000 ticks instead of 158,000. pick now walks
+  only once `time` reaches `next_wake`, which `sleep` and `alarm` keep
+  as the earliest time (`sched::sleeps_until`); it gets 129,000.
+- **States are read as small words.** A word comes into Rust split into
+  two limbs, five instructions, and every comparison looks at both.
+  pick's walk of the table did that 27 times on every switch with
+  nobody ready, and the benchmark took 1,105 million steps.
+  `detrytus.lw32` (detrytus#78) reads a word known to fit an `i32` as one
+  limb, and `Proc::is` compares a state with it: 1,012 million. pick
+  then walked the table as two plain pointer loops, the records after
+  the current one and those up to it, instead of one that wraps and
+  counts: 870 million.
+- **`proc_name` keeps registers.** ps's caller in assembly passes the
+  process in `s1`; the wrapper moves the arguments, calls
+  `rk_proc_name` and ends in `rk_restore`, like stage 3's wrappers.
+
+The kernel's code grew from 13,000 trytes to 15,500. The benchmark
+takes 870.3 million steps instead of stage 3's 819.8 million (+6.2%),
+left for the speed pass after the port. Test sessions take about as
+many steps as before: a shell session 1.84 million on one hart and 1.87
+million on three, and no test budget changed.

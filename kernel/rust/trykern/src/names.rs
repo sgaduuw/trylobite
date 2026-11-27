@@ -19,7 +19,7 @@ use crate::layout::*;
 use crate::mem::uva;
 use crate::proc::Proc;
 use crate::trytes;
-use crate::word::{Word, load_at, small, store_at};
+use crate::word::{Word, load_at, store_at};
 
 const KEY: usize = (SRV_NAME_MAX + 1) as usize;
 
@@ -28,7 +28,7 @@ type Key = [u8; KEY];
 
 /// Record `i`.
 fn record(i: Word) -> *mut u8 {
-    kdata::names_base().wrapping_offset((i * SRV) as isize)
+    kdata::names_base().wrapping_offset((i as i32 * SRV as i32) as isize) // 32-bit: no helper call
 }
 
 fn records() -> impl Iterator<Item = *mut u8> {
@@ -102,9 +102,9 @@ fn lookup(p: Proc) -> Option<Word> {
         p.set(PCB_A1, load_at(r, SRV_VERSION));
         return Some(load_at(r, SRV_PID));
     }
-    match small(how) {
-        w if w == LOOKUP_WAIT as i32 => None,
-        w if w == LOOKUP_WHILE as i32 => {
+    match how {
+        LOOKUP_WAIT => None,
+        LOOKUP_WHILE => {
             // Is pid still there? Gone, a free slot or ended: no.
             let pid = p.get(PCB_A3);
             Proc::alive(pid).map_or(Some(E_NOPROC), |_| None)

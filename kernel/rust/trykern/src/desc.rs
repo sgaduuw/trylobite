@@ -21,7 +21,7 @@ struct Desc(*mut u8);
 impl Desc {
     /// Process `p`'s descriptor `fd`, which must be in range.
     fn of(p: Proc, fd: Word) -> Desc {
-        Desc(p.at(PCB_DESCS + fd * DESC))
+        Desc(p.at(PCB_DESCS + (fd as i32 * DESC as i32) as Word)) // 32-bit: no helper call
     }
 
     fn all(p: Proc) -> impl Iterator<Item = Desc> {
@@ -58,7 +58,11 @@ fn desc_of(p: Proc, fd: Word) -> Result<Desc, Word> {
 
 /// The same for any descriptor in range, naming something or not.
 fn desc_of_any(p: Proc, fd: Word) -> Result<Desc, Word> {
-    if (0..NDESC).contains(&fd) { Ok(Desc::of(p, fd)) } else { Err(E_BADF) }
+    if (0..NDESC).contains(&fd) {
+        Ok(Desc::of(p, fd))
+    } else {
+        Err(E_BADF)
+    }
 }
 
 /// The two outcomes of a system call written here: resume the caller
@@ -173,8 +177,8 @@ fn give(p: Proc) -> Word {
         return E_INVAL;
     }
     // client_of in kernel/ipc.s: alive, and waiting for this one's reply.
-    let Some(client) = Proc::alive(p.get(PCB_A1))
-        .filter(|c| c.get(PCB_STATE) == ST_REPLY && c.get(PCB_PEER) == p.pid())
+    let Some(client) =
+        Proc::alive(p.get(PCB_A1)).filter(|c| c.is(ST_REPLY) && c.get(PCB_PEER) == p.pid())
     else {
         return E_NOPROC;
     };
