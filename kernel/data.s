@@ -10,8 +10,9 @@ ticks:  .word 0                        # timer interrupts taken
 free_head:  .word 0                    # first free page, or 0 for none
 free_count: .word 0                    # how many pages are free
 fresh_page: .word 0                    # the first page never handed out
-ram_pages:  .word 0                    # pages of RAM the kernel uses (page_init)
+ram_pages:  .word 0                    # pages of RAM the kernel uses (rk_page_init)
 next_slot:  .word 0                    # where spawn starts looking (set at boot)
+nprog:      .word NPROG                # program images this build loaded
 log_base:   .word 0                    # the log page's first tryte, through the
                                        # direct map; 0 until boot gives it one
 log_pos:    .word 0                    # code points ever printed (console.s)

@@ -4,7 +4,7 @@
 
         .compress
 # boot_report: the version, then memory, harts, devices and the process
-# table, one line each. Hart 0 calls it at boot, after page_init and
+# table, one line each. Hart 0 calls it at boot, after rk_page_init and
 # before it spawns init, so the free pages are those init can have.
 # Clobbers a0..a2, t0..t5.
 boot_report:

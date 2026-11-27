@@ -83,7 +83,7 @@ pub extern "C" fn rk_proc_name(p: *mut u8, at: *mut u8, left: i32) {
 
 /// The string's part after its last /, PROC_NAME_MAX code points of it
 /// at most, 0-padded.
-fn name(p: Proc, at: *mut u8, left: Word) {
+pub fn name(p: Proc, at: *mut u8, left: Word) {
     let mut start = 0; // where the name starts so far
     let mut end = 0;
     while end < left {

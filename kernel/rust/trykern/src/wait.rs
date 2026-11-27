@@ -100,7 +100,7 @@ fn kill(p: Proc) -> Word {
 }
 
 /// Whether process `p` drives a device (drives_any in kernel/devices.s).
-fn drives_any(p: Proc) -> bool {
+pub fn drives_any(p: Proc) -> bool {
     let me = p.addr_word();
     (0..NSRC).any(|k| load_at(kdata::drivers_base(), 3 * k) == me)
 }

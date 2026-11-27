@@ -12,6 +12,7 @@ mod info;
 mod ipc;
 mod kdata;
 mod mem;
+mod mm;
 mod names;
 mod proc;
 mod procinfo;

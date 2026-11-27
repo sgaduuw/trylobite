@@ -1,5 +1,5 @@
-//! Memory: what a process's addresses are in the kernel. kernel/mm.s keeps
-//! the assembly side until it is ported.
+//! Memory: what a process's addresses are in the kernel (mm.rs has the
+//! pages themselves).
 
 use crate::layout::*;
 use crate::proc::Proc;
@@ -31,7 +31,7 @@ pub fn user_at(p: Proc, a: Word) -> *mut u8 {
         return page_at(p.get(PCB_USERPG)).wrapping_offset((from - 9841) as isize);
     }
     let k = from / PAGE as i32; // k: the k-th page above its own
-    let off = from - k * PAGE as i32;
+    let off = from - pages(k as Word);
     let page = if k == 0 {
         p.get(PCB_USERPG)
     } else if k <= (NXPAGE + NWIN) as i32 {
@@ -65,13 +65,18 @@ pub fn page_left(a: Word) -> Word {
     (PAGE as i32 - off) as Word
 }
 
-/// Physical page `page`'s first tryte, through the direct map. Every
-/// kernel address is within ±2^31 (include/layout.s, MEM_MAX), so the
-/// product is worked out in 32 bits.
-fn page_at(page: Word) -> *mut u8 {
-    addr(
-        ((page as i32)
-            .wrapping_mul(PAGE as i32)
-            .wrapping_add(DMAP as i32)) as Word,
-    )
+/// Physical page `page`'s centre, through the direct map. Every kernel
+/// address is within ±2^31 (include/layout.s, MEM_MAX), so the product
+/// is worked out in 32 bits.
+#[inline(always)]
+pub fn page_at(page: Word) -> *mut u8 {
+    addr(pages(page).wrapping_add(DMAP as i32) as Word)
+}
+
+/// `n` pages' worth of trytes, for `n` from 0 to MEM_MAX: below 2^31.
+/// A product that may not wrap (`mul nuw`) is one instruction, where
+/// one that wraps at 32 bits is ten (detrytus docs/rust.md).
+#[inline(always)]
+pub fn pages(n: Word) -> i32 {
+    unsafe { (n as u32).unchecked_mul(PAGE as u32) as i32 }
 }

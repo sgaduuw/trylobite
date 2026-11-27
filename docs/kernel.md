@@ -92,7 +92,7 @@ the hart's bank is still that process's (`fpu_owner`).
 No kernel structure grows with memory. Free pages are those never yet
 handed out, counted by `fresh_page` up to `ram_pages`, plus a list of
 pages given back, threaded through their centre words; `take_page`
-uses the list first. So boot writes no free page, and any amount of RAM
+(`kernel/rust/trykern/src/mm.rs`) uses the list first. So boot writes no free page, and any amount of RAM
 costs nothing until it is used.
 
 The kernel reaches physical pages through the **direct map**, kernel
@@ -612,8 +612,9 @@ subsystem as `kernel/` has a file per subsystem; so far `info` (the
 `wait` (`wait`, `kill`, and burying a process), `sched` (which
 process runs next, and the sleepers the clock wakes) and `ipc` (`send`,
 `recv`, `call`, `receive`, `reply`, `copyin`, `copyout`, `notify`, and
-what servers hear when a process ends), with `mem` (where a process's address is in the
-kernel), `proc` (a process's record), `kdata` (the kernel's globals),
+what servers hear when a process ends) and `mm` (the page allocator,
+`spawn`, `spawnw`, `window`, `brk`, `phys`, and giving a process's
+pages back), with `mem` (where a process's address is in the kernel), `proc` (a process's record), `kdata` (the kernel's globals),
 `trytes` (strings of trytes, which Rust's bytes are not) and `word`
 under them. `make kernel` (`tools/kernel.py`) builds
 it with cargo for detrytus' Rust target and translates it with `detrytus

@@ -15,6 +15,12 @@ unsafe extern "C" {
     static next_wake: u8;
     static irq_armed: u8;
     static drivers: u8;
+    static free_head: u8;
+    static fresh_page: u8;
+    static next_slot: u8;
+    static nprog: u8;
+    static epochs: u8;
+    static fpu_owner: u8;
 }
 
 macro_rules! word_of {
@@ -29,7 +35,8 @@ macro_rules! word_of {
 pub mod read {
     use crate::word::{Word, load};
     word_of!(
-        ticks, ram_pages, free_count, log_base, log_pos, sleepers, next_wake, irq_armed
+        ticks, ram_pages, free_count, log_base, log_pos, sleepers, next_wake, irq_armed,
+        free_head, fresh_page, next_slot, nprog
     );
 }
 
@@ -44,7 +51,9 @@ macro_rules! set_word_of {
 // ... and written under it.
 pub mod write {
     use crate::word::{Word, store};
-    set_word_of!(sleepers, next_wake);
+    set_word_of!(
+        sleepers, next_wake, ram_pages, free_count, free_head, fresh_page, next_slot
+    );
 }
 
 /// The process table's first record.
@@ -65,4 +74,14 @@ pub fn names_base() -> *mut u8 {
 /// Each interrupt source's driver's record, or 0: NSRC words (devices.s).
 pub fn drivers_base() -> *mut u8 {
     (&raw const drivers).cast_mut()
+}
+
+/// Each slot's tenants so far: NPROC words (see resume).
+pub fn epochs_base() -> *mut u8 {
+    (&raw const epochs).cast_mut()
+}
+
+/// Whose bank each hart's coprocessor holds, a record or 0: NHART words.
+pub fn fpu_owner_base() -> *mut u8 {
+    (&raw const fpu_owner).cast_mut()
 }
