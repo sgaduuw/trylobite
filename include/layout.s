@@ -6,6 +6,7 @@
 
         .equ  PAGE, 19683                 # trytes in a page (3^9)
         .equ  SUPER, 129140163            # trytes in a mid-level superpage (3^17)
+        .equ  SUPER_PAGES, 6561           # ... and its pages (3^8)
         .equ  ROOT_SUPER, 847288609443    # trytes in a root-level superpage (3^25)
         .equ  ROOT_PAGES, 43046721        # ... and its pages (3^16)
 
@@ -29,19 +30,22 @@
                                           # how many RAM pages the machine has
 
 # --- virtual memory ------------------------------------------------------------
-# Every address space has the same regions. Root entries -4 to -1 are the
-# direct map: kernel virtual = physical + DMAP, four root-level superpages
-# of physical pages centred on 0, ROOT_PAGES, 2 * ROOT_PAGES and
-# 3 * ROOT_PAGES, so every page up to MEM_MAX. Root entry 0 is a mid table:
+# Every address space has the same regions, all in root entry 0, a mid
+# table, so that every kernel address lies within +-2^31 and is a Rust
+# pointer (detrytus docs/rust.md, Pointers):
+#  -16..-1  the direct map: kernel virtual = physical + DMAP, mid-level
+#           superpages of physical pages centred on 0, SUPER_PAGES, ...
+#           15 * SUPER_PAGES, so every page up to MEM_MAX
 #    0  the kernel, through the shared leaf table; page 0 left unmapped
 #   +1  the process's own leaf table
 # so a new address space shares everything but its mid table entry +1.
 
-        .equ  DMAP, -4 * ROOT_SUPER       # direct map offset
-        .equ  DMAP_ROOTS, 4               # root entries it takes: -4 to -1
-        .equ  MEM_MAX, 150663523          # the last page the direct map reaches:
+        .equ  DMAP_SUPERS, 16             # mid entries the direct map takes: -16 to -1
+        .equ  DMAP, -DMAP_SUPERS * SUPER  # direct map offset
+        .equ  MEM_MAX, 101695             # the last page the direct map reaches:
                                           # RAM past it goes unused
-        .assert MEM_MAX == (DMAP_ROOTS - 1) * ROOT_PAGES + (ROOT_PAGES - 1) / 2, "MEM_MAX is not the direct map's last page"
+        .assert MEM_MAX == (DMAP_SUPERS - 1) * SUPER_PAGES + (SUPER_PAGES - 1) / 2, "MEM_MAX is not the direct map's last page"
+        .assert DMAP - SUPER / 2 > -2147483648, "the direct map reaches below -2^31"
         .equ  KOFF, 4 * PAGE              # kernel code and data: physical - KOFF
         .equ  V_DISK,    -9 * PAGE        # block device
         .equ  V_IRQ,     -8 * PAGE        # interrupt controller
@@ -88,8 +92,8 @@
         .equ  PTE_D,    2187
 
         .equ  DMAP_PTE, PTE_LEAF + PTE_R + PTE_W + PTE_G + PTE_A + PTE_D   # PPN 0:
-                                          # root entry -4; entry -4 + k adds
-                                          # k * ROOT_SUPER, physical page k * ROOT_PAGES
+                                          # mid entry -16; entry -16 + k adds
+                                          # k * SUPER, physical page k * SUPER_PAGES
         .equ  KLEAF_PTR, PTE_PTR + P_KLEAF * PAGE
         .equ  USER_FLAGS, PTE_LEAF + PTE_R + PTE_W + PTE_X + PTE_U + PTE_A + PTE_D
 

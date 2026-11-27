@@ -69,14 +69,14 @@ def test_memory_is_what_the_machine_has():
         data=WORDS,
     )
     used = said(run(program))[2]
-    for pages in (RAM_PAGES + 1, 1_000_000):
+    for pages in (RAM_PAGES + 1, 100_000):
         assert said(run(program, ram_pages=pages)) == [0, pages, used]
 
 
 def test_ram_past_the_direct_map_goes_unused():
-    # The direct map takes the four negative root entries and reaches page
-    # MEM_MAX; the machine may have more (detrytus allows every positive
-    # page), which the kernel leaves alone.
+    # The direct map takes mid entries -16 to -1 and reaches page MEM_MAX;
+    # the machine may have more (detrytus allows every positive page),
+    # which the kernel leaves alone.
     program = report(info(), word("info", "SI_PAGES"), data=WORDS)
     biggest = (3**18 - 1) // 2
     assert said(run(program, ram_pages=biggest)) == [0, L["MEM_MAX"]]

@@ -328,7 +328,7 @@ rust-src` and `rustup target add riscv32imac-unknown-none-elf`.
 The kernel asks the machine how much RAM it has (detrytus' RAM size
 register), so `--ram-pages` can be anything from enough for the
 programs (about 40 pages for `demo.s`, 81 for a few programs at a time
-in `shell.s`) up to 150,663,523, the most its direct map reaches; boot
+in `shell.s`) up to 101,695, the most its direct map reaches; boot
 touches none of the free pages, so a large machine starts at once and
 costs the emulator only the pages programs use. `make run` gives the
 shell 6,561 pages (`RAM_PAGES=N` changes it). Without `--harts` the machine has one hart;

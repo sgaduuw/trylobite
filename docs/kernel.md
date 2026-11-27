@@ -43,11 +43,13 @@ of the log can tell them from a program's. Init then says each server
 it starts (The shell, below).
 
 
-Every address space has three regions, one per mid-table entry:
+Every address space has three regions, all in root entry 0's mid table,
+so that every kernel address lies within ±2³¹ and can be a Rust
+pointer (detrytus docs/rust.md, Pointers):
 
 | Region | Virtual pages | Contents |
 |--------|---------------|----------|
-| direct map | around −6561 | all of physical memory, kernel only: kernel virtual = physical − 3¹⁷ |
+| direct map | mid entries −16 to −1, pages −108,256 to −3,281 | physical memory up to `MEM_MAX`, kernel only: kernel virtual = physical + `DMAP` (−16·3¹⁷) |
 | kernel | −15, −7 to −2 | the binary floating point coprocessor, which every process may use; the hart controller (its slots, and this hart's own), power off, console, kernel code, kernel data and stack; page 0 unmapped |
 | process | 6561 (`V_USER`) and up | the process's code, data and stack; the pages above its own that a large program's image takes; its block windows |
 
@@ -92,16 +94,16 @@ pages given back, threaded through their centre words; `take_page`
 uses the list first. So boot writes no free page, and any amount of RAM
 costs nothing until it is used.
 
-The kernel reaches every physical page through the **direct map**,
-kernel virtual address = physical + `DMAP`: root entries −4 to −1 of
-every address space are root-level superpages (3¹⁶ pages each) of
-physical pages centred on 0, 3¹⁶, 2·3¹⁶ and 3·3¹⁶. That reaches page
-150,663,523 (`MEM_MAX`). detrytus allows RAM up to page 193,710,244,
-the top of the address space, but the kernel half of virtual memory is
-the same size as all of positive physical memory, and root entry 0
-holds the kernel and the process, so the last 3¹⁶ pages' worth stays
-out of reach and goes unused (a 32-bit Linux's "high memory" problem).
-Using it would take mapping it in on demand rather than all the time.
+The kernel reaches physical pages through the **direct map**, kernel
+virtual address = physical + `DMAP`: mid entries −16 to −1 of every
+address space are mid-level superpages (3⁸ = 6,561 pages each) of
+physical pages centred on 0, 3⁸, … 15·3⁸. That reaches page 101,695
+(`MEM_MAX`), about 2 × 10⁹ trytes. detrytus allows far more RAM, up to
+page 193,710,244, but the direct map is kept within ±2³¹ so that a
+kernel written in Rust can point at any of it (detrytus' Rust
+pointers are signed 32-bit addresses), and the rest stays out of reach
+and goes unused (a 32-bit Linux's "high memory" problem). Using it
+would take mapping it in on demand rather than all the time.
 
 ## System calls
 
