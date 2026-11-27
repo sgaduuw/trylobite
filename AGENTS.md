@@ -256,7 +256,9 @@ pipe.
   as a state, is read with `word::load_small_at` (`detrytus.lw32`) and
   compared as an `i32` (`Proc::is`); loops on every switch walk
   pointers, without wrapping (`rk_pick`). Name strings are trytes, not
-  bytes (`trytes.rs`). Avoid `flat_map` (CONTEXT.md, 2026-11-27).
+  bytes (`trytes.rs`). Prefer plain loops to `flat_map` on hot or
+  step-counted paths: it is right, but keeps the inner iterator's
+  state in memory (CONTEXT.md, "flat_map was slow, not wrong").
   The crate is built with `opt-level = "z"`: the kernel's code
   has `NKCODE` pages (`include/layout.s`), and `include/kernel.s`
   checks that it fits: when it does not, raise `NKCODE` and remap the

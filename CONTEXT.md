@@ -1824,6 +1824,7 @@ fdflags, and what spawn and bury do with descriptors) are Rust;
   never closed in the file server. The same scan as nested loops works.
   That points at a translation bug in `detrytus ll` for the flattening
   iterator, not yet found; until it is, kernel Rust avoids `flat_map`.
+  (Later found to be wrong: see "flat_map was slow, not wrong".)
 
 The kernel's code grew from about 9,000 trytes to 13,000. Descriptor
 calls cost more steps: fifteen shell pipelines take 12.0 million steps
@@ -2016,3 +2017,23 @@ The benchmark takes 731.1 million steps instead of stage 7's 895.1
 million (−18%), and below the 810 million of the assembly kernel
 before the port. The kernel's code is 25,100 trytes (24,300 before).
 No test budget changed.
+
+## flat_map was slow, not wrong (2026-11-28)
+
+Stage 3 blamed `detrytus ll` for a `flat_map` scan in `desc::unref` that
+seemed never to find a handle closed. Rebuilding stage 3 with it, on
+the `ll` it pinned and on today's, fails the same test,
+`test_descriptors_go_with_their_process`. But the scan's answer matches
+the nested loops on every call, and the run simply stops: the test ran
+out of its 2 million steps. With a larger budget it passes, taking 2.46
+million steps where the loops take 1.66 million (+49%), and each
+`unref` scan costs tens of thousands of steps. The flattening iterator
+keeps its inner range in memory, behind a pointer, so every step stores
+two 32-bit halves through `ll$st4`, and stage 3 still multiplied indices
+as 64-bit words. Today's kernel with the same `flat_map` passes all 712
+tests and the benchmark moves by 0.07%, as `unref` is rare there. A new
+`ll` test of a `flat_map` scan (records of descriptors, as here) also
+gives the right answers. So there is no translation bug to find. The
+lesson is to read a step-limit failure as one: "no power-off after N
+steps" in the run, not a wrong result. Plain loops stay the rule on hot
+paths for speed.
