@@ -1,5 +1,6 @@
-"""The boot report (kernel/boot.s): what the kernel says it found before
-it starts init, and init's lines in shell.s as it starts each server."""
+"""The boot report (kernel/rust/trykern/src/boot.rs): what the kernel says
+it found before it starts init, and init's lines in shell.s as it starts
+each server."""
 
 import tomllib
 

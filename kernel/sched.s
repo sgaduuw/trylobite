@@ -74,8 +74,8 @@ idle:
 1:      lw    t1, HC_RECEIVE(t0)       # empty the mailbox: no wake-up can
         bgez  t1, 1b                   # arrive now, with the entry cleared
         bnez  tp, 3f
-        call  hotplug_events
-        call  device_irqs
+        call  rk_hotplug_events
+        call  rk_device_irqs
 3:      call  timer_on
         j     pick
 

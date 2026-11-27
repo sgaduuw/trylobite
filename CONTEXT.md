@@ -1945,3 +1945,37 @@ giving a process's pages back when it ends (`rk_release`).
 The kernel's code grew from 18,700 trytes to 22,700. The benchmark takes
 892.6 million steps instead of stage 5's 895.9 million (−0.4%, the
 cheaper `user_at`). No test budget changed.
+
+## Devices, harts and boot in Rust (2026-11-27)
+
+Stage 7 of the port, the last of its plan, moved kernel/devices.s,
+kernel/harts.s and kernel/boot.s into trykern's `devices` (`drive`,
+`arm`, passing interrupts to drivers, forgetting a driver that ends),
+`harts` (starting harts, hot-plug events, `wake_one`) and `boot` (the
+boot report) modules, with `console` for printing through
+kernel/console.s.
+
+- **What stays assembly is the machine's edge.** firmware, entry, the
+  trap entry and exit, the dispatch, `schedule`/`idle`/`halt`, the lock,
+  the console and log, `hart_leave` (which stops the hart), page tables,
+  data, and a stub per system call. `putc`, `puts`, `getpid`, `hart`,
+  `yield` and `exit` are still assembly in syscall.s; a Rust dispatch
+  can come with the speed pass.
+- **No `..=` loops.** An inclusive range is an iterator `ll` calls,
+  through memory, for every step: `wake_one` over the nine harts made
+  the benchmark 8% slower until it walked a pointer instead.
+- **The device pages are constants.** Each source's leaf entry is worked
+  out at compile time (`DEV_PTE`), as the pages are below 0 and
+  `mem::pages` takes only pages from 0.
+- **A hot-plug test was a race.** `test_a_leaving_hart_wakes_another_for_its_process`
+  wanted the child on hart 1, which hart -1 wakes as it leaves. But hart
+  0's slice ends at about the same moment (the harts' timers run in
+  step), and hart 0 is already asleep on the lock while hart 1 is still
+  waking, so hart 0 wins; the assembly's `wake_one` was a few steps
+  shorter and let hart 1 get there first. The test now accepts either.
+  A setup with hart 0 idle does not tell a wake-up apart either: the
+  platform's removal event wakes hart 0 anyway.
+
+The kernel's code grew from 22,700 trytes to 24,300. The benchmark takes
+895.1 million steps instead of stage 6's 892.6 million (+0.3%). No step
+budget changed.

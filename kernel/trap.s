@@ -204,8 +204,8 @@ on_timer:
 # Devices and hot-plug events, on hart 0; the interrupted process carries
 # on. A reader that console input woke waits for a hart like any other.
 on_external:
-        call  hotplug_events
-        call  device_irqs
+        call  rk_hotplug_events
+        call  rk_device_irqs
         j     resume
 
 # A process faulted: report it, end it, and carry on with the others.

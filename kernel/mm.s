@@ -41,15 +41,6 @@ release:
         call  rk_release
         j     bury
 
-# kva: a0 = the kernel virtual address of physical page a0's centre.
-# Clobbers t0.
-kva:
-        li    t0, PAGE
-        mul   a0, a0, t0
-        li    t0, DMAP
-        add   a0, a0, t0
-        ret
-
 # uva: a0 = the kernel address of address a1 in the process whose record
 # is in a0, and a1 = how many trytes its page has from there, or a0 = 0
 # when the process has nothing there (mem::user_at in Rust, for puts): its own page, a page of its image

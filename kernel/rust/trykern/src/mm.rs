@@ -1,7 +1,6 @@
 //! Physical pages and address spaces: the page allocator, spawn and
 //! spawnw, window, brk, phys, and giving a process's pages back when it
-//! ends (release). kernel/mm.s keeps the stubs, `kva` for devices.s and
-//! `uva` for puts.
+//! ends (release). kernel/mm.s keeps the stubs and `uva` for puts.
 //!
 //! Free pages are those never handed out, fresh_page up to ram_pages,
 //! and a list of those given back, threaded through the pages

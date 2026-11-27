@@ -1,5 +1,5 @@
 """The disk server (user/diskd.s) and what the kernel gives a driver
-(kernel/devices.s): a disk call moves one block between the disk and a
+(kernel/rust/trykern/src/devices.rs): a disk call moves one block between the disk and a
 page-sized buffer of the caller's, usually a block window, which
 SYS_WINDOW makes. The server drives the block device: its registers are
 mapped into it, and its interrupts come to it as notices."""

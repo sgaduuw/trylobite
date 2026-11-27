@@ -7,7 +7,11 @@
 
 #![no_std]
 
+mod boot;
+mod console;
 mod desc;
+mod devices;
+mod harts;
 mod info;
 mod ipc;
 mod kdata;

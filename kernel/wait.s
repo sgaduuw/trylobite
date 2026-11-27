@@ -16,18 +16,19 @@ sys_kill:
         j     resume
 
 # bury: the process in s0 has ended and its pages are free. Servers,
-# names, devices and descriptors hear of it first (each wants its number
-# in t4); then the Rust orphans its children and tells its parent, or
+# devices, names and descriptors hear of it first (the assembly's
+# wrappers want its number in t4); then the Rust orphans its children and tells its parent, or
 # leaves it a zombie. Does not return.
 bury:
         call  current_pid
         mv    a1, a0
         mv    a0, s0
         call  rk_ipc_ended             # servers learn of it (ipc.rs)
+        mv    a0, s0
+        call  rk_drv_ended             # its devices go (devices.rs)
         call  current_pid
         mv    t4, a0                   # t4: its number
         call  srv_ended                # its names go (names.s)
-        call  drv_ended                # and its devices (devices.s)
         call  desc_ended               # and its descriptors (desc.s)
         mv    a0, s0
         call  rk_bury
