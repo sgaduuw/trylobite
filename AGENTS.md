@@ -179,7 +179,7 @@ pipe.
 - **Devices are their drivers', not the kernel's.** The disk server,
   `user/diskd.s` (labels `dk_`), drives the block device: `SYS_DRIVE` maps its registers at `V_DEVICE`, `SYS_ARM` lets
   it interrupt once, and the interrupt reaches the server as a
-  `NOTE_IRQ` notice (`kernel/devices.s`). Arm only when an interrupt is
+  `NOTE_IRQ` notice (`kernel/rust/trykern/src/devices.rs`). Arm only when an interrupt is
   due: an armed source keeps `pick` waiting instead of reporting a
   deadlock. Blocks reach other processes as disk calls (`DK_READ`,
   `DK_WRITE`, tests write `CALL_DISK` and pass `disk_server=True`),

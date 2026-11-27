@@ -11,7 +11,7 @@ number named here.
 
 The firmware enters the kernel on hart 0, which sets up its page
 allocator and then says what it found, on its log, before it starts
-init (`kernel/boot.s`). This is the boot of the `shell.s` build, with
+init (`kernel/rust/trykern/src/boot.rs`). This is the boot of the `shell.s` build, with
 a disk of 100 blocks:
 
 ```text
@@ -614,7 +614,10 @@ process runs next, and the sleepers the clock wakes) and `ipc` (`send`,
 `recv`, `call`, `receive`, `reply`, `copyin`, `copyout`, `notify`, and
 what servers hear when a process ends) and `mm` (the page allocator,
 `spawn`, `spawnw`, `window`, `brk`, `phys`, and giving a process's
-pages back), with `mem` (where a process's address is in the kernel), `proc` (a process's record), `kdata` (the kernel's globals),
+pages back), `devices` (`drive`, `arm` and device interrupts), `harts`
+(starting harts, hot-plug, waking an idle one) and `boot` (the boot
+report), with `console` (the kernel's messages, through
+kernel/console.s), `mem` (where a process's address is in the kernel), `proc` (a process's record), `kdata` (the kernel's globals),
 `trytes` (strings of trytes, which Rust's bytes are not) and `word`
 under them. `make kernel` (`tools/kernel.py`) builds
 it with cargo for detrytus' Rust target and translates it with `detrytus

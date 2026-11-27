@@ -3,16 +3,12 @@
 //! bin/uptime, bin/free). The kernel only reports; the tools format.
 //! kernel/info.s calls these with the caller's record.
 
+use crate::harts::harts_present;
 use crate::kdata::{self, read};
 use crate::layout::*;
 use crate::mem::uva;
 use crate::proc::Proc;
 use crate::word::{Word, addr, store_at, time};
-
-unsafe extern "C" {
-    /// kernel/boot.s: how many of the middle nine harts are present.
-    fn harts_present() -> i32;
-}
 
 /// log(buffer, n, from): copy at most n code points of the log, from the
 /// from-th the kernel ever printed, to buffer: a0 = how many, a1 = where
@@ -88,7 +84,7 @@ fn info(p: Proc) -> Word {
     store_at(b, SI_NPROC, NPROC);
     let in_use = Proc::table().filter(|q| q.state() != 0).count();
     store_at(b, SI_PROCS, in_use as Word);
-    store_at(b, SI_HARTS, unsafe { harts_present() } as Word);
+    store_at(b, SI_HARTS, harts_present() as Word);
     // The version, 0-padded; the last is always the end.
     let version = kdata::version();
     let release = b.wrapping_offset(SI_RELEASE as isize);

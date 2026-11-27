@@ -2,14 +2,10 @@
 //! the process table (include/layout.s). The layout stays defined in
 //! assembly; Rust reaches a field by its offset.
 
+use crate::harts::wake_one;
 use crate::kdata;
 use crate::layout::*;
 use crate::word::{Word, load_at, load_small_at, store_at};
-
-unsafe extern "C" {
-    /// kernel/harts.s: ring one idle hart, as something became ready.
-    fn wake_one();
-}
 
 /// A process's record, by address.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -90,7 +86,7 @@ impl Proc {
     /// Make it ready and ring a hart for it.
     pub fn ready(self) {
         self.set(PCB_STATE, ST_READY);
-        unsafe { wake_one() }
+        wake_one();
     }
 
     /// Wake it if it sleeps in `state`, to run its system call again

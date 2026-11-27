@@ -21,6 +21,8 @@ unsafe extern "C" {
     static nprog: u8;
     static epochs: u8;
     static fpu_owner: u8;
+    static idle_harts: u8;
+    static leaving: u8;
 }
 
 macro_rules! word_of {
@@ -52,7 +54,8 @@ macro_rules! set_word_of {
 pub mod write {
     use crate::word::{Word, store};
     set_word_of!(
-        sleepers, next_wake, ram_pages, free_count, free_head, fresh_page, next_slot
+        sleepers, next_wake, ram_pages, free_count, free_head, fresh_page, next_slot,
+        irq_armed
     );
 }
 
@@ -84,4 +87,14 @@ pub fn epochs_base() -> *mut u8 {
 /// Whose bank each hart's coprocessor holds, a record or 0: NHART words.
 pub fn fpu_owner_base() -> *mut u8 {
     (&raw const fpu_owner).cast_mut()
+}
+
+/// 1 for each hart that waits for work, by hart + HART_MAX: NHART words.
+pub fn idle_harts_base() -> *mut u8 {
+    (&raw const idle_harts).cast_mut()
+}
+
+/// 1 for each hart the platform asked to go, by hart + HART_MAX.
+pub fn leaving_base() -> *mut u8 {
+    (&raw const leaving).cast_mut()
 }

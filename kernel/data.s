@@ -25,7 +25,7 @@ leaving: .words NHART                  # 1: the platform asked the hart to go
 
 irq_armed: .word 0                     # sources armed by their drivers
 drivers: .words NSRC                   # each source's driver's record, 0 for
-                                       # none (devices.s)
+                                       # none (devices.rs)
 
 procs:  .words NPROC * PCB_SIZE / 3     # the process table
         .assert procs - kgp <= 363, "the process table starts out of c.lagp's reach of gp: move kgp"

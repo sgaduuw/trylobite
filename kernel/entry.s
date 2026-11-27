@@ -1,6 +1,6 @@
 # Kernel entry: the firmware drops here in ring 0, running on the boot
 # address space. Hart 0 sets up traps and the page allocator, says what
-# it found (boot.s), spawns program 0 (init), starts the other harts and
+# it found (boot.rs), spawns program 0 (init), starts the other harts and
 # the timer and runs init. The other harts enter at ksecondary and look
 # for work.
 
@@ -16,10 +16,10 @@ kentry:
         la    sp, kstack_top
         call  rk_page_init             # the free pages (mm.rs)
         call  log_init                 # the log keeps the boot report too
-        call  boot_report              # what it found, before init runs
+        call  rk_boot_report           # what it found, before init runs
         call  rk_spawn_init            # init: everything else is its to start
         beqz  a0, 1f
-        call  start_harts
+        call  rk_start_harts
         call  timer_on
         la    s0, procs
         j     pick                     # init, the only process
