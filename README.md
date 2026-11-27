@@ -90,7 +90,7 @@ detrytus run demo.s --ram-pages 40 --harts 3
 
 ```text
 trylobite: version 0.1.0, a microkernel for detrytus, the balanced-ternary machine
-trylobite: memory: 40 pages (787320 trytes), 31 free
+trylobite: memory: 40 pages (787320 trytes), 29 free
 trylobite: harts: 3
 trylobite: irq0: interrupt controller, 3 sources, at page -13
 trylobite: cons0: console, at page -1

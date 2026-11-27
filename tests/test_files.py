@@ -440,13 +440,14 @@ def test_descriptors_go_with_their_process():
 
 
 def test_a_server_without_pages_for_its_windows_says_so():
-    # The build has 5 programs, so pages 11 to 26 are free, less one for
-    # the kernel's log; init and the two servers take 4 each, the disk
-    # server a window more, leaving 2 windows, and an open needs three
-    # blocks: block 0, the inodes and the root directory.
+    # The build has 5 programs, so 15 pages from P_PROG0 + 5 are free,
+    # less one for the kernel's log; init and the two servers take 4
+    # each, the disk server a window more, leaving 2 windows, and an open
+    # needs three blocks: block 0, the inodes and the root directory.
     program = report(open_("f"), data=string("f", "f"))
-    assert said(run(program, ram_pages=26, disk=disk(f="x"))) == [L["E_NOMEM"]]
-    assert said(run(program, ram_pages=27, disk=disk(f="x"))) == [0]
+    pages = L["P_PROG0"] + 5 + 15
+    assert said(run(program, ram_pages=pages, disk=disk(f="x"))) == [L["E_NOMEM"]]
+    assert said(run(program, ram_pages=pages + 1, disk=disk(f="x"))) == [0]
 
 
 def reader(path: str, p: str = "r") -> str:
@@ -507,6 +508,10 @@ def test_two_processes_read_files_at_once():
         reader("b", "b"),
         disk=disk(10, dirs=("d",), d__a=a, b=b),
         max_steps=30_000_000,
+        # Five processes and the disk server's windows for both files: a
+        # read the server has no page for fails, which reader takes as
+        # the end of the file.
+        ram_pages=L["P_PROG0"] + 34,
     )
     sums = sum(map(ord, a)), sum(map(ord, b))
     assert sorted(result.code_of(p) for p in (3, 4)) == sorted(sums)

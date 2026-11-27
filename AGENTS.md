@@ -246,7 +246,10 @@ pipe.
   one Rust needs that the assembly also calls with its own register
   rules (such as `uva`) is written again in Rust until its file is
   ported. The crate is built with `opt-level = "z"`: the kernel's code
-  has one page, and `include/kernel.s` checks that it fits.
+  has `NKCODE` pages (`include/layout.s`), and `include/kernel.s`
+  checks that it fits: when it does not, raise `NKCODE` and remap the
+  kernel's leaf table (`kernel/pagetables.s`), which keeps data and
+  code just below the coprocessor's page −15.
 - **Writing zero to a CSR needs a register holding 0.** A CSR
   instruction whose source is `r0` only reads (detrytus isa.md 7.12), so
   `csrw sie, zero` changes nothing: `li t0, 0` first.

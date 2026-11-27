@@ -50,7 +50,7 @@ pointer (detrytus docs/rust.md, Pointers):
 | Region | Virtual pages | Contents |
 |--------|---------------|----------|
 | direct map | mid entries −16 to −1, pages −108,256 to −3,281 | physical memory up to `MEM_MAX`, kernel only: kernel virtual = physical + `DMAP` (−16·3¹⁷) |
-| kernel | −15, −7 to −2 | the binary floating point coprocessor, which every process may use; the hart controller (its slots, and this hart's own), power off, console, kernel code, kernel data and stack; page 0 unmapped |
+| kernel | −19 to −15, −9 to −4 | kernel data and stack (−19), kernel code (−18 to −16, `NKCODE` pages), the binary floating point coprocessor, which every process may use; the block device, the interrupt controller, the hart controller (its slots, and this hart's own), power off, console; page 0 unmapped |
 | process | 6561 (`V_USER`) and up | the process's code, data and stack; the pages above its own that a large program's image takes; its block windows |
 
 The first two regions are shared by every address space. A new process
@@ -83,10 +83,11 @@ the hart's bank is still that process's (`fpu_owner`).
 | Physical page | Contents |
 |---------------|----------|
 | 0 | firmware |
-| 1, 2 | kernel code; kernel data |
-| 3, 4, 5 | the boot address space; the kernel's shared leaf table |
-| 6 .. 5 + `NPROG` | program images 0 to `NPROG` − 1, at most 27 (`NPROG_MAX`; the demo has 3, the shell build 8) |
-| 6 + `NPROG` .. the machine's last | free pages, handed out by the allocator |
+| 1 | kernel data and stack |
+| 2, 3, 4 | kernel code (`NKCODE` pages from `P_KCODE`) |
+| 5, 6, 7 | the boot address space; the kernel's shared leaf table |
+| 8 .. 7 + `NPROG` | program images 0 to `NPROG` − 1, at most 27 (`NPROG_MAX`; the demo has 3, the shell build 8) |
+| 8 + `NPROG` .. the machine's last | free pages, handed out by the allocator |
 
 No kernel structure grows with memory. Free pages are those never yet
 handed out, counted by `fresh_page` up to `ram_pages`, plus a list of
@@ -617,7 +618,7 @@ the repository; the tests build it before they start.
 
 Three things make kernel Rust different from a program's:
 
-- **Its addresses are below 0.** The kernel runs near −68,900, its
+- **Its addresses are below 0.** The kernel runs near −364,000, its
   devices from page −9 to −1 and the direct map from `DMAP`, all within
   ±2³¹; `ll --signed-pointers` makes Rust's pointers signed addresses
   that reach them.
@@ -640,5 +641,6 @@ Rust costs room: `info.s`'s two calls were about 180 trytes of
 assembly and are about 3,100 of Rust, mostly 64-bit arithmetic on words
 done 32 bits at a time (the 64-bit division and multiplication helpers
 among them, which later modules share). The kernel's code grew from
-about 5,900 trytes to 9,000 of its page's 19,683. Speed and size are
+about 5,900 trytes to 9,000; it has `NKCODE` (3) pages, 59,049 trytes,
+and `include/kernel.s` checks that it fits. Speed and size are
 left for a pass after the port.
