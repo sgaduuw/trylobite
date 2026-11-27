@@ -13,6 +13,8 @@ unsafe extern "C" {
     static names: u8;
     static sleepers: u8;
     static next_wake: u8;
+    static nready: u8;
+    static nidle: u8;
     static irq_armed: u8;
     static drivers: u8;
     static free_head: u8;
@@ -27,6 +29,7 @@ unsafe extern "C" {
 
 macro_rules! word_of {
     ($($name:ident),*) => {$(
+        #[inline(always)]
         pub fn $name() -> Word {
             load(unsafe { &raw const super::$name })
         }
@@ -37,13 +40,14 @@ macro_rules! word_of {
 pub mod read {
     use crate::word::{Word, load};
     word_of!(
-        ticks, ram_pages, free_count, log_base, log_pos, sleepers, next_wake, irq_armed,
-        free_head, fresh_page, next_slot, nprog
+        ticks, ram_pages, free_count, log_base, log_pos, sleepers, next_wake, irq_armed, free_head,
+        fresh_page, next_slot, nprog, nready, nidle
     );
 }
 
 macro_rules! set_word_of {
     ($($name:ident),*) => {$(
+        #[inline(always)]
         pub fn $name(w: Word) {
             store(unsafe { &raw const super::$name }.cast_mut(), w)
         }
@@ -54,8 +58,8 @@ macro_rules! set_word_of {
 pub mod write {
     use crate::word::{Word, store};
     set_word_of!(
-        sleepers, next_wake, ram_pages, free_count, free_head, fresh_page, next_slot,
-        irq_armed
+        sleepers, next_wake, ram_pages, free_count, free_head, fresh_page, next_slot, irq_armed,
+        nready, nidle
     );
 }
 
@@ -74,7 +78,7 @@ pub fn names_base() -> *mut u8 {
     (&raw const names).cast_mut()
 }
 
-/// Each interrupt source's driver's record, or 0: NSRC words (devices.s).
+/// Each interrupt source's driver's record, or 0: NSRC words (devices.rs).
 pub fn drivers_base() -> *mut u8 {
     (&raw const drivers).cast_mut()
 }

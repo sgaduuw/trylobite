@@ -1,7 +1,6 @@
 //! Processes as system tools see them: what each is (proc, name), and
 //! waiting for the clock (sleep, alarm). The kernel keeps a name and a
 //! count of user-mode ticks in each record for this; the tools format.
-//! kernel/proc.s keeps the stubs.
 
 use crate::layout::*;
 use crate::mem::uva;
@@ -72,13 +71,6 @@ pub extern "C" fn rk_sys_name(p: *mut u8) {
         None => E_FAULT,
     };
     p.set(PCB_A0, r);
-}
-
-/// Name process `p` after the string at kernel address `at`, `left`
-/// trytes of it mapped (spawnw, through proc_name in kernel/proc.s).
-#[unsafe(no_mangle)]
-pub extern "C" fn rk_proc_name(p: *mut u8, at: *mut u8, left: i32) {
-    name(Proc(p), at, left as Word);
 }
 
 /// The string's part after its last /, PROC_NAME_MAX code points of it

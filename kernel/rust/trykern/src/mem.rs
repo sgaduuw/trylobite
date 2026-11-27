@@ -8,8 +8,7 @@ use crate::word::{Word, addr, load_at};
 /// Where address `a` of process `p` is in the kernel, through the direct
 /// map, and how many trytes its page has from there; None when the
 /// process has nothing there: its own page, a page of its image above
-/// that, a block window or a page of heap it has. The same as uva in
-/// kernel/mm.s, which the assembly still calls.
+/// that, a block window or a page of heap it has.
 pub fn uva(p: Proc, a: Word) -> Option<(*mut u8, Word)> {
     let at = user_at(p, a);
     (!at.is_null()).then(|| (at, page_left(a)))

@@ -88,6 +88,7 @@ pub fn call(p: Proc) -> i32 {
     }
     p.set(PCB_PEER, pid);
     p.set(PCB_STATE, ST_CALL);
+    q.set(PCB_CALLERS, q.get(PCB_CALLERS) + 1); // Proc::ready takes it off
     q.retry_if(ST_RECEIVE);
     SCHEDULE
 }
@@ -102,6 +103,46 @@ pub extern "C" fn rk_sys_receive(p: *mut u8) -> i32 {
     p.set(PCB_SERVES, 1);
     // Results here are i32s with NONE for none, rather than an Option of
     // a word, which comes back through memory a limb at a time.
+    if load_small_at(p.0, PCB_PENDING) != 0 {
+        let r = take_notice(p);
+        if r != NONE {
+            return r;
+        }
+        p.set(PCB_PENDING, 0); // none left
+    }
+    if load_small_at(p.0, PCB_CALLERS) == 0 {
+        p.set(PCB_STATE, ST_RECEIVE);
+        return SCHEDULE;
+    }
+    // The next caller after the one it took last, that one's turn last:
+    // two plain walks, as in sched::rk_pick. One is there, as
+    // PCB_CALLERS counts.
+    let me = p.pid();
+    let (base, end) = Proc::bounds();
+    let after = Proc::of(p.get(PCB_TURN)).at(PCB_SIZE);
+    let mut c = first_caller(after, end, me);
+    if c.is_null() {
+        c = first_caller(base, after, me);
+    }
+    if c.is_null() {
+        p.set(PCB_STATE, ST_RECEIVE);
+        return SCHEDULE;
+    }
+    let c = Proc(c);
+    p.set(PCB_TURN, c.pid());
+    p.set(PCB_CALLERS, p.get(PCB_CALLERS) - 1);
+    c.set(PCB_STATE, ST_REPLY);
+    p.set(PCB_A1, c.get(PCB_A2));
+    p.set(PCB_A2, c.get(PCB_A3));
+    p.set(PCB_A3, c.get(PCB_A4));
+    p.set(PCB_A4, c.get(PCB_A5));
+    done(p, c.pid())
+}
+
+/// receive's notices, in order: an interrupt's, then its alarm's, then
+/// a closed handle's, then a notification's, then an ending's. The
+/// caller's result if there is one, else NONE.
+fn take_notice(p: Proc) -> i32 {
     let src = first_set(p.at(PCB_IRQS), NSRC as i32);
     if src != NONE {
         return notice(p, NOTE_IRQ, src as Word + 1);
@@ -122,27 +163,7 @@ pub extern "C" fn rk_sys_receive(p: *mut u8) -> i32 {
     if pid != NONE {
         return notice(p, NOTE_ENDED, pid as Word);
     }
-    // The next caller after the one it took last, that one's turn last:
-    // two plain walks, as in sched::rk_pick.
-    let me = p.pid();
-    let (base, end) = Proc::bounds();
-    let after = Proc::of(p.get(PCB_TURN)).at(PCB_SIZE);
-    let mut c = first_caller(after, end, me);
-    if c.is_null() {
-        c = first_caller(base, after, me);
-    }
-    if c.is_null() {
-        p.set(PCB_STATE, ST_RECEIVE);
-        return SCHEDULE;
-    }
-    let c = Proc(c);
-    p.set(PCB_TURN, c.pid());
-    c.set(PCB_STATE, ST_REPLY);
-    p.set(PCB_A1, c.get(PCB_A2));
-    p.set(PCB_A2, c.get(PCB_A3));
-    p.set(PCB_A3, c.get(PCB_A4));
-    p.set(PCB_A4, c.get(PCB_A5));
-    done(p, c.pid())
+    NONE
 }
 
 /// No flag set (first_set, first_flag).
@@ -248,7 +269,7 @@ pub extern "C" fn rk_sys_notify(p: *mut u8) -> i32 {
         Some(q) if q == p => E_SELF,
         Some(q) => {
             q.set_tryte(PCB_SIGNALS + p.pid(), 1);
-            q.retry_if(ST_RECEIVE);
+            q.rouse();
             0
         }
     };
@@ -291,7 +312,7 @@ pub extern "C" fn rk_ipc_ended(p: *mut u8, pid: i32) {
         if q.get(PCB_SERVES) != 0 || Some(q) == parent {
             q.set_tryte(PCB_NOTES + pid, 1);
             q.set_tryte(PCB_SIGNALS + pid, 0); // a notification from it is stale now
-            q.retry_if(ST_RECEIVE);
+            q.rouse();
         }
         if (q.is(ST_CALL) || q.is(ST_REPLY)) && q.get(PCB_PEER) == pid {
             q.set(PCB_A0, E_NOPROC); // its call fails

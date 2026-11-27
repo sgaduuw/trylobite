@@ -61,7 +61,8 @@ fn start_hart(h: i32) -> bool {
         return false; // absent, or running already
     }
     store_at(s, HC_START_PC, unsafe { &raw const boot } as isize as Word);
-    store_at(s, HC_START_ARG, unsafe { &raw const ksecondary } as isize as Word);
+    store_at(s, HC_START_ARG, unsafe { &raw const ksecondary } as isize
+        as Word);
     // A fresh start: not leaving, whatever an earlier life of the hart
     // was asked.
     store(entry(kdata::leaving_base(), h), 0);
@@ -115,6 +116,7 @@ fn ask_to_leave(h: i32) {
     let idle = entry(kdata::idle_harts_base(), h);
     if load(idle) != 0 {
         store(idle, 0);
+        kdata::write::nidle(kdata::read::nidle() - 1);
         store_at(slot(h), HC_SEND, 1);
     }
 }
@@ -124,13 +126,19 @@ fn ask_to_leave(h: i32) {
 /// wake-up goes to another.
 pub fn wake_one() {
     // A pointer walk, the hart worked out only for the one it finds:
-    // wake_one runs whenever a process becomes ready.
+    // wake_one runs whenever a process becomes ready. With no hart
+    // waiting (nidle counts them), no walk.
+    let n = kdata::read::nidle();
+    if n == 0 {
+        return;
+    }
     let base = kdata::idle_harts_base();
     let end = base.wrapping_offset(3 * NHART as isize);
     let mut idle = base;
     while idle < end {
         if load_small_at(idle, 0) != 0 {
             store(idle, 0);
+            kdata::write::nidle(n - 1);
             let k = (idle as isize - base as isize) as i32 / 3;
             store_at(slot(k - HART_MAX as i32), HC_SEND, 1);
             return;

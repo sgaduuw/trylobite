@@ -1,6 +1,6 @@
 # The boot address space, built at assembly time: what the firmware hands
 # the kernel. It has the direct map and the kernel but no process; spawn
-# builds each process's tables at run time (kernel/mm.s).
+# builds each process's tables at run time (kernel/rust/trykern/src/mm.rs).
 
         .section tables, P_BOOTROOT * PAGE
         .word PTE_PTR + P_BOOTMID * PAGE           # root entry 0 -> mid table

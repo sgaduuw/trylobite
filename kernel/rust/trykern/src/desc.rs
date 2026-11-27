@@ -13,7 +13,7 @@
 use crate::ipc;
 use crate::layout::*;
 use crate::proc::Proc;
-use crate::word::{Word, load, load_at, store_at};
+use crate::word::{Word, load, load_at, load_small_at, store_at};
 
 /// A descriptor, by address.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -210,16 +210,26 @@ pub extern "C" fn rk_sys_fdflags(p: *mut u8) {
 /// is gone. If none is left anywhere, tell the server, if it is still
 /// there and is not `p` ending itself, with a NOTE_CLOSED notice.
 fn unref(p: Proc, server: Word, handle: Word) {
-    for q in Proc::table() {
-        if Desc::all(q).any(|d| d.server() == server && d.handle() == handle) {
-            return; // still named
+    // One walk over every record's descriptors, by pointer: they are
+    // DESC trytes apart, and a record's are PCB_SIZE from the last's.
+    let (base, end) = Proc::bounds();
+    let mut rec = base;
+    while rec < end {
+        let mut d = Proc(rec).at(PCB_DESCS);
+        let last = Proc(rec).at(PCB_DESCS + NDESC * DESC);
+        while d < last {
+            if load_small_at(d, 0) == server as i32 && load_small_at(d, 3) == handle as i32 {
+                return; // still named
+            }
+            d = d.wrapping_offset(DESC as isize);
         }
+        rec = rec.wrapping_offset(PCB_SIZE as isize);
     }
     let Some(s) = Proc::alive(server - 1).filter(|&s| s != p) else {
         return;
     };
     s.set_tryte(PCB_CLOSED + handle, 1);
-    s.retry_if(ST_RECEIVE); // rouse
+    s.rouse();
 }
 
 /// Process `pid`, record `p`, has ended (bury, through desc_ended). Its

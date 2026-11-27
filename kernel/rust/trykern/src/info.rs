@@ -1,7 +1,7 @@
 //! What the kernel tells about itself, for system tools: its log
 //! (bin/dmesg) and a summary of the machine and its use (bin/uname,
 //! bin/uptime, bin/free). The kernel only reports; the tools format.
-//! kernel/info.s calls these with the caller's record.
+//! The dispatch (syscall.rs) calls these with the caller's record.
 
 use crate::harts::harts_present;
 use crate::kdata::{self, read};

@@ -1,6 +1,6 @@
 //! Physical pages and address spaces: the page allocator, spawn and
 //! spawnw, window, brk, phys, and giving a process's pages back when it
-//! ends (release). kernel/mm.s keeps the stubs and `uva` for puts.
+//! ends (release).
 //!
 //! Free pages are those never handed out, fresh_page up to ram_pages,
 //! and a list of those given back, threaded through the pages
@@ -151,9 +151,7 @@ fn spawn(caller: Proc, parent: Word, image: i32, above: i32) -> Word {
     s.set(PCB_LEAFPG, leaf);
     let user = if image != 0 {
         let user = take_page(); // copied over whole: no need to clear it
-        unsafe {
-            core::ptr::copy_nonoverlapping(first(image as Word), first(user), PAGE as usize)
-        };
+        unsafe { core::ptr::copy_nonoverlapping(first(image as Word), first(user), PAGE as usize) };
         user
     } else {
         alloc_page() // zeroed: copy_mem fills in the image
@@ -415,8 +413,8 @@ pub extern "C" fn rk_sys_phys(p: *mut u8) {
     p.set(PCB_A0, r);
 }
 
-/// Give back the pages of process `p`, which has ended (release in
-/// kernel/mm.s, which left its address space first: freeing a page
+/// End process `p`: give back its pages and bury it (release in
+/// kernel/syscall.s, which left its address space first: freeing a page
 /// writes the free-list link into its centre word, which in a root table
 /// is entry 0, and done while that table is live the next walk would
 /// read garbage).
@@ -442,4 +440,5 @@ pub extern "C" fn rk_release(p: *mut u8) {
         }
         x = words(x, 1);
     }
+    wait::bury(p);
 }

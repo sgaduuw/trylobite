@@ -232,8 +232,8 @@ pipe.
   every `rk_*` function, into `kernel/trykern.s` (not committed), which
   `include/kernel.s` includes after `kernel/data.s`; the tests build it
   once per run (`tests/conftest.py`). The assembly calls an `rk_*`
-  function with the current record as its argument (`kernel/info.s`
-  is the pattern: `mv a0, s0; call rk_sys_info; j resume`), and the
+  function with the current record as its argument (`kernel/syscall.s`
+  is the pattern: `mv a0, s0; call rk_syscall`), and the
   Rust leaves a system call's result in the record itself. Rust keeps
   `s0` to `s8`, `gp` and `tp`, so the kernel's registers survive a
   call. Rust reaches the kernel's data as words (`word.rs`: a word is
@@ -244,14 +244,12 @@ pipe.
   routine still in assembly that Rust needs is declared `extern "C"`
   and must keep the ABI (only `a0`..`a5`, `t0`..`t6` and `ra` changed);
   one Rust needs that the assembly also calls with its own register
-  rules (such as `uva`) is written again in Rust until its file is
-  ported. Assembly that calls Rust with its own register rules goes
-  through a wrapper that saves what its callers keep (`srv_ended`,
-  `desc_ended`, `desc_inherit`, ending in `rk_restore` in
-  `kernel/rt.s`), and passes no negative number: Rust reads an `i32` as
-  its unsigned value. A system call that may not resume says so in its
-  result (`rk_sys_lookup`: 1 to schedule; `rk_sys_read`: 1 to go on as
-  `sys_call`). Arithmetic on a word is 64-bit, done 32 bits at a time,
+  rules is written again in Rust. Assembly that calls Rust passes no
+  negative number: Rust reads an `i32` as its unsigned value. A system
+  call's routine returns what to do next (`syscall.rs`: RESUME,
+  SCHEDULE or RELEASE). Hot paths avoid table walks with counts kept
+  where states change (`nready`, `nidle`, `PCB_CALLERS`,
+  `PCB_PENDING`): keep them right when adding a state change. Arithmetic on a word is 64-bit, done 32 bits at a time,
   and a 64-bit multiplication, division or remainder is a helper call:
   work out indices and offsets in `i32` (`Proc::of`, `Proc::pid`), as
   the scheduler runs them on every pick. A word known to be small, such

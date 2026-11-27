@@ -19,7 +19,7 @@ impl Proc {
     }
 
     /// Process `pid`'s record if it is alive: neither a free slot nor
-    /// ended (proc_of in kernel/ipc.s).
+    /// ended.
     pub fn alive(pid: Word) -> Option<Proc> {
         if pid < 0 || pid >= NPROC {
             return None;
@@ -85,12 +85,29 @@ impl Proc {
 
     /// Make it ready and ring a hart for it.
     pub fn ready(self) {
+        if self.is(ST_CALL) {
+            // Its call is off (killed, or the server ended): the server
+            // counts one caller fewer.
+            let q = Proc::of(self.get(PCB_PEER));
+            q.set(PCB_CALLERS, q.get(PCB_CALLERS) - 1);
+        }
+        if !self.is(ST_READY) {
+            kdata::write::nready(kdata::read::nready() + 1);
+        }
         self.set(PCB_STATE, ST_READY);
         wake_one();
     }
 
+    /// A notice waits for it (an interrupt, its alarm, a closed handle,
+    /// a notification, an ending): note that receive should look, and
+    /// wake it if it sleeps in receive.
+    pub fn rouse(self) {
+        self.set(PCB_PENDING, 1);
+        self.retry_if(ST_RECEIVE);
+    }
+
     /// Wake it if it sleeps in `state`, to run its system call again
-    /// (PCB_RETRY): rouse in kernel/ipc.s for ST_RECEIVE.
+    /// (PCB_RETRY): rouse, for ST_RECEIVE.
     pub fn retry_if(self, state: Word) {
         if self.is(state) {
             self.set(PCB_RETRY, 1);

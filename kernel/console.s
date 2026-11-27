@@ -1,6 +1,6 @@
 # Kernel console output, which is also the kernel's log: every code point
 # the kernel prints is kept in a page of its own (log_base), the last
-# LOG_SIZE of them, for SYS_LOG (info.s) to read back, as Unix's dmesg
+# LOG_SIZE of them, for SYS_LOG (info.rs) to read back, as Unix's dmesg
 # reads the kernel's message buffer. Each helper clobbers only a0 and
 # t0..t5.
 
@@ -35,6 +35,21 @@ kputs:
         addi  a0, a0, 1
         j     1b
 2:      jalr  zero, 0(t4)
+
+# kputs_upto: print the string at a0, at most a1 (> 0) trytes of it, as
+# kputs does; a0 = 1 if it ended with its 0, else 0 (puts, syscall.rs).
+kputs_upto:
+        mv    t4, ra
+        add   a1, a1, a0               # a1: just past the last
+1:      lt    t0, 0(a0)
+        beqz  t0, 2f
+        call  kout
+        addi  a0, a0, 1
+        blt   a0, a1, 1b
+        li    a0, 0
+        jalr  zero, 0(t4)
+2:      li    a0, 1
+        jalr  zero, 0(t4)
 
 # kputn: print a0 in decimal.
 kputn:

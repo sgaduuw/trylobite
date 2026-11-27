@@ -603,10 +603,14 @@ detrytus run shell.s --ram-pages 81 --input session.txt --disk disk.img
 
 ## Rust in the kernel
 
-The kernel is being moved from assembly to Rust a subsystem at a time,
-with every test passing at each step. The Rust part is one crate,
-[`kernel/rust/trykern`](../kernel/rust/trykern), a module per
-subsystem as `kernel/` has a file per subsystem; so far `info` (the
+The kernel was moved from assembly to Rust a subsystem at a time,
+with every test passing at each step; what stays assembly is the
+machine's edge (entry, the trap entry and exit, `schedule` and `idle`,
+the lock, the console, page tables and data). The Rust part is one
+crate, [`kernel/rust/trykern`](../kernel/rust/trykern), a module per
+subsystem: `syscall` (the dispatch, a table of every call's routine,
+and the small calls `putc`, `puts`, `getpid`, `hart`, `yield` and
+`exit`), `info` (the
 `log` and `info` calls above), `names` (`register` and `lookup`),
 `desc` (descriptors), `procinfo` (`proc`, `name`, `sleep`, `alarm`),
 `wait` (`wait`, `kill`, and burying a process), `sched` (which
@@ -639,9 +643,11 @@ Three things make kernel Rust different from a program's:
   their `PCB_` offsets, which stay defined in `include/layout.s`, and
   every number comes from that file (trystd's `build.rs`).
 - **It has no `main`.** The assembly calls functions named `rk_*`, which
-  are the roots `ll` keeps with what they reach. A system call's stub
-  passes the caller's record, `mv a0, s0; call rk_sys_info; j resume`,
-  and the Rust leaves the result in the record for `resume` to return.
+  are the roots `ll` keeps with what they reach. The system-call trap
+  passes the caller's record to `rk_syscall`, `mv a0, s0; call
+  rk_syscall`, and the Rust leaves the result in the record for
+  `resume` to return; its own result says whether to resume, schedule
+  or release the caller.
   Rust keeps `s0` to `s8`, `gp` and `tp`, so the kernel's registers
   survive, and calls the assembly routines it still needs, such as
   `harts_present`, by name. A panic ends in `abort` (`kernel/rt.s`), a
