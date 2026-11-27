@@ -61,7 +61,8 @@ fn start_hart(h: i32) -> bool {
         return false; // absent, or running already
     }
     store_at(s, HC_START_PC, unsafe { &raw const boot } as isize as Word);
-    store_at(s, HC_START_ARG, unsafe { &raw const ksecondary } as isize as Word);
+    store_at(s, HC_START_ARG, unsafe { &raw const ksecondary } as isize
+        as Word);
     // A fresh start: not leaving, whatever an earlier life of the hart
     // was asked.
     store(entry(kdata::leaving_base(), h), 0);

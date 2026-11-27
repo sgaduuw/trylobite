@@ -775,7 +775,11 @@
                                           # since receive last told it
         .equ  PCB_RETRY,  129             # 1: run its system call again when it
                                           # next runs (ipc.s wakes a server so)
-        # 135 to 156 were its block windows' pages: PCB_WINS, below, now
+        .equ  PCB_PENDING, 135            # 1 when a notice may wait for receive
+                                          # (PCB_IRQS, PCB_RANG, PCB_CLOSED,
+                                          # PCB_SIGNALS, PCB_NOTES): 0 lets it
+                                          # skip looking (Proc::rouse sets it)
+        # 138 to 156 were its block windows' pages: PCB_WINS, below, now
         .equ  NWIN,         9             # block windows: window k is at V_BLOCK + PAGE * k
         .equ  V_DEVICE, V_BLOCK + NWIN * PAGE   # a driver's device registers,
                                           # past its windows: source s's at

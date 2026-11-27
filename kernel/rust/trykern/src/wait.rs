@@ -10,6 +10,7 @@ use crate::kdata;
 use crate::layout::*;
 use crate::proc::Proc;
 use crate::word::{Word, load_at};
+use crate::{desc, devices, ipc, names};
 
 /// Process `pid` if it is a child of process `parent`, ended or not;
 /// else E_NOCHILD.
@@ -121,16 +122,18 @@ fn kill_pid(pid: Word) {
     }
 }
 
-/// The rest of bury (kernel/wait.s), once servers, names, devices and
-/// descriptors have heard: process `p` has ended and its pages are free.
-/// Orphan its children, freeing those already ended, since nobody can
-/// wait for them now; hand how it ended to its parent if the parent waits
-/// for it, else stay as a zombie until the parent does. A process with no
+/// Process `p` has ended and its pages are free (release, mm.rs).
+/// Servers, devices, names and descriptors hear of it first. Then orphan
+/// its children, freeing those already ended, since nobody can wait for
+/// them now; hand how it ended to its parent if the parent waits for it,
+/// else stay as a zombie until the parent does. A process with no
 /// parent simply goes.
-#[unsafe(no_mangle)]
-pub extern "C" fn rk_bury(p: *mut u8) {
-    let p = Proc(p);
+pub fn bury(p: Proc) {
     let pid = p.pid();
+    ipc::rk_ipc_ended(p.0, pid as i32); // servers learn of it
+    devices::rk_drv_ended(p.0); // its devices go
+    names::rk_srv_ended(pid as i32); // and its names
+    desc::rk_desc_ended(p.0, pid as i32); // and its descriptors
     for q in Proc::table() {
         if q.get(PCB_PARENT) == pid {
             q.set(PCB_PARENT, NO_PARENT);

@@ -89,6 +89,14 @@ impl Proc {
         wake_one();
     }
 
+    /// A notice waits for it (an interrupt, its alarm, a closed handle,
+    /// a notification, an ending): note that receive should look, and
+    /// wake it if it sleeps in receive.
+    pub fn rouse(self) {
+        self.set(PCB_PENDING, 1);
+        self.retry_if(ST_RECEIVE);
+    }
+
     /// Wake it if it sleeps in `state`, to run its system call again
     /// (PCB_RETRY): rouse in kernel/ipc.s for ST_RECEIVE.
     pub fn retry_if(self, state: Word) {

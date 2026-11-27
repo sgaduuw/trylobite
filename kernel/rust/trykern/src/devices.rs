@@ -113,7 +113,7 @@ pub extern "C" fn rk_device_irqs() {
         if d != 0 {
             let d = Proc(addr(d));
             d.set_tryte(PCB_IRQS - 1 + src, 1);
-            d.retry_if(ST_RECEIVE);
+            d.rouse();
         }
         store_at(ctl, IRQ_COMPLETE, src);
     }

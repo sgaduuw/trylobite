@@ -37,8 +37,8 @@ macro_rules! word_of {
 pub mod read {
     use crate::word::{Word, load};
     word_of!(
-        ticks, ram_pages, free_count, log_base, log_pos, sleepers, next_wake, irq_armed,
-        free_head, fresh_page, next_slot, nprog
+        ticks, ram_pages, free_count, log_base, log_pos, sleepers, next_wake, irq_armed, free_head,
+        fresh_page, next_slot, nprog
     );
 }
 
@@ -54,8 +54,7 @@ macro_rules! set_word_of {
 pub mod write {
     use crate::word::{Word, store};
     set_word_of!(
-        sleepers, next_wake, ram_pages, free_count, free_head, fresh_page, next_slot,
-        irq_armed
+        sleepers, next_wake, ram_pages, free_count, free_head, fresh_page, next_slot, irq_armed
     );
 }
 

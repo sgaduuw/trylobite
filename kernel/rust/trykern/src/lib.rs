@@ -21,6 +21,7 @@ mod names;
 mod proc;
 mod procinfo;
 mod sched;
+mod syscall;
 mod trytes;
 mod wait;
 mod word;

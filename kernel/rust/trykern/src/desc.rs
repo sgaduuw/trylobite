@@ -219,7 +219,7 @@ fn unref(p: Proc, server: Word, handle: Word) {
         return;
     };
     s.set_tryte(PCB_CLOSED + handle, 1);
-    s.retry_if(ST_RECEIVE); // rouse
+    s.rouse();
 }
 
 /// Process `pid`, record `p`, has ended (bury, through desc_ended). Its

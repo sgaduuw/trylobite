@@ -55,7 +55,7 @@ fn wake_sleepers() {
             if alarm <= now {
                 q.set(PCB_ALARM, 0); // it rings
                 q.set(PCB_RANG, 1);
-                q.retry_if(ST_RECEIVE); // rouse
+                q.rouse();
                 now = time();
             } else {
                 later(alarm, &mut any);

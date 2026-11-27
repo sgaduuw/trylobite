@@ -12,24 +12,6 @@ abort:  la    gp, kgp
         li    a0, 99
         j     halt
 
-# rk_restore: the end of a wrapper that calls Rust for assembly with its
-# own register rules (srv_ended, desc_ended, desc_inherit): it saved ra,
-# t4, a0..a5, t5 and t6 in 30 trytes of stack, which this restores, and
-# returns to the wrapper's caller. Rust itself keeps s0..s8, gp and tp.
-rk_restore:
-        lw    ra, 0(sp)
-        lw    t4, 3(sp)
-        lw    a0, 6(sp)
-        lw    a1, 9(sp)
-        lw    a2, 12(sp)
-        lw    a3, 15(sp)
-        lw    a4, 18(sp)
-        lw    a5, 21(sp)
-        lw    t5, 24(sp)
-        lw    t6, 27(sp)
-        addi  sp, sp, 30
-        ret
-
 # memcpy(dst, src, n) and memmove(dst, src, n): dst. Both at a word's
 # first tryte (its centre a multiple of 3), nine words at a time while
 # that many are left, then trytes one by one: most of what servers copy

@@ -60,7 +60,7 @@ pub extern "C" fn rk_boot_report() {
 
     msg!(msg_harts);
     putn(harts_present());
-    putc(b'\n');
+    putc(b'\n' as i32);
 
     // The devices, each on its page.
     msg!(msg_irq);
@@ -85,7 +85,7 @@ pub extern "C" fn rk_boot_report() {
     } else {
         // Its address, as BSD's ifconfig shows it.
         octets(load_small_at(net, NET_MAC_HI));
-        putc(b':');
+        putc(b':' as i32);
         octets(load_small_at(net, NET_MAC_LO));
     }
     at_page(P_NET);
@@ -111,18 +111,22 @@ fn octets(v: i32) {
         if place == 0 {
             break;
         }
-        putc(b':');
+        putc(b':' as i32);
     }
 }
 
 /// Print `d`, 0 to 15, as a hexadecimal digit.
 fn hex(d: i32) {
-    putc(if d < 10 { b'0' + d as u8 } else { b'a' + (d - 10) as u8 });
+    putc(if d < 10 {
+        '0' as i32 + d
+    } else {
+        'a' as i32 + d - 10
+    });
 }
 
 /// ", at page " `page` and the end of the line.
 fn at_page(page: i64) {
     msg!(msg_atpage);
     putn(page as i32);
-    putc(b'\n');
+    putc(b'\n' as i32);
 }
