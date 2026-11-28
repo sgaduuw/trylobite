@@ -319,6 +319,7 @@ init_stopneed:
         lw    t0, 0(t0)
         bgez  t0, 2f                   # what it needs is up
         li    a0, SYS_KILL
+        li    a3, SIGKILL
         li    a2, FOR_SELF
         sys
         li    a0, SYS_WAIT
@@ -336,6 +337,7 @@ init_stopsh:
         lw    a1, init_sh
         bltz  a1, 9f
         li    a0, SYS_KILL
+        li    a3, SIGKILL
         li    a2, FOR_SELF
         sys
         li    a0, SYS_WAIT
@@ -608,6 +610,7 @@ init_stopprogs:
         lw    a1, 0(s0)
         bltz  a1, 2f                   # down, or done
         li    a0, SYS_KILL
+        li    a3, SIGKILL
         li    a2, FOR_SELF
         sys
         li    a0, SYS_WAIT

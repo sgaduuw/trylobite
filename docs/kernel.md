@@ -137,8 +137,8 @@ is as it was, since the trap entry saves them all. Trice relies on this
 | 6 | `puts(address)` | 0; −2 if the string is outside the process's page and block windows |
 | 7 | `spawn(program)` | the new process's number; −1 no free slot, −2 no such program, −3 not enough memory |
 | 8 | `hart()` | the number of the hart running the caller, −4 to +4 |
-| 10 | `wait(pid)` | how child `pid` ended, once it has: `a0` 0 exited, 1 faulted or 2 killed, `a1` its exit code, trap cause, or 0 when killed; `a0` −2 if `pid` is not the caller's child |
-| 13 | `kill(pid, for)` | ends `pid` before it runs again, a child of the caller when `for` is `FOR_SELF` (−1), or, for a driver, a child of process `for`: 0; 1 (`KILL_ENDED`) if it had ended already; −2 if `pid` is not that process's child, −21 `for` from a process that drives nothing. With `for` `KILL_ANY` (−2), any process but init: 0; −2 none, or it has ended; −21 for init |
+| 10 | `wait(pid)` | how child `pid` ended, once it has: `a0` 0 exited, 1 faulted or 2 killed, `a1` its exit code, trap cause, or the signal that ended it; `a0` −2 if `pid` is not the caller's child |
+| 13 | `kill(pid, for, sig)` | sends signal `sig` (Signals; 0 only checks) to `pid`'s process, a child of the caller when `for` is `FOR_SELF` (−1), or, for a driver, a child of process `for`: 0, and it ends before it runs again; 2 (`KILL_CAUGHT`) it goes on, catching, ignoring or blocking the signal; 1 (`KILL_ENDED`) if it had ended already; −2 if `pid` is not that process's child, −10 no such signal, −21 `for` from a process that drives nothing. With `for` `KILL_ANY` (−2), any process but init: as before, or −2 none, or it has ended; −21 for init |
 | 15 | `spawnw(window, for, args, n)` | starts the program file whose first block is in block window `window`, and each next block in the next window (docs/filesystem.md), as the caller's child when `for` is `FOR_SELF` (−1), or as the child of process `for`, whose call the caller holds, with the `n` trytes of arguments at `args` in that parent's memory (docs/filesystem.md, Program arguments): as `spawn`, with −2 when there is no window or no program in it, its image is larger than `EXEC_MAX` or runs past the windows the caller has, or `for` is not waiting for the caller, −10 (`E_INVAL`) for `n` below 0 or above `ARG_MAX`, −12 (`E_FAULT`) for arguments not all in the parent's memory |
 | 16 | `close(fd)` | empties descriptor `fd`: 0; −8 if it names nothing |
 | 17 | `give(pid, handle)` | puts the caller's `handle`, 0 to 26, in the lowest free descriptor of process `pid`, whose call the caller holds: the descriptor; −9 none free, −2 `pid` is not waiting for the caller, −10 no such handle |
@@ -164,7 +164,7 @@ is as it was, since the trap entry saves them all. Trice relies on this
 | 37 | `name(string)` | names the caller after the string: its part after the last `/`, at most 8 code points: 0; −12 not in the caller's memory |
 | 38 | `sleep(until)` | waits until the `time` CSR reaches `until`: 0 |
 | 39 | `notify(pid)` | tells process `pid`, without waiting, that the caller wants its attention: its `receive` gives a `NOTE_SIGNAL` notice naming the caller, once however often it was notified since: 0; −2 no such process, −3 `pid` is the caller |
-| 40 | `alarm(until)` | when the `time` CSR reaches `until`, the caller's `receive` gives a `NOTE_ALARM` notice; a later alarm replaces an earlier one, and `NO_ALARM` (−1) cancels it: 0 |
+| 40 | `alarm(until, how)` | when the `time` CSR reaches `until`, the caller's `receive` gives a `NOTE_ALARM` notice (`how` `ALARM_NOTICE`, 0), or its process gets `SIGALRM` (`ALARM_SIGNAL`, 1); a later alarm replaces an earlier one, and `NO_ALARM` (−1) cancels it: 0; −10 another `how` |
 | 41 | `brk(end)` | makes the caller's heap reach `end`, in whole zeroed pages from `HEAP_START`: the break, the first address past the heap; an `end` inside the heap, or `BRK_QUERY` (0), only asks, since the heap never shrinks; −10 (`E_INVAL`) for an `end` below `HEAP_START` or past `HEAP_MAX` pages, −3 (`E_NOMEM`) when the pages are not there, and then it maps none |
 | 42 | `clock()` | the time of day, from the machine's real-time clock: `a0` whole seconds since 1970-01-01 00:00:00 UTC (Unix time, negative before 1970), `a1` the microseconds past that second, 0 to 999,999; it cannot fail (System tools, The time of day) |
 | 43 | `stepclock(seconds, micros)` | moves the time of day `clock` gives by `seconds` and `micros` (−999,999 to 999,999, of the seconds' sign when they are not 0): 0; −10 (`E_INVAL`) for micros out of range or of the other sign, −21 (`E_PERM`) for a caller that is not init's child: only the servers and the programs `/etc/init` names may (The time of day) |
@@ -173,6 +173,9 @@ is as it was, since the trap entry saves them all. Trice relies on this
 | 46 | `join(tid, how)` | `a0` 0 and `a1` the code thread `tid` gave `thread_exit`, once it has: `JOIN_WAIT` (0) waits, `JOIN_POLL` (1) gives −19 (`E_BUSY`) while it runs; −2 (`E_NOCHILD`) for what is not another thread of the caller's process, or was joined, −10 (`E_INVAL`) for the caller itself or another `how` |
 | 47 | `futex(address, op, value)` | `FUTEX_WAIT` (0): sleeps while the `u32` at `address` (four trytes, low byte first) is `value`, until a `FUTEX_WAKE`: 0, or −27 (`E_AGAIN`) at once if it is not; `FUTEX_WAKE` (1): wakes at most `value` threads of the caller's process sleeping at `address`: how many; −12 (`E_FAULT`), −10 (`E_INVAL`) |
 | 48 | `gettid()` | the calling thread's number; a process's first thread's is the process's (`getpid`) |
+| 50 | `sigaction(sig, action, entry)` | what signal `sig` does to the caller's process from now: `SIG_DFL` (0) its default, `SIG_IGN` (1) nothing, `SIG_CATCH` (2) run `entry`, which becomes the process's signal entry (Signals): the action it had; −10 (`E_INVAL`) no such signal or action, or any but `SIG_DFL` for `SIGKILL` |
+| 51 | `sigmask(how, set)` | changes the calling thread's set of blocked signals, a bit 2^`sig` for each: `SIG_BLOCK` (0) adds `set`, `SIG_UNBLOCK` (1) takes it away, `SIG_SETMASK` (2) makes it `set`: the set it had; −10 another `how`, or `set` outside 0 to 2^`NSIG` − 1. `SIGKILL` is never blocked, and a signal it lets in is taken before the call returns |
+| 52 | `sigreturn(frame)` | goes back from a signal's handler to where the thread was, with the registers, coprocessor bank and mask the frame at `frame` keeps; does not return, but −12 if the frame is not all in the caller's memory |
 
 Numbers 9, 11, 12 and 14 are free: console input, blocks and
 files are not system calls but calls to the console server, the disk
@@ -318,9 +321,12 @@ by the hart that next schedules, and a hart with nothing to run sets
 its timer for the earliest sleeper, so sleeping is neither a busy wait
 nor, with nothing else running, a deadlock.
 
-`kill PID...` ends any process but init (`KILL_ANY`): there are no users
-to tell apart, so this is Unix's root. A server killed this way is
-started again by init, with what needs it, the shell included.
+`kill [-SIGNAL] PID...` sends each process `SIGTERM`, or the signal
+named (`-INT`, `-SIGUSR1`, `-s HUP`, `-9`), to any process but init
+(`KILL_ANY`): there are no users to tell apart, so this is Unix's root.
+`kill -l` lists the signals. A server ended this way is started again
+by init, with what needs it, the shell included. `bin/kill` is Rust,
+over trystd's `signal`.
 
 ## Messages for servers
 
@@ -445,6 +451,79 @@ are a deadlock. trystd's `thread` and `sync` (`spawn`, `JoinHandle`,
 `Mutex`, `Condvar`, `Arc`) are built on these, and `bin/rthreads` counts
 primes in threads on two harts.
 
+## Signals
+
+Signals are POSIX's, kept small (`kernel/rust/trykern/src/signal.rs`),
+and numbered as Linux numbers them: `SIGHUP` 1, `SIGINT` 2, `SIGQUIT` 3,
+`SIGKILL` 9, `SIGUSR1` 10, `SIGUSR2` 12, `SIGPIPE` 13, `SIGALRM` 14,
+`SIGTERM` 15 and `SIGCHLD` 17, any of 1 to `NSIG` − 1 (30) being one. A
+set of signals is a word with the bit 2^`sig` for each. `kill(pid, for,
+sig)` sends one to a whole process; who may send to whom is as `kill`
+always allowed.
+
+Each signal does one of three things to a process, which `sigaction`
+sets: its **default**, which ends the process (and its parent's `wait`
+says `WAIT_KILLED` with the signal in `a1`), or for `SIGCHLD` nothing;
+**nothing** (`SIG_IGN`); or it is **caught** (`SIG_CATCH`). `SIGKILL`
+always ends the process. The kernel keeps, in the process's record,
+the signals sent and not yet taken (`PCB_SIGPEND`), the sets it catches
+and ignores, and one **signal entry** for every caught signal, the
+address the last `SIG_CATCH` gave: which handler runs for which signal
+is the program's own business (trystd keeps a table). A child starts
+with what its parent ignores and blocks, and every other signal at its
+default, as across Unix's `fork` and `exec`; a thread starts with the
+mask of the thread that started it.
+
+Each **thread** has its own mask of blocked signals (`sigmask`); a
+signal goes to the process, and is taken by whichever of its threads
+does not block it. One every thread blocks waits, pending, until a
+thread lets it in. Sending marks the signal pending and sets
+`PCB_SIGNOTE` in each thread that lets it in; `resume`, on its way back
+to user mode, looks at that one word and calls `rk_signal`, which takes
+the lowest signal waiting and acts on it. A signal that ends the process
+ends it at once, as `kill` always has, when some thread lets it in.
+
+A caught signal runs the entry in that thread, between two of its
+instructions: the kernel pushes a **signal frame** (`SIGFRAME` trytes)
+below the thread's `sp`, holding its registers as the record keeps them
+(`PCB_SP` to `PCB_T6`), its `pc` (`SF_PC`), coprocessor bank (`SF_FPU`),
+mask (`SF_MASK`) and the signal (`SF_SIG`); blocks the signal; and
+starts the entry with `a0` = the signal, `a1` = the frame and `sp` just
+below it. The entry ends with `sigreturn(frame)`, which puts everything
+back, the mask too, so the thread carries on as if nothing had happened.
+A stack with no room for the frame ends the process instead.
+
+A thread waiting in a system call when a caught signal comes is woken
+to run its handler at once, and the call then returns −28 (`E_INTR`):
+any wait but a call a server has received (`ST_REPLY`), whose reply is
+still to come. Such a call had not happened yet, so calling again is
+always right, and trystd's system-call entry does, as Unix's
+`SA_RESTART`; nothing else ever sees `E_INTR`, since only a process that
+catches a signal is interrupted. A held read of the console is the
+console server's to end: it answers it with `E_INTR` at Ctrl-C (The
+console).
+
+Where the signals come from: Ctrl-C is `SIGINT` to the console's
+foreground process; the pipe server sends `SIGPIPE` to a process
+writing to a pipe nobody can read, as well as failing the write with
+`E_PIPE`; `alarm(until, ALARM_SIGNAL)` sends `SIGALRM`; a child's end
+sends its parent `SIGCHLD`; `bin/kill` sends any. A fault is not a
+signal: it ends the process as `WAIT_FAULTED`. There is no `SIGSTOP` or
+`SIGCONT`, and no signal reaches one thread alone.
+
+The shell catches `SIGPIPE`, so that a built-in writing into a pipeline
+whose reader has gone gets `E_PIPE` and the shell lives on; catching
+rather than ignoring leaves its children `SIGPIPE`'s default. It says
+nothing of a program `SIGPIPE` ended, as Unix shells do not.
+
+trystd's `signal` module has it for Rust: `signal(sig,
+Handler::Catch(f))` (or `Ignore`, `Default`), `kill(pid, sig)`,
+`raise`, `block`, `unblock` and `set_mask` over a `SigSet`, `alarm`,
+and `Child::signal` and `ExitStatus::signal` in `process`. A handler
+should only set an atomic or end the process: printing or allocating
+can wait forever on a lock the interrupted code holds. `tests/rsig.rs`
+tries each.
+
 ## The console
 
 The console belongs to a process, the **console server**
@@ -460,12 +539,16 @@ in `detrytus debug` the console stays open, `input TEXT` types more
 while a program waits, and `eof` closes it. The kernel still writes its own messages, and `putc` and
 `puts`, to the console's output directly: they are its log.
 
-Ctrl-C (code point 3) kills the console's **foreground process**, which
-`CN_FOREGROUND` names; the shell gives it each program it runs and takes
-the console back after, and the server lets go of a foreground process
-that ends. The server ends it with `kill` on behalf of the process that
-named it, which the kernel allows a driver, so it can end only that
-process's children. To see a Ctrl-C while nobody reads, the server reads
+Ctrl-C (code point 3) sends `SIGINT` to the console's **foreground
+process**, which `CN_FOREGROUND` names; the shell gives it each program
+it runs and takes the console back after, and the server lets go of a
+foreground process that ends. The server sends it with `kill` on behalf
+of the process that named it, which the kernel allows a driver, so it
+can reach only that process's children. `SIGINT`'s default ends the
+process, and the console is nobody's after; a process that catches or
+ignores it (`KILL_CAUGHT`) keeps the console, and a read of its that
+the server holds is answered with `E_INTR`, so its handler runs at once
+and trystd reads again. To see a Ctrl-C while nobody reads, the server reads
 console input into a buffer of its own, but only while a reader waits
 (as much as the readers need) or a foreground process runs (all of it).
 Ctrl-C throws away what was typed before it, as a terminal does; with no
@@ -803,9 +886,9 @@ when its writer goes. A built-in takes one place in a pipeline
 (`ls | wc`, `hello | cat`) and runs in the shell once the programs have
 started; two would wait for each other.
 
-**Ctrl-C** ends the program the shell is waiting for (in a pipeline the
-line's first program first), and at the prompt drops the line typed so
-far.
+**Ctrl-C** sends `SIGINT` to the program the shell is waiting for (in a
+pipeline the line's first program first), which ends it unless it
+catches the signal, and at the prompt drops the line typed so far.
 
 ```bash
 tools/fs.py new disk.img 100 notes.txt bin/*.rs
@@ -827,7 +910,7 @@ and the small calls `putc`, `puts`, `getpid`, `hart`, `yield` and
 `exit`), `info` (the
 `log` and `info` calls above), `names` (`register` and `lookup`),
 `desc` (descriptors), `procinfo` (`proc`, `name`, `sleep`, `alarm`),
-`wait` (`wait`, `kill`, and burying a process), `sched` (which
+`wait` (`wait`, `kill`, and burying a process), `signal` (`sigaction`, `sigmask`, `sigreturn`, sending and taking signals), `sched` (which
 process runs next, and the sleepers the clock wakes) and `ipc` (`send`,
 `recv`, `call`, `receive`, `reply`, `copyin`, `copyout`, `notify`, and
 what servers hear when a process ends) and `mm` (the page allocator,

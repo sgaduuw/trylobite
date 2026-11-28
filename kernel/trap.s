@@ -103,6 +103,8 @@ ktrap:
 resume:
         lw    t0, PCB_KILLED(s0)       # killed while it waited or was ready
         bnez  t0, on_kill
+        lw    t0, PCB_SIGNOTE(s0)      # a signal may be there for it: take
+        bnez  t0, on_signal            # it before it runs on (signal.rs)
         la    t0, procs
         sub   t0, s0, t0
         li    t1, PCB_SIZE
@@ -254,6 +256,14 @@ on_kill:
         mv    a0, s0
         call  rk_on_kill
         j     release
+
+# The thread in s0 has a signal to take (PCB_SIGNOTE): rk_signal takes
+# one, ending the process or starting its handler, or clears the note;
+# then resume looks again.
+on_signal:
+        mv    a0, s0
+        call  rk_signal
+        j     resume
 
 # A trap inside the kernel: nothing to save, nowhere to return to.
 kpanic:

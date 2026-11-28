@@ -16,15 +16,15 @@
 # Input passes through a buffer of the server's, so that Ctrl-C can be
 # seen while nobody reads: the server reads the console only while a
 # process waits in getc or the console has a foreground process, and a
-# Ctrl-C then kills that process instead of being read. Otherwise the
+# Ctrl-C then interrupts that process (SIGINT) instead of being read. Otherwise the
 # console is left alone, so input typed ahead waits in it for whoever
 # comes to read it, and a Ctrl-C typed ahead finds the program it was
 # meant for. A reader's call is held, unanswered, until there is a code
 # point for it (cn_readers), as the kernel held a reader in getc before.
 #
 # The foreground is the server's: the shell names each program it runs
-# with CN_FOREGROUND, and the server ends it at Ctrl-C with SYS_KILL on
-# the shell's behalf, which the kernel allows a driver. A process that
+# with CN_FOREGROUND, and the server sends it SIGINT at Ctrl-C with
+# SYS_KILL on the shell's behalf, which the kernel allows a driver. A process that
 # is not the caller's child is not refused when named, but the kill then
 # fails, and Ctrl-C is read as an ordinary code point.
 #
@@ -408,17 +408,23 @@ cn_arm:
         sys
         j     cn_wait
 
-# cn_kill: Ctrl-C: end the foreground process, for the process that
-# named it; the console is nobody's after. a0 = 0 if it was ended, else
-# KILL_ENDED or why not, and the Ctrl-C ended nothing. Clobbers a1, a2,
-# t0, t1.
+# cn_kill: Ctrl-C: send the foreground process SIGINT, for the process
+# that named it. One that ends reads nothing more, and the console is
+# nobody's after. One that goes on (it catches or ignores SIGINT,
+# KILL_CAUGHT) keeps the console, and a read it waits in ends with
+# E_INTR, as a terminal's does, so its handler runs now. a0 = 0 if the
+# Ctrl-C did either, else KILL_ENDED or why not, and the Ctrl-C ended
+# nothing. Clobbers a1..a3, t0, t1.
 cn_kill:
         lw    a1, cn_fg
         li    t0, NO_FOREGROUND
         sw    t0, cn_fg
         li    a0, SYS_KILL
         lw    a2, cn_fgfor
+        li    a3, SIGINT
         sys
+        li    t0, KILL_CAUGHT
+        beq   a0, t0, 2f
         bnez  a0, 1f
         li    t0, 3                    # it reads nothing more
         mul   t0, a1, t0
@@ -426,6 +432,19 @@ cn_kill:
         add   t1, t1, t0
         sw    zero, 0(t1)
 1:      ret
+2:      sw    a1, cn_fg                # it goes on, and keeps the console
+        li    t0, 3
+        mul   t0, a1, t0
+        la    t1, cn_readers
+        add   t1, t1, t0
+        lw    t0, 0(t1)
+        beqz  t0, 3f                   # not reading
+        sw    zero, 0(t1)
+        li    a0, SYS_REPLY
+        li    a2, E_INTR
+        sys
+3:      li    a0, 0
+        ret
 
 # cn_push: put code point a0 at the buffer's end, which has room.
 # Clobbers t1..t3.

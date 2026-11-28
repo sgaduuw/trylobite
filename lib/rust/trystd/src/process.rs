@@ -315,12 +315,17 @@ impl Child {
         Ok(status)
     }
 
-    /// End it (SYS_KILL); `wait` then says it was killed.
+    /// End it with SIGKILL; `wait` then says it was killed.
     pub fn kill(&mut self) -> io::Result<()> {
+        self.signal(sys::SIGKILL)
+    }
+
+    /// Send it signal `sig` (SYS_KILL, `signal`).
+    pub fn signal(&mut self, sig: i32) -> io::Result<()> {
         if self.status.is_some() {
             return Ok(());
         }
-        sys::check(sys::call(sys::SYS_KILL, &[self.pid, sys::FOR_SELF])).map(|_| ())
+        sys::check(sys::call(sys::SYS_KILL, &[self.pid, sys::FOR_SELF, sig])).map(|_| ())
     }
 
     pub fn wait_with_output(mut self) -> io::Result<Output> {
@@ -398,6 +403,12 @@ impl ExitStatus {
         self.how == sys::WAIT_KILLED
     }
 
+    /// The signal that ended it, if one did (std's
+    /// `ExitStatusExt::signal`).
+    pub fn signal(&self) -> Option<i32> {
+        self.killed().then_some(self.code)
+    }
+
     /// The trap cause that ended it, if it faulted.
     pub fn fault(&self) -> Option<i32> {
         (self.how == sys::WAIT_FAULTED).then_some(self.code)
@@ -411,7 +422,10 @@ impl fmt::Display for ExitStatus {
         } else if let Some(cause) = self.fault() {
             write!(f, "fault {cause}")
         } else {
-            f.write_str("killed")
+            match crate::signal::name(self.code) {
+                Some(name) => write!(f, "killed by SIG{name}"),
+                None => write!(f, "killed by signal {}", self.code),
+            }
         }
     }
 }

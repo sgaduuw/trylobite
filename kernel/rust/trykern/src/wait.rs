@@ -9,7 +9,7 @@ use crate::kdata;
 use crate::layout::*;
 use crate::proc::Proc;
 use crate::word::{Word, load_at};
-use crate::{desc, devices, ipc, names, thread};
+use crate::{desc, devices, ipc, names, signal};
 
 /// Process `pid` if it is a child of process `parent`, ended or not;
 /// else E_NOCHILD.
@@ -50,17 +50,20 @@ pub extern "C" fn rk_sys_wait(p: *mut u8) -> i32 {
     }
 }
 
-/// kill(pid, for): end pid, a child of the caller, or with for not
-/// FOR_SELF a child of process for. It goes the next time the kernel
-/// would run it, which for one running on another hart is its next trap,
-/// within a timer slice; its parent's wait then reports WAIT_KILLED. A
-/// child that has ended already gives KILL_ENDED instead, so the console
-/// server can tell that a Ctrl-C ended nothing. Only a driver may kill on
-/// another's behalf: the console server, which ends the console's
-/// foreground process at Ctrl-C with the authority of the process that
-/// gave it the console. A driver is trusted with more than that already,
-/// since its device can write any page. With KILL_ANY, any process but
-/// init (bin/kill).
+/// kill(pid, for, sig): send signal sig to pid, a child of the caller,
+/// or with for not FOR_SELF a child of process for (signal.rs says what
+/// it does there). One that ends goes the next time the kernel would run
+/// it, which for one running on another hart is its next trap, within a
+/// timer slice; its parent's wait then reports WAIT_KILLED and the
+/// signal. A child that has ended already gives KILL_ENDED instead, and
+/// one that goes on (it catches, ignores or blocks the signal)
+/// KILL_CAUGHT, so the console server can tell what a Ctrl-C did. Only a
+/// driver may signal on another's behalf: the console server, which
+/// sends the console's foreground process SIGINT at Ctrl-C with the
+/// authority of the process that gave it the console. A driver is
+/// trusted with more than that already, since its device can write any
+/// page. With KILL_ANY, any process but init (bin/kill). Signal 0 only
+/// checks that the process is there.
 #[unsafe(no_mangle)]
 pub extern "C" fn rk_sys_kill(p: *mut u8) {
     let p = Proc(p);
@@ -71,6 +74,10 @@ pub extern "C" fn rk_sys_kill(p: *mut u8) {
 fn kill(p: Proc) -> Word {
     let pid = p.get(PCB_A1);
     let on_behalf = p.get(PCB_A2);
+    let sig = p.get(PCB_A3);
+    if !(0..NSIG).contains(&sig) {
+        return E_INVAL;
+    }
     if on_behalf == KILL_ANY {
         let Some(q) = Proc::alive(pid) else {
             return E_NOPROC;
@@ -78,8 +85,7 @@ fn kill(p: Proc) -> Word {
         if q.space().pid() == 0 {
             return E_PERM; // init, which the rest needs, or a thread of it
         }
-        kill_pid(pid);
-        return 0;
+        return send(q, sig);
     }
     let parent = if on_behalf == FOR_SELF {
         p.space().pid() // a thread's children are its process's
@@ -92,30 +98,20 @@ fn kill(p: Proc) -> Word {
     match child(pid, parent) {
         Err(e) => e,
         Ok(c) if c.is(ST_ZOMBIE) => KILL_ENDED,
-        Ok(_) => {
-            kill_pid(pid);
-            0
-        }
+        Ok(c) => send(c, sig),
     }
+}
+
+/// Signal `sig` to the process of `q`, which has not ended; a thread's
+/// number reaches its whole process.
+fn send(q: Proc, sig: Word) -> Word {
+    if sig == 0 { 0 } else { signal::post(q.space(), sig) }
 }
 
 /// Whether process `p` drives a device.
 pub fn drives_any(p: Proc) -> bool {
     let me = p.addr_word();
     (0..NSRC).any(|k| load_at(kdata::drivers_base(), 3 * k) == me)
-}
-
-/// End process `pid`, every thread of it, if it has not ended; each
-/// goes the next time the kernel would run it (ktrap, resume), and one
-/// blocked in any system call (recv, wait, call, receive, lookup) is
-/// made ready for that, since nothing else would wake it. A thread's
-/// number ends its whole process.
-fn kill_pid(pid: Word) {
-    let q = Proc::of(pid);
-    if q.is(ST_EXITED) || q.is(ST_ZOMBIE) {
-        return; // already gone
-    }
-    thread::end(q.space(), WAIT_KILLED, 0);
 }
 
 /// Process `p` has ended, after every thread of it, and its pages are
@@ -158,4 +154,5 @@ pub fn bury(p: Proc) {
     } else {
         p.set(PCB_STATE, ST_ZOMBIE); // it waits for another child, or none
     }
+    signal::post(par, SIGCHLD); // which does nothing, unless it catches it
 }

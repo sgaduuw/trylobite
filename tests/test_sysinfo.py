@@ -380,6 +380,7 @@ def test_proc_counts_the_ticks_each_process_runs():
 {proc("0")}
         lw    s2, pinfo + PI_CPU       # s2: init's
         li    a0, SYS_KILL
+        li    a3, SIGKILL
         li    a1, 1
         li    a2, FOR_SELF
         sys
@@ -438,6 +439,7 @@ def test_a_sleeper_can_be_killed():
         li    a0, SYS_YIELD            # let it fall asleep
         sys
         li    a0, SYS_KILL
+        li    a3, SIGKILL
         mv    a1, s0
         li    a2, FOR_SELF
         sys
@@ -489,6 +491,7 @@ def test_kill_any_ends_a_process_that_is_not_its_child():
         *(
             f"""
         li    a0, SYS_KILL
+        li    a3, SIGKILL
         li    a1, {pid}
         li    a2, KILL_ANY
         sys"""

@@ -79,6 +79,11 @@
 sh:     li    a0, SYS_NAME             # for ps: a program of the image
         la    a1, sh_myname            # has no argv[0] to name it
         sys
+        li    a0, SYS_SIGACTION        # a built-in writing to a pipe whose
+        li    a1, SIGPIPE              # reader has gone gets E_PIPE, and
+        li    a2, SIG_CATCH            # the shell lives on. Caught, not
+        la    a3, sh_sigpipe           # ignored, so the programs it starts
+        sys                            # have SIGPIPE's default
         li    a0, SYS_LOOKUP           # the console server, which init
         la    a1, sh_conname           # has started (user/init.s)
         li    a2, LOOKUP_NOW
@@ -1351,7 +1356,9 @@ reap:   addi  sp, sp, -3
         beqz  s3, 9f                   # exited with 0: nothing to say
         la    a1, sh_exited
         j     3f
-1:      la    a1, sh_killed
+1:      li    t0, SIGPIPE              # a writer whose reader left: as
+        beq   s3, t0, 9f               # Unix shells, nothing to say
+        la    a1, sh_killed
         call  puts
         j     4f
 2:      la    a1, sh_faulted
@@ -1363,6 +1370,14 @@ reap:   addi  sp, sp, -3
 9:      lw    ra, 0(sp)
         addi  sp, sp, 3
         ret
+
+# sh_sigpipe: the shell's signal entry, for SIGPIPE: nothing to do but go
+# back (a1 is the frame). It only comes while the shell waits in a write
+# the pipe server holds, which a signal never cuts short, so no call of
+# the shell's gets E_INTR.
+sh_sigpipe:
+        li    a0, SYS_SIGRETURN
+        sys
 
 # --- built-ins ----------------------------------------------------------------
 # Each is jumped to with s4 at the rest of its line, and ends at prompt.

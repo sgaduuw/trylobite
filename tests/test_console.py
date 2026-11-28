@@ -120,6 +120,7 @@ def test_kill_says_when_a_child_had_ended_already():
         mv    s1, a0
         {spin(3000)}
         li    a0, SYS_KILL
+        li    a3, SIGKILL
         mv    a1, s1
         li    a2, FOR_SELF
         sys

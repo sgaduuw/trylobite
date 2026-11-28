@@ -116,11 +116,18 @@ pub extern "C" fn rk_sys_sleep(p: *mut u8) -> i32 {
     1
 }
 
-/// alarm(until): set the caller's alarm, or cancel it with NO_ALARM. It
+/// alarm(until, how): set the caller's alarm, or cancel it with NO_ALARM;
+/// it gives a notice, or with ALARM_SIGNAL sends its process SIGALRM. It
 /// waits with the sleepers: wake_sleepers rings it.
 #[unsafe(no_mangle)]
 pub extern "C" fn rk_sys_alarm(p: *mut u8) {
     let p = Proc(p);
+    let how = p.get(PCB_A2);
+    if how != ALARM_NOTICE && how != ALARM_SIGNAL {
+        p.set(PCB_A0, E_INVAL);
+        return;
+    }
+    p.set(PCB_SIGALRM, how);
     p.set(PCB_ALARM, 0);
     let until = p.get(PCB_A1);
     if until >= 0 {

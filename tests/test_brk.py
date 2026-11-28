@@ -131,6 +131,7 @@ def test_the_heap_goes_back_when_the_process_ends():
         la    a2, pinfo
         sys
         li    a0, SYS_KILL
+        li    a3, SIGKILL
         mv    a1, s1
         li    a2, FOR_SELF
         sys
