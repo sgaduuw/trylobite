@@ -20,7 +20,9 @@ def shell():
 
 def said(shell, typed: str, disk=None) -> str:
     """What the shell said to typed, the kernel's messages left out."""
-    result = run_image(shell, input=typed, disk=disk or bin_disk(), max_steps=20_000_000)
+    result = run_image(
+        shell, input=typed, disk=disk or bin_disk(), max_steps=20_000_000
+    )
     assert result.exit_code == 0, result.console
     return re.sub(r"trylobite: [^\n]*\n", "", result.after_boot)
 
@@ -88,13 +90,13 @@ def test_quoting_decides_expansion_and_splitting(shell):
     # a bare value splits, and an empty one is no argument at all.
     typed = (
         "V='a   b'\necho $V \"$V\" '$V' \\$V\n"
-        "E=\necho x $E y \"$E\" | wc\necho $ \"$\" $1x\n"
+        'E=\necho x $E y "$E" | wc\necho $ "$" $1x\n'
     )
     assert said(shell, typed) == (
         "$ V='a   b'\n$ echo $V \"$V\" '$V' \\$V\n"
         "a b a   b $V $V\n"
-        "$ E=\n$ echo x $E y \"$E\" | wc\n1 2 5\n"
-        "$ echo $ \"$\" $1x\n$ $ $1x\n$ \n"
+        '$ E=\n$ echo x $E y "$E" | wc\n1 2 5\n'
+        '$ echo $ "$" $1x\n$ $ $1x\n$ \n'
     )
 
 
@@ -104,7 +106,9 @@ def test_braces_defaults_and_lengths(shell):
 
 
 def test_status_and_process_number(shell):
-    out = said(shell, "fail\necho $?\nnope\necho $?\necho $? $$\ncd /nowhere\necho $?\n")
+    out = said(
+        shell, "fail\necho $?\nnope\necho $?\necho $? $$\ncd /nowhere\necho $?\n"
+    )
     assert out == (
         "$ fail\nsh: exit 3\n$ echo $?\n3\n"
         "$ nope\nsh: no such program: nope\n$ echo $?\n127\n"
@@ -115,7 +119,9 @@ def test_status_and_process_number(shell):
 
 def test_path_is_searched_in_order(shell):
     disk = bin_disk(programs=(RENV,))
-    typed = "PATH=/nowhere\nhello\nPATH=/tmp:/bin\nhello\n/bin/hello\nunset PATH\nhello\n"
+    typed = (
+        "PATH=/nowhere\nhello\nPATH=/tmp:/bin\nhello\n/bin/hello\nunset PATH\nhello\n"
+    )
     out = said(shell, typed, disk)
     assert out == (
         "$ PATH=/nowhere\n$ hello\nsh: no such program: hello\n"
