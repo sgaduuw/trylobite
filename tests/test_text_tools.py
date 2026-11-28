@@ -1,8 +1,11 @@
-"""sort and diff of bin/, run from the shell on a disk of bin/. sort
-reads every line before it writes, so `sort -o f f` is safe; diff's
-output is checked against what Unix's diff says for the same files."""
+"""sort, diff, find and tar of bin/, run from the shell on a disk of
+bin/. sort reads every line before it writes, so `sort -o f f` is safe;
+diff's output is what Unix's diff says for the same files; tar's archives
+are ustar, so Python's tarfile reads them and makes ones it takes."""
 
+import io
 import re
+import tarfile
 
 import pytest
 
@@ -16,6 +19,20 @@ TABLE = "b:2:x\na:10:y\nc:1:x\n"
 @pytest.fixture(scope="module")
 def shell():
     return assemble_file(ROOT / "shell.s")
+
+
+def tree_disk(blocks: int = 90, **texts: str):
+    """A disk of bin/ with a small tree, docs/ holding a.txt, b.md and
+    sub/c.txt, beside the texts."""
+    disk = bin_disk(blocks, **texts)
+    fs = Filesystem.load(disk[0])
+    fs.mkdir("docs")
+    fs.write("docs/a.txt", "alpha\n")
+    fs.write("docs/b.md", "# bee\n")
+    fs.mkdir("docs/sub")
+    fs.write("docs/sub/c.txt", "sea\n" * 300)  # over a record of 512
+    fs.save(disk[0])
+    return disk
 
 
 def said(shell, typed: str, on=None, max_steps: int = 40_000_000) -> str:
@@ -158,7 +175,7 @@ def test_diff_finds_a_shortest_script_that_patches(shell):
     result = list(old)
     heads = [x for x in lines if re.fullmatch(r"[\d,]+[acd][\d,]+", x)]
     for head in reversed(heads):
-        a, op, b = re.fullmatch(r"([\d,]+)([acd])([\d,]+)", head).groups()
+        a, op, _ = re.fullmatch(r"([\d,]+)([acd])([\d,]+)", head).groups()
         a0, *a1 = map(int, a.split(","))
         a1 = a1[0] if a1 else a0
         body = lines[lines.index(head) + 1 :]
@@ -181,3 +198,175 @@ def test_diff_finds_a_shortest_script_that_patches(shell):
         else:
             result[a0 - 1 : a1] = put
     assert result == new
+
+
+# --- find -----------------------------------------------------------------------
+
+
+def test_find_walks_a_tree(shell):
+    on = tree_disk(notes="n\n")
+    assert output(shell, "find docs", on) == (
+        "docs\ndocs/a.txt\ndocs/b.md\ndocs/sub\ndocs/sub/c.txt\n"
+    )
+
+
+def test_find_tests(shell):
+    on = tree_disk(notes="n\n")
+    out = said(
+        shell,
+        "find . -name '*.txt'\nfind docs -type d\nfind / -maxdepth 1 -type d\n"
+        "find docs -name '[ab].*' -type f\nfind /bin -name 'f?nd'\n",
+        on,
+    )
+    assert out == (
+        "$ find . -name '*.txt'\n./docs/a.txt\n./docs/sub/c.txt\n"
+        "$ find docs -type d\ndocs\ndocs/sub\n"
+        "$ find / -maxdepth 1 -type d\n/\n/bin\n/docs\n"
+        "$ find docs -name '[ab].*' -type f\ndocs/a.txt\ndocs/b.md\n"
+        "$ find /bin -name 'f?nd'\n/bin/find\n$ \n"
+    )
+
+
+def test_find_goes_deeper_than_its_descriptors(shell):
+    """Ten directories deep, more than a program's nine descriptors."""
+    disk = bin_disk()
+    fs = Filesystem.load(disk[0])
+    path = ""
+    for i in range(10):
+        path += f"d{i}/"
+        fs.mkdir(path.rstrip("/"))
+    fs.write(path + "end", "x\n")
+    fs.save(disk[0])
+    assert output(shell, "find d0 -name end", disk) == (
+        "d0/d1/d2/d3/d4/d5/d6/d7/d8/d9/end\n"
+    )
+
+
+def test_find_complains(shell):
+    out = said(shell, "find nothing docs\nfind -size 3\n", tree_disk())
+    assert out.startswith(
+        "$ find nothing docs\nfind: nothing: no such file or directory\ndocs\n"
+    )
+    assert out.endswith(
+        "sh: exit 1\n$ find -size 3\n"
+        "usage: find [PATH]... [-name PATTERN] [-type f|d] [-maxdepth N]\n"
+        "sh: exit 2\n$ \n"
+    )
+
+
+# --- tar ------------------------------------------------------------------------
+
+
+def archive(fs: Filesystem, path: str) -> tarfile.TarFile:
+    """The archive at path, its trytes as bytes, opened by Python."""
+    trytes = fs.read_trytes(path)
+    assert all(0 <= t < 256 for t in trytes)
+    return tarfile.open(fileobj=io.BytesIO(bytes(trytes)))
+
+
+def test_tar_makes_an_archive_any_tar_reads(shell):
+    on = tree_disk(notes="some notes\n")
+    out = said(shell, "tar cvf a.tar docs notes\n", on)
+    assert out == (
+        "$ tar cvf a.tar docs notes\n"
+        "docs/\ndocs/a.txt\ndocs/b.md\ndocs/sub/\ndocs/sub/c.txt\nnotes\n$ \n"
+    )
+    fs = Filesystem.load(on[0])
+    with archive(fs, "a.tar") as tar:
+        assert tar.getnames() == [
+            "docs",
+            "docs/a.txt",
+            "docs/b.md",
+            "docs/sub",
+            "docs/sub/c.txt",
+            "notes",
+        ]
+        assert tar.getmember("docs/sub").isdir()
+        assert tar.extractfile("docs/sub/c.txt").read() == b"sea\n" * 300
+        assert tar.extractfile("notes").read() == b"some notes\n"
+    assert len(fs.read_trytes("a.tar")) % 512 == 0
+
+
+def test_tar_lists_and_extracts(shell):
+    on = tree_disk(notes="some notes\n")
+    out = said(
+        shell,
+        "tar cf a.tar docs notes\ntar tvf a.tar\nmkdir out\ncd out\n"
+        "tar xf ../a.tar\ncd ..\ndiff -u docs/sub/c.txt out/docs/sub/c.txt\n"
+        "mkdir part\ncd part\ntar -x -v -f ../a.tar docs/sub\nfind .\n",
+        on,
+    )
+    assert (
+        "$ tar tvf a.tar\n"
+        + (
+            "d        0 docs/\n"
+            "-        6 docs/a.txt\n"
+            "-        6 docs/b.md\n"
+            "d        0 docs/sub/\n"
+            "-     1200 docs/sub/c.txt\n"
+            "-       11 notes\n"
+        )
+        in out
+    )
+    assert "$ diff -u docs/sub/c.txt out/docs/sub/c.txt\n$ " in out
+    assert out.endswith(
+        "docs/sub/\ndocs/sub/c.txt\n"
+        "$ find .\n.\n./docs\n./docs/sub\n./docs/sub/c.txt\n$ \n"
+    )
+    fs = Filesystem.load(on[0])
+    assert fs.read("out/notes") == "some notes\n"
+    assert fs.read("out/docs/b.md") == "# bee\n"
+
+
+def test_tar_through_a_pipe_and_with_programs(shell):
+    on = tree_disk()
+    out = said(
+        shell,
+        "tar cf - docs/sub bin/hello | tar tf -\n"
+        "tar cf p.tar bin/hello\nmkdir x\ncd x\ntar xf ../p.tar\n",
+        on,
+    )
+    assert out.startswith(
+        "$ tar cf - docs/sub bin/hello | tar tf -\n"
+        "docs/sub/\ndocs/sub/c.txt\nbin/hello\n"
+    )
+    fs = Filesystem.load(on[0])
+    assert fs.read_trytes("x/bin/hello") == fs.read_trytes("bin/hello")
+
+
+def test_tar_takes_an_archive_python_made(shell):
+    made = io.BytesIO()
+    with tarfile.open(fileobj=made, mode="w", format=tarfile.USTAR_FORMAT) as tar:
+        for name, data in [("t/one", b"1\n"), ("t/deep/two", b"2" * 700)]:
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+        info = tarfile.TarInfo("../escape")
+        info.size = 1
+        tar.addfile(info, io.BytesIO(b"!"))
+    disk = bin_disk()
+    fs = Filesystem.load(disk[0])
+    fs.write_trytes("py.tar", list(made.getvalue()))
+    fs.save(disk[0])
+    out = said(shell, "tar xf py.tar\n", disk)
+    assert out == (
+        "$ tar xf py.tar\ntar: ../escape: member name contains '..'\nsh: exit 2\n$ \n"
+    )
+    fs = Filesystem.load(disk[0])
+    assert fs.read("t/one") == "1\n"
+    assert fs.read("t/deep/two") == "2" * 700
+    assert fs.lookup("escape") is None
+
+
+def test_tar_leaves_out_the_archive_and_complains(shell):
+    on = tree_disk()
+    out = said(
+        shell, "tar cf docs/in.tar docs\ntar tf docs/in.tar\ntar q\ntar xf gone\n", on
+    )
+    assert out == (
+        "$ tar cf docs/in.tar docs\ntar: docs/in.tar: is the archive; not dumped\n"
+        "$ tar tf docs/in.tar\n"
+        "docs/\ndocs/a.txt\ndocs/b.md\ndocs/sub/\ndocs/sub/c.txt\n"
+        "$ tar q\nusage: tar -c|-t|-x [-v] [-f ARCHIVE] [PATH]...\nsh: exit 2\n"
+        "$ tar xf gone\ntar: gone: no such file or directory\nsh: exit 2\n$ \n"
+    )
