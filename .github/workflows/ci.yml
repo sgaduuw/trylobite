@@ -50,7 +50,7 @@ jobs:
           tools/fs.py cat disk.img docs/hi | grep -q 'hello from a balanced-ternary machine'
       - name: Run a shell session on three harts
         # The shell is /bin/sh: it needs the disk.
-        run: printf 'hello\nfail\npingpong\nexit\n' | detrytus run shell.s --ram-pages 84 --harts 3 --input - --disk disk.img
+        run: printf 'hello\nfail\npingpong\nexit\n' | detrytus run shell.s --ram-pages 243 --harts 3 --input - --disk disk.img
       - name: Boot the shell from the disk
         run: |
           printf 'hello\nuname -a\nexit\n' | detrytus run --harts 3 --input - --disk disk.img | tee boot.txt

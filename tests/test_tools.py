@@ -58,7 +58,7 @@ def test_free_adds_up(shell):
     assert lines[1].split() == ["total", "used", "free"]
     pages = [int(n) for n in lines[2].split()[1:]]
     trytes = [int(n) for n in lines[3].split()[1:]]
-    assert pages[0] == 84 and pages[1] + pages[2] == pages[0]
+    assert pages[0] == 243 and pages[1] + pages[2] == pages[0]
     assert trytes == [n * 19683 for n in pages]
 
 
@@ -127,11 +127,11 @@ def test_top_shows_a_screen_each_period(shell):
             assert 99.0 <= sum(float(x) for x in m.groups()) <= 100.0, cpu
         mem = lines[2 + kernel.HARTS]
         m = re.fullmatch(
-            r"Mem   : +84 pages total, +(\d+) free, +(\d+) used  "
+            r"Mem   : +243 pages total, +(\d+) free, +(\d+) used  "
             r"\(19,683 trytes a page\)",
             mem,
         )
-        assert m and int(m[1]) + int(m[2]) == 84, mem
+        assert m and int(m[1]) + int(m[2]) == 243, mem
         table = lines[4 + kernel.HARTS :]
         header = "PID PPID STATE PAGES CPU% TIME NAME"
         assert table[0].split() == header.split()

@@ -2461,11 +2461,11 @@ running a line, the built-ins), over trystd.
   having read the shell's file, and `xargs < words | wc` (xargs with a
   heap, its echo, wc and the shell) no longer fit on 81 pages: on main
   it fitted only because the file server had not grown yet when the test
-  ran. The shell test machine is 84 pages now (`SHELL_RAM_PAGES`), and
-  `bin_disk` 60 blocks for the shell's two. The real machine's default
-  is 59,049 pages; the small one stays small to show what costs memory.
-  trystd
-  gained what that needed without the heap: `process::spawn_file`
+  ran. Eelco: "the test machine should have enough pages to do anything
+  comfortably", so `SHELL_RAM_PAGES` is 243 (3^5) now, which reverses
+  the earlier choice to keep it tight to show what costs memory; boot
+  touches no free page, so a larger machine costs the tests nothing.
+  `bin_disk` is 60 blocks, for the shell's two. trystd gained what that needed without the heap: `process::spawn_file`
   (FS_SPAWN with an argument block) and `spawn_image`, descriptors by
   number (`fs::dup2`, `close`, `is_open`, `set_inherit`),
   `File::read_name`, `env::current_dir_in`, and a `console` module (open,

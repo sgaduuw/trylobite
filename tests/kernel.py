@@ -19,7 +19,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
 RAM_PAGES = 40  # RAM of a machine build() makes, unless a test says
-SHELL_RAM_PAGES = 84  # ... and of one an assembled file (shell.s) runs on
+SHELL_RAM_PAGES = 243  # ... and of one an assembled file (shell.s) runs on
 # Harts the machine has when a test does not say: the suite runs once
 # with each of these (tests/conftest.py sets it).
 HARTS = 1

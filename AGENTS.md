@@ -116,7 +116,7 @@ pipe.
   Program images sit in pages from `P_PROG0`, and the free pages start
   after the last. **RAM size belongs to the machine**: the kernel reads
   it at boot (`page_init`), so no build names one; tests choose it with
-  `ram_pages=` (`build()`'s default, 40, or `SHELL_RAM_PAGES`, 84, for an
+  `ram_pages=` (`build()`'s default, 40, or `SHELL_RAM_PAGES`, 243, for an
   assembled file such as `shell.s`).
 - **Program 0 is init.** The kernel starts it and nothing else. In
   `demo.s` it is `user/demo-init.s`; in `shell.s` it is `user/init.s`,
@@ -166,8 +166,10 @@ pipe.
   file, complaints on standard error as `NAME: what: why` (an
   `io::Error` says the why), and exit 1 when anything failed. Watch its
   size: a program's image shares its one page with its stack, so one
-  over about 9,800 trytes takes a fifth page, and a heap one more; the
-  84-page test machine then runs out in a pipeline of three. core::fmt
+  over about 9,800 trytes takes a fifth page, and a heap one more. The
+  test machine (243 pages) is roomy on purpose, so a test never fails
+  for want of memory; keep programs small anyway, as every page counts
+  on every machine. core::fmt
   is 6,000 trytes, brought in by `println!`, `write!`, `format!` or a
   `run` returning an `io::Result` (main! prints its error); a `&mut dyn
   Read` brings every default method of the trait. So the small tools
