@@ -23,6 +23,11 @@ import sys
 import tempfile
 from pathlib import Path
 
+try:
+    from tools import toolchain
+except ImportError:  # run as a script: tools/ is on the path, not the repository
+    import toolchain  # type: ignore[no-redef]
+
 ROOT = Path(__file__).resolve().parent.parent
 CRATE = ROOT / "kernel" / "rust" / "trykern"
 OUT = ROOT / "kernel" / "trykern.s"
@@ -45,13 +50,8 @@ def rust_ir() -> list[Path]:
     cargo = shutil.which("cargo")
     if cargo is None:
         raise BuildError("no cargo to build the kernel's Rust with")
-    target = Path(tempfile.gettempdir()) / f"trylobite-kernel-{os.getuid()}"
-    env = {
-        **os.environ,
-        "RUSTC_BOOTSTRAP": "1",
-        "RUSTFLAGS": "--emit=llvm-ir,link -Zunstable-options -Cpanic=immediate-abort",
-        "CARGO_TARGET_DIR": str(target),
-    }
+    work = Path(tempfile.gettempdir()) / f"trylobite-kernel-{os.getuid()}"
+    env, target = toolchain.cargo_env(CRATE, work)
     args = ["--release", "--target", RUST_TARGET]
     # Cleaned first, so its IR is written afresh: a build cargo thinks is
     # up to date writes none.
