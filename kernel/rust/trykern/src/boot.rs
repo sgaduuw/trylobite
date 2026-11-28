@@ -7,7 +7,7 @@ use crate::harts::harts_present;
 use crate::kdata::{self, read};
 use crate::layout::*;
 use crate::mem::pages;
-use crate::word::{addr, load_small_at};
+use crate::word::{addr, load_at, load_small_at};
 
 unsafe extern "C" {
     static msg_version: u8;
@@ -44,6 +44,8 @@ macro_rules! msg {
 /// spawns init, so the free pages are those init can have.
 #[unsafe(no_mangle)]
 pub extern "C" fn rk_boot_report() {
+    // When it booted, by the real-time clock, for uptime (info).
+    kdata::write::booted(load_at(addr(V_POWER), POWER_CLOCK));
     msg!(msg_version);
     puts(kdata::version());
     msg!(msg_about);

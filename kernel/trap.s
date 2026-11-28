@@ -66,6 +66,17 @@ ktrap:
         add   t1, t1, t0
         sw    t1, PCB_CPU(s0)
         lw    tp, PCB_HART(s0)         # tp: this hart's number (see resume)
+        addi  t1, tp, HART_MAX         # ... and its count of them: only this
+        li    t2, 3                    # hart writes its own entries, and it
+        mul   t1, t1, t2               # stops counting as in user mode first,
+        la    t2, hart_ran             # so hartinfo may count these ticks a
+        add   t2, t2, t1               # moment late, never twice
+        sw    zero, 0(t2)
+        la    t2, hart_user
+        add   t1, t1, t2
+        lw    t2, 0(t1)
+        add   t2, t2, t0
+        sw    t2, 0(t1)
         call  klock_take
         la    sp, kstack_top           # the one kernel stack: ours while we hold the lock
         lw    t0, PCB_KILLED(s0)       # killed while it ran: it goes before
@@ -150,6 +161,13 @@ resume:
         csrw  ptbr, t0
         lw    t0, PCB_RETRY(s0)        # its call runs again: a server woken
         bnez  t0, retry                # in receive or lookup (ipc.rs, names.rs)
+        addi  t1, tp, HART_MAX         # this hart is in user mode from now
+        li    t2, 3                    # (hartinfo)
+        mul   t1, t1, t2
+        la    t2, hart_ran
+        add   t1, t1, t2
+        csrr  t0, time
+        sw    t0, 0(t1)
         lw    t0, PCB_PC(s0)
         csrw  stpc, t0
         li    t0, -1                   # PR = -1: tret returns to user mode

@@ -92,7 +92,8 @@ pipe.
 - **One kernel lock.** Every path from trap entry to `resume` runs
   holding it (`kernel/lock.s`), and so may touch any kernel data,
   including the one kernel stack. Code before `klock_take` touches only
-  the trapping process's own record.
+  the trapping process's own record and its hart's own counters
+  (`hart_ran`, `hart_user`, which only that hart writes).
 - **Physical memory is reached through the direct map**
   (`physical + DMAP`). Never free a page while it is part of the active
   address space: switch `ptbr` away first, as `release` does.

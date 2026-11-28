@@ -11,7 +11,7 @@
 use crate::console::{putn, puts};
 use crate::kdata;
 use crate::layout::*;
-use crate::word::{Word, addr, load, load_at, load_small_at, store, store_at};
+use crate::word::{Word, addr, load, load_at, load_small_at, store, store_at, time};
 
 unsafe extern "C" {
     /// firmware/boot.s: where every hart starts, untranslated.
@@ -49,6 +49,17 @@ pub fn harts_present() -> i32 {
     n
 }
 
+/// Whether hart `h` is one of the middle nine and present (hartinfo).
+pub fn present(h: i32) -> bool {
+    in_middle(h) && load_small_at(slot(h), HC_STATE) >= 0
+}
+
+/// Hart `h`'s entry in a per-hart table of words, for the tables of
+/// what each hart did with its time (hartinfo).
+pub fn hart_entry(table: *mut u8, h: i32) -> *mut u8 {
+    entry(table, h)
+}
+
 /// Start hart `h` if it is in the middle nine, present and stopped. It
 /// enters the firmware like hart 0, with a0 = ksecondary, and waits for
 /// the kernel lock there. Whether it was started.
@@ -66,6 +77,12 @@ fn start_hart(h: i32) -> bool {
     // A fresh start: not leaving, whatever an earlier life of the hart
     // was asked.
     store(entry(kdata::leaving_base(), h), 0);
+    // ... and its use of time counts from now (hartinfo).
+    store(entry(kdata::hart_started_base(), h), time());
+    store(entry(kdata::hart_user_base(), h), 0);
+    store(entry(kdata::hart_idle_base(), h), 0);
+    store(entry(kdata::hart_ran_base(), h), 0);
+    store(entry(kdata::hart_waits_base(), h), 0);
     store_at(s, HC_CONTROL, 1);
     true
 }

@@ -21,6 +21,12 @@ unsafe extern "C" {
     fn raw_more(k: i32) -> i32;
     #[link_name = "word_at"]
     fn raw_word_at(address: usize) -> i32;
+    #[link_name = "word_split"]
+    fn raw_word_split(address: usize) -> u32;
+    #[link_name = "ticks"]
+    fn raw_ticks() -> u32;
+    #[link_name = "sleep_until"]
+    fn raw_sleep_until(low: u32, high: i32);
     #[link_name = "argc"]
     fn raw_argc() -> i32;
     #[link_name = "argv"]
@@ -51,6 +57,24 @@ pub fn more(k: i32) -> i32 {
 /// The word at an aligned address in this process's memory.
 pub fn word_at(address: usize) -> i32 {
     unsafe { raw_word_at(address) }
+}
+
+/// The word at an aligned address whole, past what an i32 holds: a
+/// count of ticks, Unix seconds.
+pub fn word_at_i64(address: usize) -> i64 {
+    let low = unsafe { raw_word_split(address) };
+    ((more(0) as i64) << 32) | low as i64
+}
+
+/// The time CSR: ticks since boot, the clock for intervals.
+pub fn ticks() -> i64 {
+    let low = unsafe { raw_ticks() };
+    ((more(0) as i64) << 32) | low as i64
+}
+
+/// Wait until the time CSR reaches `until` (SYS_SLEEP, absolute).
+pub fn sleep_until(until: i64) {
+    unsafe { raw_sleep_until(until as u32, (until >> 32) as i32) }
 }
 
 /// main's arguments as the start code laid them out.
@@ -180,5 +204,15 @@ impl<const T: usize> Words<T> {
     /// The word at offset `at` (in trytes, a multiple of 3).
     pub fn word(&self, at: i32) -> i32 {
         word_at(self.ptr() + at as usize)
+    }
+
+    /// The same, whole, for a word past what an i32 holds.
+    pub fn word_i64(&self, at: i32) -> i64 {
+        word_at_i64(self.ptr() + at as usize)
+    }
+
+    /// The tryte at offset `at`, a code point of a string the call left.
+    pub fn tryte(&self, at: i32) -> u8 {
+        self.buf[self.ptr() - self.buf.as_ptr() as usize + at as usize]
     }
 }
