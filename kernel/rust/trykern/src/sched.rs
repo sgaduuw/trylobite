@@ -174,7 +174,7 @@ pub extern "C" fn rk_stuck() -> i32 {
     // to serve.
     let stuck = Proc::table().any(|q| {
         let s = q.state();
-        [ST_RECV, ST_CALL, ST_REPLY, ST_LOOKUP]
+        [ST_RECV, ST_CALL, ST_REPLY, ST_LOOKUP, ST_FUTEX, ST_JOIN]
             .iter()
             .any(|&t| s == t as i32)
     });

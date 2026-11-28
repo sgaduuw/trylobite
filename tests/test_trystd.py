@@ -71,6 +71,35 @@ def test_sockets_from_rust(shell):
     )
 
 
+def test_threads_and_locks_from_rust(shell):
+    out = session(shell, "rstd threads\n")
+    assert out == (
+        "$ rstd threads\n"
+        'args ["rstd", "threads"]\n'
+        "joined 42\n"
+        "counted 600\n"
+        "woken true\n"
+        "numbers: own true process same true\n"
+        'relative Ok("in thr\\n")\n'
+        "forty threads\n"
+        "printed by a thread\n"
+        "done\n"
+        "$ \n"
+    )
+
+
+def test_threads_on_two_harts_count_primes(shell):
+    # bin/rthreads: two threads share a tally behind a Mutex; with more
+    # than one hart they run on two at once.
+    disk = bin_disk()
+    result = run_image(shell, input="rthreads 3000\n", disk=disk, max_steps=60_000_000)
+    assert result.exit_code == 0, result.console
+    out = result.after_boot
+    assert "primes below 3000: 430\n" in out
+    harts = 1 if result.harts == 1 else 2
+    assert f"harts used: {harts}\n" in out
+
+
 def test_tee_copies_to_files_too(shell):
     disk = bin_disk(notes=NOTES)
     out = session(

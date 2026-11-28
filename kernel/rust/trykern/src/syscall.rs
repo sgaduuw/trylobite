@@ -8,7 +8,7 @@ use crate::layout::*;
 use crate::mem::{page_left, user_at};
 use crate::proc::Proc;
 use crate::word::{Word, addr, load_at};
-use crate::{desc, devices, info, ipc, mm, names, procinfo, wait};
+use crate::{desc, devices, info, ipc, mm, names, procinfo, thread, wait};
 
 /// The caller goes on (resume).
 pub const RESUME: i32 = 0;
@@ -40,60 +40,69 @@ pub extern "C" fn rk_syscall(p: *mut u8) -> i32 {
 /// Each call's routine, by its number (SYS_ in include/layout.s): one
 /// indirect call, where a chain of tests took 40 for the last.
 static CALLS: [fn(Proc) -> i32; SYS_HARTINFO as usize + 1] = [
-    sys_putc,     // 0
-    sys_send,     // 1
-    sys_recv,     // 2
-    sys_yield_,   // 3
-    sys_exit,     // 4
-    sys_getpid,   // 5
-    sys_puts,     // 6
-    sys_spawn,    // 7
-    sys_hart,     // 8
-    nocall,       // 9, not a call
-    sys_wait,     // 10
-    nocall,       // 11, not a call
-    nocall,       // 12, not a call
-    sys_kill,     // 13
-    nocall,       // 14, not a call
-    sys_spawnw,   // 15
-    sys_close,    // 16
-    sys_give,     // 17
-    sys_dup2,     // 18
-    sys_iocall,   // 19
-    sys_read,     // 20
-    sys_write,    // 21
-    sys_fdflags,  // 22
-    sys_call,     // 23
-    sys_receive,  // 24
-    sys_reply,    // 25
-    sys_copyin,   // 26
-    sys_copyout,  // 27
-    sys_register, // 28
-    sys_lookup,   // 29
-    sys_window,   // 30
-    sys_drive,    // 31
-    sys_arm,      // 32
-    sys_phys,     // 33
-    sys_log,      // 34
-    sys_info,     // 35
-    sys_proc,     // 36
-    sys_name,     // 37
-    sys_sleep,    // 38
-    sys_notify,   // 39
-    sys_alarm,    // 40
-    sys_brk,      // 41
-    sys_clock,    // 42
-    nocall,       // 43, stepclock (NTP, in review)
-    nocall,       // 44 to 48, the kernel threads' (in review)
-    nocall,       // 45
-    nocall,       // 46
-    nocall,       // 47
-    nocall,       // 48
-    sys_hartinfo, // 49
+    sys_putc,           // 0
+    sys_send,           // 1
+    sys_recv,           // 2
+    sys_yield_,         // 3
+    sys_exit,           // 4
+    sys_getpid,         // 5
+    sys_puts,           // 6
+    sys_spawn,          // 7
+    sys_hart,           // 8
+    nocall,             // 9, not a call
+    sys_wait,           // 10
+    nocall,             // 11, not a call
+    nocall,             // 12, not a call
+    sys_kill,           // 13
+    nocall,             // 14, not a call
+    sys_spawnw,         // 15
+    sys_close,          // 16
+    sys_give,           // 17
+    sys_dup2,           // 18
+    sys_iocall,         // 19
+    sys_read,           // 20
+    sys_write,          // 21
+    sys_fdflags,        // 22
+    sys_call,           // 23
+    sys_receive,        // 24
+    sys_reply,          // 25
+    sys_copyin,         // 26
+    sys_copyout,        // 27
+    sys_register,       // 28
+    sys_lookup,         // 29
+    sys_window,         // 30
+    sys_drive,          // 31
+    sys_arm,            // 32
+    sys_phys,           // 33
+    sys_log,            // 34
+    sys_info,           // 35
+    sys_proc,           // 36
+    sys_name,           // 37
+    sys_sleep,          // 38
+    sys_notify,         // 39
+    sys_alarm,          // 40
+    sys_brk,            // 41
+    sys_clock,          // 42
+    nocall,             // 43, kept for stepclock (a pull request of its own)
+    thread::sys_thread, // 44
+    thread::sys_texit,  // 45
+    thread::sys_join,   // 46
+    thread::sys_futex,  // 47
+    thread::sys_gettid, // 48
+    sys_hartinfo,       // 49
 ];
 
-const _: () =
-    assert!(SYS_PUTC == 0 && SYS_SEND == 1 && SYS_BRK == 41 && SYS_CLOCK == 42 && SYS_HARTINFO == 49 && SYS_CALL == 23 && SYS_RECEIVE == 24);
+const _: () = assert!(
+    SYS_PUTC == 0
+        && SYS_SEND == 1
+        && SYS_BRK == 41
+        && SYS_CLOCK == 42
+        && SYS_CALL == 23
+        && SYS_RECEIVE == 24
+        && SYS_THREAD == 44
+        && SYS_GETTID == 48
+        && SYS_HARTINFO == 49
+);
 
 /// A number that names no call.
 fn nocall(p: Proc) -> i32 {
@@ -127,7 +136,7 @@ fn sys_exit(p: Proc) -> i32 {
 }
 
 fn sys_getpid(p: Proc) -> i32 {
-    done(p, p.pid())
+    done(p, p.space().pid()) // a thread's is its process's (gettid)
 }
 
 fn sys_puts(p: Proc) -> i32 {
@@ -359,11 +368,11 @@ fn puts_string(p: Proc) -> Word {
     }
 }
 
-/// exit(code): say so, and end with WAIT_EXITED and the code (saved a1)
-/// for the parent's wait.
+/// exit(code): say so, and end the process, every thread of it, with
+/// WAIT_EXITED and the code (saved a1) for the parent's wait.
 fn exit(p: Proc) -> i32 {
     puts(unsafe { &raw const msg_proc });
-    putn(p.pid() as i32);
+    putn(p.space().pid() as i32); // from any thread, its process ends
     puts(unsafe { &raw const msg_exited });
     putw(p.get(PCB_A1));
     putc(b'\n' as i32);

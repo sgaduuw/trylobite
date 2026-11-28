@@ -16,6 +16,7 @@ use crate::layout::*;
 use crate::mem::{page_at, page_left, pages, user_at};
 use crate::proc::Proc;
 use crate::procinfo;
+use crate::thread;
 use crate::trytes;
 use crate::wait;
 use crate::word::{Word, addr, load, load_at, store};
@@ -102,45 +103,18 @@ fn words(p: *mut u8, n: i32) -> *mut u8 {
 /// it), whose image takes `above` pages above the process's own. Its
 /// process number, or E_NOSLOT or E_NOMEM.
 fn spawn(caller: Proc, parent: Word, image: i32, above: i32) -> Word {
-    // Find a free slot, starting after the last one handed out, so a
-    // process number is not reused until the table wraps: a message
-    // meant for a process that just exited should not reach a new one.
-    let (base, end) = Proc::bounds();
-    let mut s = addr(read::next_slot());
-    let mut n = NPROC as i32;
-    loop {
-        if s >= end {
-            s = base; // wrap around
-        }
-        if Proc(s).is(ST_EXITED) {
-            break;
-        }
-        s = s.wrapping_offset(PCB_SIZE as isize);
-        n -= 1;
-        if n == 0 {
-            return E_NOSLOT;
-        }
-    }
-    let s = Proc(s);
+    let Some(s) = free_slot() else {
+        return E_NOSLOT;
+    };
 
     // Check memory before taking any.
     if (read::free_count() as i32) < PAGES_PER_PROCESS as i32 + above {
         return E_NOMEM;
     }
 
-    unsafe { core::ptr::write_bytes(s.at(-1), 0, PCB_SIZE as usize) };
+    claim(s, s);
     s.set(PCB_PARENT, parent);
     s.set(PCB_FILE, (image == 0) as Word); // a program file may not drive a device
-    // No hart's coprocessor bank is its yet: it starts from its zeroed
-    // PCB_FPU, not what the slot's last tenant left.
-    let me = s.addr_word();
-    let mut owner = kdata::fpu_owner_base();
-    for _ in 0..NHART as i32 {
-        if load(owner) == me {
-            store(owner, 0);
-        }
-        owner = words(owner, 1);
-    }
     desc::rk_desc_inherit(s.0, parent as i32); // its parent's descriptors
 
     let root = alloc_page();
@@ -187,23 +161,70 @@ fn spawn(caller: Proc, parent: Word, image: i32, above: i32) -> Word {
     if image == 0 {
         // Copy its image in, from the caller's windows.
         let w = caller.get(PCB_A1) as i32; // the first window
-        let head = page_at(load(words(caller.at(PCB_WINS), w)));
+        let head = page_at(load(words(caller.space().at(PCB_WINS), w)));
         let from = pages(w as Word) as Word + V_BLOCK + EXEC_IMAGE - 1;
         ipc::copy_mem(caller, from, s, V_USER - 1, load_at(head, EXEC_SIZE));
     }
 
-    let pid = s.pid();
-    s.set(PCB_PTBR, phys(root) + (3 * pid as i32 + 4) as Word); // its ASID pid + 1, mode +
+    s.set(PCB_PTBR, ptbr(root, s));
     s.set(PCB_PC, V_USER);
     s.set(0, USER_SP);
     s.set(PCB_GP, USER_GP); // programs address their data from gp
-    write::next_slot(s.at(PCB_SIZE) as isize as Word); // the next spawn looks after it
+    s.ready(); // a hart waiting for work can run it
+    s.pid()
+}
+
+/// A free slot of the process table, starting after the last one handed
+/// out, so a process number is not reused until the table wraps: a
+/// message meant for a process that just exited should not reach a new
+/// one. None when every slot is taken.
+pub fn free_slot() -> Option<Proc> {
+    let (base, end) = Proc::bounds();
+    let mut s = addr(read::next_slot());
+    let mut n = NPROC as i32;
+    loop {
+        if s >= end {
+            s = base; // wrap around
+        }
+        if Proc(s).is(ST_EXITED) {
+            return Some(Proc(s));
+        }
+        s = s.wrapping_offset(PCB_SIZE as isize);
+        n -= 1;
+        if n == 0 {
+            return None;
+        }
+    }
+}
+
+/// Make free slot `s` a new tenant's, in the address space of process
+/// `space` (`s` itself for a process): a zeroed record, which no hart's
+/// coprocessor bank or translations belong to yet. The next free_slot
+/// looks after it.
+pub fn claim(s: Proc, space: Proc) {
+    unsafe { core::ptr::write_bytes(s.at(-1), 0, PCB_SIZE as usize) };
+    s.set(PCB_SPACE, space.pid()); // before anything reaches its descriptors
+    // No hart's coprocessor bank is its yet: it starts from its zeroed
+    // PCB_FPU, not what the slot's last tenant left.
+    let me = s.addr_word();
+    let mut owner = kdata::fpu_owner_base();
+    for _ in 0..NHART as i32 {
+        if load(owner) == me {
+            store(owner, 0);
+        }
+        owner = words(owner, 1);
+    }
     // The slot's last tenant had this ASID: a new epoch makes each hart
     // drop its translations before running the new one (see resume).
-    let epoch = words(kdata::epochs_base(), pid as i32);
+    let epoch = words(kdata::epochs_base(), s.pid() as i32);
     store(epoch, load(epoch) + 1);
-    s.ready(); // a hart waiting for work can run it
-    pid
+    write::next_slot(s.at(PCB_SIZE) as isize as Word);
+}
+
+/// The page table base for slot `s` in the address space whose root
+/// table is page `root`: its ASID is its slot plus 1, mode +.
+pub fn ptbr(root: Word, s: Proc) -> Word {
+    phys(root) + (3 * s.pid() as i32 + 4) as Word
 }
 
 /// Spawn init, program 0, at boot (kernel/entry.s): 1 if it started.
@@ -223,7 +244,7 @@ pub extern "C" fn rk_sys_spawn(p: *mut u8) {
     let r = if n < 0 || n >= read::nprog() {
         E_NOPROG
     } else {
-        spawn(p, p.pid(), (P_PROG0 + n) as i32, 0)
+        spawn(p, p.space().pid(), (P_PROG0 + n) as i32, 0) // a thread's are its process's
     };
     p.set(PCB_A0, r);
 }
@@ -251,7 +272,7 @@ fn spawnw(p: Proc) -> Word {
     if w < 0 || w >= NWIN {
         return E_NOPROG;
     }
-    let page = load(words(p.at(PCB_WINS), w as i32));
+    let page = load(words(p.space().at(PCB_WINS), w as i32));
     if page == 0 {
         return E_NOPROG;
     }
@@ -280,10 +301,11 @@ fn spawnw(p: Proc) -> Word {
 
     let to = p.get(PCB_A2);
     let (parent, pid) = if to == FOR_SELF {
-        (p, p.pid())
+        (p.space(), p.space().pid())
     } else {
         match ipc::client_of(p, to) {
-            Some(c) => (c, to), // its child, if we hold its call
+            // Its child, if we hold its call: a thread's process's.
+            Some(c) => (c.space(), c.space().pid()),
             None => return E_NOPROC,
         }
     };
@@ -336,11 +358,12 @@ fn give_args(c: Proc, from: *mut u8, n: Word) {
 pub extern "C" fn rk_sys_window(p: *mut u8) {
     let p = Proc(p);
     let k = p.get(PCB_A1);
+    let sp = p.space(); // a thread's windows are its process's
     let r = if k < 0 || k >= NWIN {
         E_INVAL
     } else {
         let k = k as i32;
-        let win = words(p.at(PCB_WINS), k);
+        let win = words(sp.at(PCB_WINS), k);
         if load(win) != 0 {
             0
         } else if read::free_count() == 0 {
@@ -349,7 +372,7 @@ pub extern "C" fn rk_sys_window(p: *mut u8) {
             let page = alloc_page();
             store(win, page);
             // Leaf entry NXPAGE + 1 + k: the window.
-            let entry = words(page_at(p.get(PCB_LEAFPG)), NXPAGE as i32 + 1 + k);
+            let entry = words(page_at(sp.get(PCB_LEAFPG)), NXPAGE as i32 + 1 + k);
             store(entry, phys(page) + USER_FLAGS);
             0
         }
@@ -364,7 +387,7 @@ pub extern "C" fn rk_sys_window(p: *mut u8) {
 #[unsafe(no_mangle)]
 pub extern "C" fn rk_sys_brk(p: *mut u8) {
     let p = Proc(p);
-    let r = brk(p, p.get(PCB_A1));
+    let r = brk(p.space(), p.get(PCB_A1)); // a thread's heap is its process's
     p.set(PCB_A0, r);
 }
 
@@ -413,14 +436,36 @@ pub extern "C" fn rk_sys_phys(p: *mut u8) {
     p.set(PCB_A0, r);
 }
 
-/// End process `p`: give back its pages and bury it (release in
-/// kernel/syscall.s, which left its address space first: freeing a page
-/// writes the free-list link into its centre word, which in a root table
-/// is entry 0, and done while that table is live the next walk would
-/// read garbage).
+/// Process or thread `p` has ended (release in kernel/syscall.s, which
+/// left its address space first: freeing a page writes the free-list
+/// link into its centre word, which in a root table is entry 0, and done
+/// while that table is live the next walk would read garbage). Its saved
+/// a0 and a1 say how. Unless it is a thread ending alone (thread_exit),
+/// its whole process ends: every thread goes first (thread::end), and
+/// the pages go back once the last has, the process then buried for its
+/// parent's wait; until then the process waits as ST_DYING.
 #[unsafe(no_mangle)]
 pub extern "C" fn rk_release(p: *mut u8) {
     let p = Proc(p);
+    let sp = p.space();
+    if p.get(PCB_TEXIT) == 0 {
+        thread::end(sp, p.get(PCB_A0), p.get(PCB_A1));
+    }
+    if p != sp {
+        thread::bury(p, sp);
+        if !sp.is(ST_DYING) || sp.get(PCB_THREADS) != 0 {
+            return;
+        }
+    } else if sp.get(PCB_THREADS) != 0 {
+        sp.set(PCB_STATE, ST_DYING); // its last thread frees it
+        return;
+    }
+    free_space(sp);
+    wait::bury(sp);
+}
+
+/// Give back the pages of process `p`, whose address space no hart uses.
+fn free_space(p: Proc) {
     // Its heap first, while its leaf table, which says where, is there.
     let mut entry = words(page_at(p.get(PCB_LEAFPG)), HEAP_LEAF as i32);
     for _ in 0..p.get(PCB_HEAP) as i32 {
@@ -440,5 +485,4 @@ pub extern "C" fn rk_release(p: *mut u8) {
         }
         x = words(x, 1);
     }
-    wait::bury(p);
 }

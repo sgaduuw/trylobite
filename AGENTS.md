@@ -89,6 +89,16 @@ pipe.
 - **Hart 0 handles hot-plug.** It is the hart controller's event hart and
   can never be removed. A hart asked to go only stops itself in `pick`,
   where it holds no process: anything it ran is back in the table.
+- **A thread is a slot with another's address space.** `PCB_SPACE`
+  names the process whose pages, descriptors and children a record has
+  (itself for a process): reach those through `Proc::space()`
+  (`mem::user_at`, `desc.rs`, `brk`, `window`), never the thread's own
+  record, whose page fields are empty. A process's pages go back only
+  after its last thread (`PCB_THREADS`), which `rk_release` and
+  `thread::end` see to (docs/kernel.md, Threads). In trystd, `tp`
+  points at each thread's own words (`lib/rust/start.s`, `sys`), and
+  library state threads share sits behind a `sync::RawLock` (the heap,
+  standard I/O).
 - **One kernel lock.** Every path from trap entry to `resume` runs
   holding it (`kernel/lock.s`), and so may touch any kernel data,
   including the one kernel stack. Code before `klock_take` touches only

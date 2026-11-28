@@ -20,9 +20,10 @@ use crate::word::{Word, load, load_at, load_small_at, store_at};
 struct Desc(*mut u8);
 
 impl Desc {
-    /// Process `p`'s descriptor `fd`, which must be in range.
+    /// Process `p`'s descriptor `fd`, which must be in range: for a
+    /// thread, its process's, as threads share them.
     fn of(p: Proc, fd: Word) -> Desc {
-        Desc(p.at(PCB_DESCS + (fd as i32 * DESC as i32) as Word)) // 32-bit: no helper call
+        Desc(p.space().at(PCB_DESCS + (fd as i32 * DESC as i32) as Word)) // 32-bit: no helper call
     }
 
     fn all(p: Proc) -> impl Iterator<Item = Desc> {

@@ -2132,6 +2132,43 @@ and the kernel passes it on with one call, `clock()`: seconds since
   `date -s`), file modification times in the filesystem, and time zones.
 
 
+### 2026-11-28 · Threads: slots of the process table that share a space
+
+Rust programs wanted threads (std's `thread::spawn`) and the machine has
+harts to run them on, so the kernel grew them.
+
+- **A thread is a slot of the process table**, with a record of its
+  own, not a second set of registers inside a process's record. All the
+  per-run state (registers, state, `PCB_HART`, the coprocessor bank,
+  IPC, alarms, sleeping) was already per record, and the scheduler,
+  `call`, `receive` and `kill` already work on records, so threads get
+  all of it unchanged; a thread's number is its slot's, so a server
+  answers each thread's call to that thread. What is the process's is
+  reached through `PCB_SPACE`. Rejected: a separate thread table (every
+  wait, wake and switch would need a second kind of record), and copying
+  the page fields into each thread (brk and window change them).
+- **Each thread has its own ASID** (its slot's) over the shared page
+  tables: nothing is ever unmapped while a process lives, so no other
+  thread's translations go stale, and the epoch scheme stays as it is.
+- **The whole process ends together**, as on Unix and as Rust's main
+  returning expects: exit, a fault or a kill in any thread kills all of
+  them, and the pages go back only once the last has gone (`ST_DYING`
+  until then), since a thread may be running on another hart when the
+  end begins. `thread_exit` and `join` are for threads that end alone.
+- **futex for waiting**, the Linux shape: the lock is a Rust atomic in
+  user memory, and the kernel only sleeps and wakes on its address.
+  It reads the word as Rust's `u32`, four trytes low byte first.
+- **trystd keeps per-thread words at `tp`** (what `sys` leaves in
+  a1..a3), and locks its heap and standard I/O. A dropped `JoinHandle`
+  lets its thread run on; its slot and stack are taken back at the next
+  spawn or join (`JOIN_POLL`), so the kernel needs no detach.
+- **Receive gives the caller's process in `a5`**, so the file server
+  keys current directories by process: a thread's relative paths are
+  its process's.
+- **Later:** threads in `ps` marked as such (they show their process's
+  name now, with no pages of their own), futex with a timeout (for
+  `Condvar::wait_timeout`), thread-local storage beyond `tp`'s words.
+
 ### 2026-11-28 · top gets a modern header, and the kernel three more numbers
 
 Eelco asked for a top header like modern BSD and GNU tops. The header

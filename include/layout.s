@@ -226,7 +226,8 @@
         .equ  SYS_RECV,   2               # wait for a message; a0 = the value
         .equ  SYS_YIELD,  3               # let another process run
         .equ  SYS_EXIT,   4               # stop with exit code a1
-        .equ  SYS_GETPID, 5               # a0 = this process's number
+        .equ  SYS_GETPID, 5               # a0 = this process's number (for a
+                                          # thread, its process's: SYS_GETTID)
         .equ  SYS_PUTS,   6               # print the string at a1, whole: 0 done,
                                           # E_RANGE (outside its page and window)
         .equ  SYS_SPAWN,  7               # start program a1: its process number,
@@ -324,7 +325,9 @@
                                           # its reply: a0..a3 = the reply's words;
                                           # E_NOPROC (none, or it ended first), E_SELF
         .equ  SYS_RECEIVE, 24             # wait for a call: a0 = the caller,
-                                          # a1..a4 = its words; or a0 = FROM_KERNEL,
+                                          # a1..a4 = its words, a5 = its process
+                                          # (the caller, unless it is a thread:
+                                          # SYS_THREAD); or a0 = FROM_KERNEL,
                                           # a1 = NOTE_ENDED, a2 = a process that ended
         .equ  SYS_REPLY, 25               # answer the call of process a1 with a2..a5:
                                           # 0, E_NOPROC (it is not waiting for you)
@@ -510,6 +513,47 @@
                                           # the rest since HI_STARTED it was in
                                           # the kernel, or waiting for its lock
         .equ  HARTINFO,  12               # trytes hartinfo fills, from HI_TIME - 1
+
+# Threads (docs/kernel.md, Threads). A thread is a process-table slot of
+# its own, with its own registers, state and messages, running in the
+# address space of the process that started it, whose pages,
+# descriptors, children and exit it shares. Its number is its slot's,
+# like a process number: calls, sends and kills reach it by that.
+# exit, a fault or a kill in any thread ends the whole process, every
+# thread first; thread_exit ends one thread alone, and join gives its
+# code to another thread of the process.
+        .equ  SYS_THREAD, 44              # thread(entry, stack, arg, tp): start a
+                                          # thread of the caller's process at
+                                          # entry, with sp = stack, a0 = arg, tp =
+                                          # tp and the caller's gp: its number;
+                                          # E_NOSLOT
+        .equ  SYS_TEXIT, 45               # thread_exit(code): end the calling
+                                          # thread alone, for join; E_PERM in a
+                                          # process's first thread, which ends
+                                          # with exit (it returns nothing else)
+        .equ  SYS_JOIN,  46               # join(tid, how): a0 = 0 and a1 = the
+                                          # code thread tid gave thread_exit, once
+                                          # it has; JOIN_WAIT waits for that,
+                                          # JOIN_POLL gives E_BUSY instead.
+                                          # E_NOCHILD (not another thread of the
+                                          # caller's process, or another join had
+                                          # it), E_INVAL (how, or the caller)
+        .equ  JOIN_WAIT, 0
+        .equ  JOIN_POLL, 1
+        .equ  SYS_FUTEX, 47               # futex(address, op, value): the u32 at
+                                          # address, four trytes low byte first as
+                                          # Rust lays one out, is a lock's word.
+                                          # FUTEX_WAIT: sleep there if it is value
+                                          # (taken as a u32), until a FUTEX_WAKE:
+                                          # 0, E_AGAIN (it is not). FUTEX_WAKE:
+                                          # wake at most value threads of the
+                                          # caller's process sleeping there: how
+                                          # many. E_FAULT, E_INVAL
+        .equ  FUTEX_WAIT, 0
+        .equ  FUTEX_WAKE, 1
+        .equ  SYS_GETTID, 48              # a0 = the calling thread's number; a
+                                          # process's first thread's is the
+                                          # process's
 
 # Files (docs/filesystem.md) come from the file server, which registers
 # as "fs" with protocol FS_PROTOCOL; a program looks it up once, and
@@ -759,6 +803,7 @@
         .equ  E_NOROUTE, -24              # ping: off the network, and no gateway
         .equ  E_REFUSED, -25              # connect: nothing listens on that port
         .equ  E_RESET,  -26               # a connection: the other end reset it
+        .equ  E_AGAIN,  -27               # futex: the word is not what was given
 
         .equ  O_RDONLY, 0                 # open: the access mode is the flags mod
         .equ  O_WRONLY, 1                 # 3. Add any of O_CREAT (make a file not
@@ -793,6 +838,8 @@
 # sp (r-13) is at 0 and t6 (r13) at 78; r0 has a slot that is never used.
 
         .equ  NPROC, 27
+        .equ  PCB_SP,      0              # saved sp
+        .equ  PCB_TP,      6              # saved tp
         .equ  PCB_GP,      9              # saved gp
         .equ  PCB_A0,     42              # saved a0: system-call number and result
         .equ  PCB_A1,     45
@@ -828,7 +875,19 @@
                                           # skip looking (Proc::rouse sets it)
         .equ  PCB_CALLERS, 138            # how many processes wait in ST_CALL
                                           # for it: 0 lets receive skip looking
-        # 141 to 156 were its block windows' pages: PCB_WINS, below, now
+        # 141 to 156 were its block windows' pages (PCB_WINS, below, now);
+        # threads use them (docs/kernel.md, Threads):
+        .equ  PCB_SPACE,  141             # the process whose address space,
+                                          # descriptors and children it has: its
+                                          # own number, or a thread's process's.
+                                          # Every field below is the process's
+        .equ  PCB_THREADS, 144            # how many of its threads have not ended
+        .equ  PCB_ENDING, 147             # 1 once it is ending: it goes after the
+                                          # last of its threads (ST_DYING)
+        .equ  PCB_HOW,    150             # ... and how, for its parent's wait,
+        .equ  PCB_CODE,   153             # as saved a0 and a1 say
+        .equ  PCB_TEXIT,  156             # a thread's own: 1 when it ends alone,
+                                          # by thread_exit
         .equ  NWIN,         9             # block windows: window k is at V_BLOCK + PAGE * k
         .equ  V_DEVICE, V_BLOCK + NWIN * PAGE   # a driver's device registers,
                                           # past its windows: source s's at
@@ -893,8 +952,12 @@
                                           # its saved a1
         .equ  ST_ZOMBIE, -3               # ended; holds how (saved a0, a1) until
                                           # its parent waits for it
-        # -4 was ST_GETC, waiting for the kernel's console input
-        # -5 was ST_DISK, waiting for the kernel's disk driver
+        .equ  ST_FUTEX,  -4               # blocked in FUTEX_WAIT, at its saved a1
+                                          # (-4 was ST_GETC, the kernel's console)
+        .equ  ST_JOIN,   -5               # blocked in SYS_JOIN, for the thread in
+                                          # its saved a1 (-5 was ST_DISK)
+        .equ  ST_DYING,  -6               # a process that has ended and waits for
+                                          # its threads to go, before its pages do
         .equ  ST_CALL,   -7               # its call waits for PCB_PEER to receive it
         .equ  ST_REPLY,  -8               # PCB_PEER has received its call: waits
                                           # for the reply
