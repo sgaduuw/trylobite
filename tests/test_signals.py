@@ -279,7 +279,7 @@ def shell():
 def test_signals_from_rust(shell):
     result = run_image(
         shell,
-        input="rsig\nkill -l\nexit\n",
+        input="rsig\n/bin/kill -l\nexit\n",
         disk=bin_disk(programs=(RSIG,)),
         max_steps=60_000_000,
     )
@@ -295,7 +295,7 @@ def test_signals_from_rust(shell):
         "alarm 1 14\n"
         "thread took it true\n"
         "child killed by SIGINT Some(2) chld 1\n"
-        "$ kill -l\n"
+        "$ /bin/kill -l\n"
         " 1 HUP\n 2 INT\n"
     ), out
 
@@ -305,7 +305,8 @@ def test_kill_sends_the_signal_it_is_given(shell):
         shell,
         input="spin\n"
         + CTRL_C
-        + "kill -USR1 99\nkill -NOPE 4\nkill -s HUP\nkill -9 4\nps\nexit\n",
+        + "/bin/kill -USR1 99\n/bin/kill -NOPE 4\n/bin/kill -s HUP\n"
+        "/bin/kill -9 4\nps\nexit\n",
         disk=bin_disk(),
         max_steps=60_000_000,
     )

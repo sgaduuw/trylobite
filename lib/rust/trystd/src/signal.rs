@@ -19,7 +19,11 @@
 //! interrupted code holds. A system call the signal cut short goes again
 //! after the handler, as with SA_RESTART: trystd never shows E_INTR.
 //!
-//! Where trylobite differs: there is no SIGSTOP or SIGCONT, a fault is
+//! SIGSTOP, and by default SIGTSTP (Ctrl-Z), SIGTTIN and SIGTTOU, stop
+//! the process until SIGCONT; `kill_group` signals a process group, as
+//! the shell does a job (`process::set_group`).
+//!
+//! Where trylobite differs: a fault is
 //! not a signal (it ends the process, and its parent's wait says so),
 //! and `kill` reaches a whole process, never one of its threads alone.
 //! A child started with `process::Command` keeps the signals this
@@ -32,14 +36,15 @@ use crate::io;
 use crate::sys;
 
 pub use crate::sys::{
-    NSIG, SIGALRM, SIGCHLD, SIGHUP, SIGINT, SIGKILL, SIGPIPE, SIGQUIT, SIGTERM, SIGUSR1,
-    SIGUSR2,
+    NSIG, SIGALRM, SIGCHLD, SIGCONT, SIGHUP, SIGINT, SIGKILL, SIGPIPE, SIGQUIT, SIGSTOP,
+    SIGTERM, SIGTSTP, SIGTTIN, SIGTTOU, SIGUSR1, SIGUSR2,
 };
 
 /// What a signal does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Handler {
-    /// Its default: end the process, or for SIGCHLD nothing.
+    /// Its default: end the process, stop it (SIGSTOP, SIGTSTP, SIGTTIN,
+    /// SIGTTOU), or nothing (SIGCHLD, SIGCONT).
     Default,
     /// Nothing: it is thrown away.
     Ignore,
@@ -52,7 +57,7 @@ pub enum Handler {
 static HANDLERS: [AtomicUsize; NSIG as usize] = [const { AtomicUsize::new(0) }; NSIG as usize];
 
 /// Every signal's name, by number, as `kill -l` lists them.
-pub const NAMES: [(i32, &str); 10] = [
+pub const NAMES: [(i32, &str); 15] = [
     (SIGHUP, "HUP"),
     (SIGINT, "INT"),
     (SIGQUIT, "QUIT"),
@@ -63,6 +68,11 @@ pub const NAMES: [(i32, &str); 10] = [
     (SIGALRM, "ALRM"),
     (SIGTERM, "TERM"),
     (SIGCHLD, "CHLD"),
+    (SIGCONT, "CONT"),
+    (SIGSTOP, "STOP"),
+    (SIGTSTP, "TSTP"),
+    (SIGTTIN, "TTIN"),
+    (SIGTTOU, "TTOU"),
 ];
 
 /// The signal a name gives, with or without "SIG", in any case: "INT",
@@ -82,7 +92,7 @@ pub fn name(sig: i32) -> Option<&'static str> {
 }
 
 /// Make `sig` do what `handler` says from now on: the handler it had.
-/// SIGKILL can only have its default.
+/// SIGKILL and SIGSTOP can only have their default.
 pub fn signal(sig: i32, handler: Handler) -> io::Result<Handler> {
     if !(1..NSIG).contains(&sig) {
         return Err(io::Error::from_raw(sys::E_INVAL));
@@ -127,10 +137,33 @@ extern "C" fn entry(sig: i32, frame: usize) -> ! {
 
 /// Send signal `sig` to process `pid`, any but init (kill(pid,
 /// KILL_ANY, sig)); signal 0 only checks it is there. Ok(true) if the
-/// process will end, Ok(false) if it goes on.
+/// process will end, Ok(false) if it goes on (or stops).
 pub fn kill(pid: i32, sig: i32) -> io::Result<bool> {
     let r = sys::check(sys::call(sys::SYS_KILL, &[pid, sys::KILL_ANY, sig]))?;
-    Ok(r != sys::KILL_CAUGHT)
+    Ok(r == 0)
+}
+
+/// What signalling a group did (`kill_group`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sent {
+    /// Each process of it will end.
+    Ended,
+    /// One goes on: it caught, ignored or blocked the signal.
+    Caught,
+    /// One stopped.
+    Stopped,
+}
+
+/// Send signal `sig` to each process of group `pgrp` that this process
+/// started, or that those started (killpg(pgrp, FOR_SELF, sig)): how
+/// it went, or E_NOPROC when there is no such process.
+pub fn kill_group(pgrp: u32, sig: i32) -> io::Result<Sent> {
+    let r = sys::check(sys::call(sys::SYS_KILLPG, &[pgrp as i32, sys::FOR_SELF, sig]))?;
+    Ok(match r {
+        sys::KILL_STOPPED => Sent::Stopped,
+        sys::KILL_CAUGHT => Sent::Caught,
+        _ => Sent::Ended,
+    })
 }
 
 /// Send signal `sig` to this process.

@@ -71,10 +71,13 @@ exit:   li    t0, I32_SIGN
 write:  li    t0, SYS_WRITE
         j     1f
 read:   li    t0, SYS_READ
-1:      mv    a3, a2
-        mv    a2, a1
-        mv    a1, a0
-2:      mv    a0, t0                   # again after a signal's E_INTR (sysu)
+1:      mv    t3, a0                   # kept: the kernel makes a descriptor
+        mv    t4, a1                   # call a SYS_CALL in the registers,
+        mv    t5, a2                   # so a1 to a3 come back changed
+2:      mv    a0, t0                   # again after a signal's E_INTR (sysu),
+        mv    a1, t3                   # as when a console read ends for a
+        mv    a2, t4                   # Ctrl-C caught or a stop
+        mv    a3, t5
         sys
         li    t1, E_INTR
         beq   a0, t1, 2b
@@ -128,11 +131,21 @@ sys:    li    t0, I32_SIGN
         bxor  a5, a5, t0
         sub   a5, a5, t0
 sysu:   mv    t1, a0
+        mv    t2, a1                   # kept, as a descriptor call
+        mv    t3, a2                   # (SYS_IOCALL) comes back with its
+        mv    t4, a3                   # registers made a SYS_CALL's
+        mv    t5, a4
+        mv    t6, a5
 1:      sys
-        li    t2, E_INTR               # a caught signal cut it short: its
-        bne   a0, t2, 2f               # handler has run, and the call had
+        li    t0, E_INTR               # a caught signal cut it short: its
+        bne   a0, t0, 2f               # handler has run, and the call had
         mv    a0, t1                   # not happened, so it goes again, as
-        j     1b                       # with SA_RESTART
+        mv    a1, t2                   # with SA_RESTART
+        mv    a2, t3
+        mv    a3, t4
+        mv    a4, t5
+        mv    a5, t6
+        j     1b
 2:      sw    a1, 0(tp)
         sw    a2, 3(tp)
         sw    a3, 6(tp)

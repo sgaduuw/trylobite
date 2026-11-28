@@ -16,17 +16,28 @@
 # Input passes through a buffer of the server's, so that Ctrl-C can be
 # seen while nobody reads: the server reads the console only while a
 # process waits in getc or the console has a foreground process, and a
-# Ctrl-C then interrupts that process (SIGINT) instead of being read. Otherwise the
+# Ctrl-C then interrupts that process (SIGINT), or a Ctrl-Z stops it
+# (SIGTSTP), instead of being read. Otherwise the
 # console is left alone, so input typed ahead waits in it for whoever
 # comes to read it, and a Ctrl-C typed ahead finds the program it was
 # meant for. A reader's call is held, unanswered, until there is a code
 # point for it (cn_readers), as the kernel held a reader in getc before.
 #
-# The foreground is the server's: the shell names each program it runs
-# with CN_FOREGROUND, and the server sends it SIGINT at Ctrl-C with
-# SYS_KILL on the shell's behalf, which the kernel allows a driver. A process that
-# is not the caller's child is not refused when named, but the kill then
-# fails, and Ctrl-C is read as an ordinary code point.
+# The foreground is the server's: the shell names each job it runs with
+# CN_FOREGROUND, and the server sends it SIGINT at Ctrl-C and SIGTSTP at
+# Ctrl-Z with SYS_KILL on the shell's behalf, which the kernel allows a
+# driver. A process that leads its process group stands for the group,
+# which SYS_KILLPG signals whole: every program of a pipeline, and what
+# they start. A process that is not the caller's child is not refused
+# when named, but the kill then fails, and the key is read as an
+# ordinary code point. CN_KEYS names a foreground for which Ctrl-C and
+# Ctrl-Z are keys, as the shell's prompt wants them.
+#
+# While the console has a foreground, a process of another group that
+# reads it is a background job wanting input meant for the foreground:
+# its group is sent SIGTTIN, which stops it, and its read ends with
+# E_INTR, to be made again once it goes on (or E_IO, if it did not
+# stop). Init's group, which holds the servers, is left alone.
 #
 # Not a program on its own: a build includes it in a program's section.
 # Its labels all start with cn_, since it shares the build's symbols.
@@ -75,6 +86,8 @@ cn_wait:
         beq   a1, t0, cn_fground
         li    t0, CN_OPEN
         beq   a1, t0, cn_open
+        li    t0, CN_KEYS
+        beq   a1, t0, cn_keyfg
         li    t0, IO_READ
         beq   a1, t0, cn_ioread
         li    t0, IO_WRITE
@@ -101,12 +114,16 @@ cn_notice:
         la    t1, cn_readers
         add   t1, t1, t0
         sw    zero, 0(t1)
-        lw    t0, cn_fg                # and the console goes back to
-        beq   t0, a2, 1f               # nobody when its foreground ends,
-        lw    t0, cn_fgfor             # or the process that named it,
-        bne   t0, a2, cn_wait          # whose authority a kill uses
+        lw    t0, cn_fgfor             # and the console goes back to
+        beq   t0, a2, 1f               # nobody when the process that
+        lw    t0, cn_lead              # named it ends, whose authority a
+        bnez  t0, cn_wait              # kill uses, or its foreground
+        lw    t0, cn_fg                # (a group's leader may end while
+        bne   t0, a2, cn_wait          # the rest of the group goes on)
 1:      li    t0, NO_FOREGROUND
         sw    t0, cn_fg
+        sw    t0, cn_tgrp
+        sw    zero, cn_lead
         j     cn_wait
 
 # open(): a descriptor for the console, the caller's lowest free one.
@@ -208,22 +225,45 @@ cn_write:
 5:      li    a2, E_FAULT
         j     cn_answer
 
-# foreground(pid): give the console to pid, the caller's child, or to
-# nobody; then look at the console, which may now hold a Ctrl-C for it.
+# foreground(pid): give the console to pid, the caller's child (with
+# its group, if it leads one), or to nobody; then look at the console,
+# which may now hold a Ctrl-C or Ctrl-Z for it. keys(pid): the same,
+# with those two read as keys.
 cn_fground:
-        li    t0, NO_FOREGROUND
-        beq   a2, t0, 1f
+        li    s4, 0                    # s4: 1 for keys
+        j     1f
+cn_keyfg:
+        li    s4, 1
+1:      li    t0, NO_FOREGROUND
+        beq   a2, t0, 2f
         bltz  a2, cn_inval
         li    t0, NPROC
         bge   a2, t0, cn_inval
         sw    s0, cn_fgfor
-1:      sw    a2, cn_fg
+        mv    s1, a2                   # s1: the process
+        li    a0, SYS_GETPGRP
+        mv    a1, s1
+        sys
+        mv    a2, s1
+        sw    a0, cn_tgrp              # its group (negative if gone)
+        li    t1, 0
+        bne   a0, a2, 3f
+        beqz  a0, 3f                   # init's group, the servers', is
+        li    t1, 1                    # never signalled whole; another
+3:      sw    t1, cn_lead              # it leads stands for it
+        j     4f
+2:      sw    a2, cn_tgrp
+        sw    zero, cn_lead
+4:      sw    a2, cn_fg
+        sw    s4, cn_keys
         li    a0, SYS_REPLY
         mv    a1, s0
         li    a2, 0
         sys
         lw    t0, cn_fg                # a Ctrl-C typed ahead, kept since it
         bltz  t0, cn_serve             # ended nothing then, is for this one:
+        lw    t0, cn_keys
+        bnez  t0, cn_serve
         li    s6, 0                    # s6: how far into the buffer
 1:      lw    t0, cn_count
         bge   s6, t0, cn_serve
@@ -237,13 +277,14 @@ cn_fground:
         mul   t1, t1, t2
         la    t2, cn_buf
         add   t1, t1, t2
-        lw    t1, 0(t1)
-        li    t2, CTRL_C
-        beq   t1, t2, 3f
+        lw    a0, 0(t1)
+        call  cn_sigkey
+        bnez  a1, 3f
         addi  s6, s6, 1
         j     1b
-3:      call  cn_kill                  # kill it, and throw away what was
-        bnez  a0, cn_serve             # typed before the Ctrl-C
+3:      mv    a0, a1
+        call  cn_kill                  # signal it, and throw away what was
+        bnez  a0, cn_serve             # typed before the key
         addi  s7, s7, 1
         li    t0, CN_MAX
         blt   s7, t0, 4f
@@ -283,20 +324,22 @@ cn_drain:
         li    t1, CN_MAX
         bge   t0, t1, cn_give
         lw    t1, cn_fg
-        bgez  t1, 1f                   # look for Ctrl-C in all of it
-        bge   t0, s5, cn_give          # enough for the readers
+        bltz  t1, 5f
+        lw    t1, cn_keys
+        beqz  t1, 1f                   # look for Ctrl-C in all of it
+5:      bge   t0, s5, cn_give          # enough for the readers
 1:      li    t0, CN_REGS
         lw    a0, CONSOLE_IN(t0)
         bltz  a0, 4f
-        li    t0, CTRL_C
-        bne   a0, t0, 2f
-        lw    t1, cn_fg
-        bltz  t1, 2f                   # nobody to kill: an ordinary code point
+        call  cn_sigkey
+        beqz  a1, 2f                   # an ordinary code point
+        mv    s4, a0                   # s4: the key
+        mv    a0, a1
         call  cn_kill
         bnez  a0, 3f
         sw    zero, cn_count
         j     cn_serve                 # one reader fewer, maybe
-3:      li    a0, CTRL_C               # it ended nothing: kept, for the next
+3:      mv    a0, s4                   # it ended nothing: kept, for the next
 2:      call  cn_push                  # foreground process or a reader
         j     cn_drain
 4:      li    t0, CONSOLE_EMPTY
@@ -316,6 +359,8 @@ cn_give:
         add   s7, s7, t0               # s7: its entry
         lw    s3, 0(s7)                # s3: its kind of call
         beqz  s3, 4f
+        call  cn_ttin                  # a background reader: stopped, or
+        bnez  a0, 4f                   # refused
         li    s8, 0                    # s8: how many code points it took
         lw    t0, cn_count
         beqz  t0, 2f
@@ -394,8 +439,10 @@ cn_arm:
         li    t1, CN_MAX
         bge   t0, t1, cn_wait
         lw    t0, cn_fg
-        bgez  t0, 6f
-        la    t0, cn_readers
+        bltz  t0, 7f
+        lw    t0, cn_keys
+        beqz  t0, 6f
+7:      la    t0, cn_readers
         li    t1, NPROC
 5:      lw    t2, 0(t0)
         bnez  t2, 6f
@@ -408,42 +455,116 @@ cn_arm:
         sys
         j     cn_wait
 
-# cn_kill: Ctrl-C: send the foreground process SIGINT, for the process
-# that named it. One that ends reads nothing more, and the console is
-# nobody's after. One that goes on (it catches or ignores SIGINT,
-# KILL_CAUGHT) keeps the console, and a read it waits in ends with
-# E_INTR, as a terminal's does, so its handler runs now. a0 = 0 if the
-# Ctrl-C did either, else KILL_ENDED or why not, and the Ctrl-C ended
-# nothing. Clobbers a1..a3, t0, t1.
+# cn_sigkey: a1 = the signal code point a0 sends the foreground (SIGINT
+# for Ctrl-C, SIGTSTP for Ctrl-Z), or 0: another code point, or no
+# foreground that takes signals. Clobbers t0.
+cn_sigkey:
+        li    a1, 0
+        lw    t0, cn_fg
+        bltz  t0, 1f
+        lw    t0, cn_keys
+        bnez  t0, 1f
+        li    t0, CTRL_C
+        bne   a0, t0, 2f
+        li    a1, SIGINT
+        ret
+2:      li    t0, CTRL_Z
+        bne   a0, t0, 1f
+        li    a1, SIGTSTP
+1:      ret
+
+# cn_kill: Ctrl-C or Ctrl-Z: send the foreground signal a0, its whole
+# group if it leads one, for the process that named it. One that ends
+# reads nothing more, and the console is nobody's after. One that goes
+# on (it catches or ignores the signal, KILL_CAUGHT) or stops
+# (KILL_STOPPED) keeps the console, and each read the foreground waits
+# in ends with E_INTR, as a terminal's does: its handler runs now, or a
+# stopped reader leaves the console's input to the shell. a0 = 0 if the
+# key did one of those, else KILL_ENDED or why not, and it ended
+# nothing. Clobbers a1..a3, t0..t3.
 cn_kill:
+        mv    a3, a0
         lw    a1, cn_fg
-        li    t0, NO_FOREGROUND
-        sw    t0, cn_fg
         li    a0, SYS_KILL
-        lw    a2, cn_fgfor
-        li    a3, SIGINT
+        lw    t0, cn_lead
+        beqz  t0, 1f
+        lw    a1, cn_tgrp
+        li    a0, SYS_KILLPG
+1:      lw    a2, cn_fgfor
         sys
         li    t0, KILL_CAUGHT
-        beq   a0, t0, 2f
-        bnez  a0, 1f
-        li    t0, 3                    # it reads nothing more
-        mul   t0, a1, t0
-        la    t1, cn_readers
-        add   t1, t1, t0
-        sw    zero, 0(t1)
-1:      ret
-2:      sw    a1, cn_fg                # it goes on, and keeps the console
+        beq   a0, t0, 3f
+        li    t0, KILL_STOPPED
+        beq   a0, t0, 3f
+        bnez  a0, 2f
+        lw    a1, cn_fg                # it reads nothing more
         li    t0, 3
         mul   t0, a1, t0
         la    t1, cn_readers
         add   t1, t1, t0
-        lw    t0, 0(t1)
-        beqz  t0, 3f                   # not reading
         sw    zero, 0(t1)
+        li    t0, NO_FOREGROUND        # and the console is nobody's
+        sw    t0, cn_fg
+        sw    t0, cn_tgrp
+        sw    zero, cn_lead
+2:      ret
+3:      li    t2, 0                    # t2: each process
+4:      li    t0, 3
+        mul   t3, t2, t0
+        la    t0, cn_readers
+        add   t3, t3, t0               # t3: its entry
+        lw    t0, 0(t3)
+        beqz  t0, 6f                   # not reading
+        lw    t0, cn_lead
+        bnez  t0, 5f
+        lw    t0, cn_fg                # the foreground alone
+        bne   t2, t0, 6f
+        j     7f
+5:      li    a0, SYS_GETPGRP          # or its whole group
+        mv    a1, t2
+        sys
+        lw    t0, cn_tgrp
+        bne   a0, t0, 6f
+7:      sw    zero, 0(t3)
         li    a0, SYS_REPLY
+        mv    a1, t2
         li    a2, E_INTR
         sys
-3:      li    a0, 0
+6:      addi  t2, t2, 1
+        li    t0, NPROC
+        blt   t2, t0, 4b
+        li    a0, 0
+        ret
+
+# cn_ttin: reader s6, whose entry is s7, reads while the console's
+# foreground is another group's: send its group SIGTTIN and end its
+# read, with E_INTR if that stopped it (it reads again once it goes on)
+# or E_IO if not. a0 = 1 if so, 0 if it may read. Clobbers a1..a3, t0.
+cn_ttin:
+        lw    t0, cn_tgrp
+        bltz  t0, 1f                   # no foreground: anyone reads
+        li    a0, SYS_GETPGRP
+        mv    a1, s6
+        sys
+        blez  a0, 1f                   # gone, or init's group
+        lw    t0, cn_tgrp
+        beq   a0, t0, 1f               # the foreground's
+        mv    a1, a0
+        li    a0, SYS_KILLPG
+        li    a2, KILL_ANY
+        li    a3, SIGTTIN
+        sys
+        li    a2, E_INTR
+        li    t0, KILL_STOPPED
+        beq   a0, t0, 2f
+        li    a2, E_IO
+2:      sw    zero, 0(s7)
+        li    a0, SYS_REPLY
+        mv    a1, s6
+        sys
+        li    a0, 1
+        ret
+1:      li    a0, 0
         ret
 
 # cn_push: put code point a0 at the buffer's end, which has room.
@@ -496,7 +617,11 @@ cn_unpop:
         ret
 
 cn_fg:  .word NO_FOREGROUND            # the process Ctrl-C kills,
-cn_fgfor: .word 0                      # and the one that named it
+cn_fgfor: .word 0                      # and the one that named it;
+cn_tgrp: .word NO_FOREGROUND           # its group, whose reads are not
+                                       # background reads;
+cn_lead: .word 0                       # 1 if it leads that group;
+cn_keys: .word 0                       # 1 if Ctrl-C and Ctrl-Z are keys
 cn_head: .word 0                       # the buffer's oldest code point
 cn_count: .word 0                      # how many it holds
 cn_closed: .word 0                     # 1 once the console said it is closed

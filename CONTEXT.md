@@ -2752,6 +2752,52 @@ paths: six pages while it runs.
 - `bin_disk` is 84 blocks now (70 on main, with dhcp, telnet and printenv) and CI's disk
   100: the five programs take seven blocks more.
 
+
+## Job control (2026-11-28)
+
+Eelco asked for full job control after the scripting PR gave the shell
+background jobs: Ctrl-Z, `fg`, `bg`, `jobs` with `%N`, and the stop and
+continue signals under them.
+
+- **A stopped thread parks on its way to user mode.** `PCB_STOP` and
+  each thread's note are set, and `rk_signal` (from `resume`) parks the
+  thread as `ST_STOPPED` and picks another. Waking blocked threads to
+  stop them, as Linux does, would hand assembly programs an `E_INTR`
+  they never asked for; a blocked thread stays blocked and parks once
+  its call ends. A stopped thread is not cut short by a caught signal
+  either: its handler runs after `SIGCONT`.
+- **Process groups were needed after all.** Without them Ctrl-Z stops
+  only the program the shell names, while the rest of a pipeline, or a
+  script's children, run on; Ctrl-C had the same gap (it ended a
+  pipeline's first program only). The console's foreground stays a
+  process number, for compatibility, and stands for the group when it
+  leads one. Init's group 0, which holds the servers, is never
+  signalled whole: init naming itself would have killed the console
+  server.
+- **Children join a group from their first instruction.** POSIX shells
+  call setpgid in both parent and child; a spawned image runs no shell
+  code first, so the parent chooses the group of its next children
+  (`setpgrp(PGRP_CHILDREN, ...)`) before spawning.
+- **A foreground job starts held.** Even in its own group, a job's
+  program could read the console before the shell gave the group the
+  console, and be stopped by `SIGTTIN`. Starting them stopped and
+  sending `SIGCONT` once the console was theirs lost a Ctrl-Z typed in
+  between (the continue undid it), so held is its own flag
+  (`PCB_HELD`), lifted by `setpgrp(PGRP_RELEASE, g)`, which leaves a real
+  stop alone.
+- **`waitpid` is a new call** rather than an option word on `wait`:
+  init and many tests call `wait` with whatever `a2` holds. Each stop is
+  reported once (`PCB_STOPWAIT`), as WUNTRACED does.
+- **A stopped orphan gets `SIGHUP` and `SIGCONT`**, a small form of
+  POSIX's orphaned process group rule: there are no sessions.
+- **trystd's retry after `E_INTR` reused changed registers.** A
+  descriptor call comes back with its registers made a `call`'s, so
+  `read` and `sys` called again with garbage, which only showed once a
+  stopped reader's read was answered `E_INTR`. Both keep the arguments
+  in temporaries now.
+- `SIGTTOU` is defined and stops, but nothing sends it: background
+  writes to the console are allowed, as with TOSTOP off.
+
 ### 2026-11-28 · A B-tree filesystem with metadata
 
 Eelco asked for file times, modes and owners. Porting FFS or ext4 was

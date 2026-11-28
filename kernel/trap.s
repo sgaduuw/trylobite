@@ -264,11 +264,13 @@ on_kill:
 
 # The thread in s0 has a signal to take (PCB_SIGNOTE): rk_signal takes
 # one, ending the process or starting its handler, or clears the note;
-# then resume looks again.
+# then resume looks again. A thread of a stopped process parks instead
+# (ST_STOPPED), and another runs.
 on_signal:
         mv    a0, s0
         call  rk_signal
-        j     resume
+        beqz  a0, resume
+        j     pick
 
 # A trap inside the kernel: nothing to save, nowhere to return to.
 kpanic:

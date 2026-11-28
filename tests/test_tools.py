@@ -85,13 +85,13 @@ def test_ps_lists_every_process_by_name(shell):
 
 
 def test_kill_ends_a_server_and_init_starts_it_again(shell):
-    result = session(shell, "kill 0\nkill 99\nkill x\nkill 4\nps\n")
+    result = session(shell, "/bin/kill 0\n/bin/kill 99\n/bin/kill x\n/bin/kill 4\nps\n")
     out = re.sub(r"trylobite: [^\n]*\n", "", result.after_boot)
     assert out.startswith(
-        "$ kill 0\nkill: 0: not allowed\nsh: exit 1\n"
-        "$ kill 99\nkill: 99: no such process\nsh: exit 1\n"
-        "$ kill x\nusage: kill [-SIGNAL] PID... | kill -l\nsh: exit 2\n"
-        "$ kill 4\n"
+        "$ /bin/kill 0\nkill: 0: not allowed\nsh: exit 1\n"
+        "$ /bin/kill 99\nkill: 99: no such process\nsh: exit 1\n"
+        "$ /bin/kill x\nusage: kill [-SIGNAL] PID... | kill -l\nsh: exit 2\n"
+        "$ /bin/kill 4\n"
     ), out
     assert "process 4 killed" in result.console
     assert "init: pipe ended, starting it again" in result.console

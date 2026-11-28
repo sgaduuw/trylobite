@@ -34,7 +34,11 @@ fn proc_info(p: Proc) -> Word {
     }
     // The buffer, as its words see it.
     let b = first.wrapping_offset((1 - PI_STATE) as isize);
-    let state = q.get(PCB_STATE);
+    let mut state = q.get(PCB_STATE);
+    let ended = [ST_ZOMBIE, ST_DYING].contains(&state);
+    if !ended && (q.space().get(PCB_STOP) != 0 || q.space().get(PCB_HELD) != 0) {
+        state = ST_STOPPED; // whatever its threads are doing, it is stopped
+    }
     store_at(b, PI_STATE, state);
     store_at(b, PI_PARENT, q.get(PCB_PARENT));
     let pages = if state == ST_ZOMBIE {
