@@ -2523,10 +2523,18 @@ B-tree of every record, in Rust (docs/filesystem.md). The choices:
   image to hold programs of more than one page (`IMAGE_PAGES`), and a
   stack check in the build (`tools/server.py`), since an inlined call
   chain overflowed the stack below `V_USER` silently at first. It is
-  slower per call than the assembly was; caching the last inodes and
-  extents, u32 division for in-block offsets and fewer key copies took
-  a small read from about 70,000 steps to about 11,000, most of the
-  rest being the kernel's IPC.
+  slower per call than the assembly was, and that shows: a process
+  busy for long is interrupted every `QUANTUM` (500) ticks at several
+  hundred steps each, so a slow server pays twice. Caching the last
+  inodes and extents, u32 division, fewer key copies, node sums in an
+  assembly loop, the server's state in its heap and same-sized records
+  overwritten in place brought a small read from about 70,000 steps to
+  about 11,000, a 243-tryte write from 240,000 to 140,000, and the
+  server's share of booting the shell from 1.56 million to 675,000.
+  Booting the shell build still takes about 1.65 million steps against
+  main's 840,000, so the tests' step budgets grew. A longer `QUANTUM`,
+  or a leaf search that skips items by inode, are the next things to
+  try.
 - **Relatime.** Reading moves the access time only when it is no later
   than the last change, as Linux does, so reads do not write the disk.
 - **No permission checks yet.** Mode, uid and gid are stored, shown and

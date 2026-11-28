@@ -97,9 +97,26 @@ pub fn cmp_key<S: Store>(st: &S, s: Slot, pos: usize, k: &[i64]) -> Ordering {
 /// (more than `k` when `strict`), or where the items end, and whether
 /// that item's key is `k`.
 pub fn find<S: Store>(st: &S, s: Slot, k: &[i64], strict: bool) -> (usize, bool) {
+    if let Some(found) = st.find(s, k, strict) {
+        return found;
+    }
     let end = end(st, s);
     let mut pos = ITEMS;
+    let k0 = k.first().copied();
     while pos < end {
+        // Most items differ from k in their first word, their inode: a
+        // leaf is searched a word an item until the inode is k's.
+        let kl = klen(st, s, pos);
+        if let (Some(k0), true) = (k0, kl > 0) {
+            let w0 = st.word(s, pos + IT_KEY as usize);
+            if w0 < k0 {
+                pos += IT_KEY as usize + kl + vlen(st, s, pos);
+                continue;
+            }
+            if w0 > k0 {
+                return (pos, false);
+            }
+        }
         match cmp_key(st, s, pos, k) {
             Ordering::Less => {}
             Ordering::Equal if strict => {}

@@ -355,7 +355,7 @@ impl<S: Store> Fs<S> {
                 break;
             }
             if it.value[DE_INO as usize] == dir {
-                return Ok(it.key.name(out));
+                return Ok(it.key.name_with(out, |w| self.store.trytes(w)));
             }
             k = it.key;
             strict = true;

@@ -171,6 +171,14 @@ impl Store for Windows {
         sys::word(base(s), i)
     }
 
+    fn find(&self, s: Slot, k: &[i64], strict: bool) -> Option<(usize, bool)> {
+        Some(sys::find(base(s), k, strict))
+    }
+
+    fn trytes(&self, w: i64) -> [i64; 3] {
+        sys::trytes(w)
+    }
+
     fn sum_words(&self, s: Slot, n: usize, skip: usize) -> i64 {
         debug_assert_eq!(skip, tryfs::layout::N_SUM as usize);
         sys::sum(base(s), n)

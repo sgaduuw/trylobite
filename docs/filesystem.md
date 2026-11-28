@@ -332,7 +332,11 @@ with the kernel's Rust. Its image takes `FS_PAGES` (4) pages, the only
 built-in program of more than one (its `IMAGE_PAGES` word, kernel.md,
 Memory). `tools/server.py` also checks that its deepest chain of
 calls fits its stack, about 9,800 trytes below `V_USER`, and fails the
-build if it does not.
+build if it does not. Its state, about 14,000 trytes, most of it the
+sets of which blocks are in use, is in its heap (`brk`), not its image,
+where those zeros would take a page. Node sums are a loop in
+`user/fsd.s`, where a register wraps as the sum does, rather than Rust's
+64-bit arithmetic.
 
 It keeps blocks in its `NWIN` (9) block windows, as a cache: a block
 it needs and has not got is read into the window used least recently,

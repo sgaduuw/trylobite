@@ -13,6 +13,9 @@ unsafe extern "C" {
     /// A node's sum over `n` words from `p`, N_SUM's counted as 0, as a
     /// word at `out` (lib/rust/tryfs/src/sum.rs).
     fn fs_sum(p: *const u8, n: i32, out: *mut u8);
+    /// node::find in the leaf whose first word is at `node`, for the `n`
+    /// words at `key`: the position and 1 if found exactly, at `out`.
+    fn fs_find(node: *const u8, key: *const u8, n: i32, strict: i32, out: *mut u8);
     #[link_name = "detrytus.lw"]
     fn lw(p: *const u8) -> i64;
     #[link_name = "detrytus.sw"]
@@ -23,6 +26,8 @@ unsafe extern "C" {
     /// trytes, and the words of what goes out or in.
     static fs_pathbuf: u8;
     static fs_words: u8;
+    static fs_key: u8;
+    static fs_found: u8;
 }
 
 /// System call `n`: its a0.
@@ -51,6 +56,19 @@ pub fn sum(p: *const u8, n: usize) -> i64 {
     let out = words();
     unsafe { fs_sum(p, n as i32, out) };
     word(out, 0)
+}
+
+/// node::find in the leaf whose first word is at `node` (user/fsd.s's
+/// fs_find): the position of the first item whose key is `k` or more
+/// (more when `strict`), and whether it is `k`.
+pub fn find(node: *const u8, k: &[i64], strict: bool) -> (usize, bool) {
+    let key = (&raw const fs_key).cast_mut();
+    let out = (&raw const fs_found).cast_mut();
+    for (i, &w) in k.iter().enumerate() {
+        set_word(key, i, w);
+    }
+    unsafe { fs_find(node, key, k.len() as i32, strict as i32, out) };
+    (word(out, 0) as usize, word(out, 1) != 0)
 }
 
 /// Word `i` from the word-aligned address `p`.

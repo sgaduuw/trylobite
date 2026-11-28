@@ -74,7 +74,12 @@ impl Key {
     /// The name of a directory entry's key, as code points, into `out`:
     /// how many.
     pub fn name(&self, out: &mut [i32; NAME_LEN]) -> usize {
-        unpack(&self.w[2..self.len], out)
+        unpack(&self.w[2..self.len], out, trytes)
+    }
+
+    /// The same, splitting each word with `split` (see [`trytes`]).
+    pub fn name_with(&self, out: &mut [i32; NAME_LEN], split: impl Fn(i64) -> [i64; 3]) -> usize {
+        unpack(&self.w[2..self.len], out, split)
     }
 }
 
@@ -103,6 +108,16 @@ pub fn pack(name: &[i32], out: &mut [i64]) -> usize {
     n
 }
 
+/// A word's three balanced digits of base 3^9, low first: its trytes.
+/// This takes 64-bit division, a long loop on detrytus, where the file
+/// server reads the trytes of a word directly instead (Key::name_with).
+pub fn trytes(w: i64) -> [i64; 3] {
+    let (c2, rest) = digit(w);
+    let (c1, rest) = digit(rest);
+    let (c0, _) = digit(rest);
+    [c2, c1, c0]
+}
+
 /// The balanced digit of base 3^9 at the bottom of `w`, and what is
 /// left above it.
 fn digit(w: i64) -> (i64, i64) {
@@ -117,12 +132,10 @@ fn digit(w: i64) -> (i64, i64) {
 
 /// Unpack words of a name into code points, stopping at the first 0:
 /// how many.
-pub fn unpack(words: &[i64], out: &mut [i32; NAME_LEN]) -> usize {
+pub fn unpack(words: &[i64], out: &mut [i32; NAME_LEN], split: impl Fn(i64) -> [i64; 3]) -> usize {
     let mut n = 0;
     for &w in words {
-        let (c2, rest) = digit(w);
-        let (c1, rest) = digit(rest);
-        let (c0, _) = digit(rest);
+        let [c2, c1, c0] = split(w);
         for c in [c0, c1, c2] {
             if c == 0 || n == NAME_LEN {
                 return n;

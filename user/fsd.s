@@ -110,6 +110,53 @@ fs_sum:
 3:      sw    t0, 0(a2)
         ret
 
+# fs_find(node, key, n, strict, out): in the leaf whose first word is at
+# node, the first item whose key is the n words at key or more (more
+# with strict), as lib/rust/tryfs/src/node.rs's find: its position, or
+# where the items end, at out, and 1 at out + 3 if its key is key. The
+# Rust takes dozens of steps an item, masking and splitting every
+# number; this takes a few.
+fs_find:
+        addi  sp, sp, -3
+        sw    a4, 0(sp)                # out, while a4 compares
+        lw    t0, 3 * N_USED(a0)
+        addi  t0, t0, N_ITEMS          # t0: where the items end
+        li    t1, N_ITEMS              # t1: the item's position
+1:      bge   t1, t0, 8f
+        li    t2, 3
+        mul   t2, t2, t1
+        add   t2, t2, a0               # t2: the item's first word
+        lw    t3, 3 * IT_KLEN(t2)      # t3: its key's length
+        min   t4, t3, a2               # t4: words to compare
+        addi  t5, t2, 3 * IT_KEY       # t5: its key
+        mv    t6, a1                   # t6: the key looked for
+2:      beqz  t4, 4f
+        lw    a5, 0(t5)
+        lw    a4, 0(t6)
+        blt   a5, a4, 6f               # less: on to the next
+        bgt   a5, a4, 7f               # more: here
+        addi  t5, t5, 3
+        addi  t6, t6, 3
+        addi  t4, t4, -1
+        j     2b
+4:      blt   t3, a2, 6f               # a shorter key comes first
+        bgt   t3, a2, 7f
+        bnez  a3, 6f                   # the same: past it when strict
+        li    t2, 1
+        j     9f
+6:      lw    t4, 3 * IT_VLEN(t2)
+        add   t1, t1, t3
+        add   t1, t1, t4
+        addi  t1, t1, IT_KEY
+        j     1b
+8:      mv    t1, t0                   # none: where the items end
+7:      li    t2, 0
+9:      lw    a4, 0(sp)
+        addi  sp, sp, 3
+        sw    t1, 0(a4)
+        sw    t2, 3(a4)
+        ret
+
 # memcpy(dst, src, n) and memmove(dst, src, n): dst. Blocks are copied
 # with these too, and the Rust copies and clears its keys and items with
 # them often, so they go a word (3 trytes) at a time where dst and src
@@ -212,6 +259,8 @@ fs_more_w:  .words 5                   # a1 to a5 of the last call
 fs_pathbuf: .words (PATH_MAX + 3) / 3  # a path coming in, PATH_MAX + 1 trytes
 fs_words:   .words (PATH_MAX + 3) / 3  # what goes out: stat's words, a name,
                                        # the current directory's path
+fs_key:     .words KEY_MAX             # a key fs_find looks for
+fs_found:   .words 2                   # and what it found
 
         .include "fsd-rust.s"
 fs_end: .word 0                        # where the image ends

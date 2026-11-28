@@ -70,6 +70,18 @@ pub trait Store {
         sum
     }
 
+    /// In the leaf in slot `s`, node::find's answer, if the store can
+    /// work it out faster than node::find's own loop.
+    fn find(&self, _s: Slot, _k: &[i64], _strict: bool) -> Option<(usize, bool)> {
+        None
+    }
+
+    /// A word's trytes, low first (key::trytes). A store on a machine
+    /// that can read them directly says so.
+    fn trytes(&self, w: i64) -> [i64; 3] {
+        crate::key::trytes(w)
+    }
+
     fn copy_to(&mut self, s: Slot, to: i64) -> Result<Slot>;
 
     /// Forget block `b`, dirty or not: it is free again.

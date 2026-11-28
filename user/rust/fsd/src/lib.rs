@@ -423,7 +423,8 @@ impl Server {
         for i in 0..(STAT / 3) as usize {
             sys::set_word(out, i, 0);
         }
-        let put = |at: i64, w: i64| sys::set_word(out, (at / 3) as usize, w);
+        // u32 division: the machine's own, where an i64's is a long loop.
+        let put = |at: i64, w: i64| sys::set_word(out, (at as u32 / 3) as usize, w);
         put(ST_INO, ino);
         put(ST_TYPE, node.typ);
         put(ST_LINKS, node.links);
@@ -635,7 +636,8 @@ impl Server {
         let out = sys::words();
         let free = self.fs.free_blocks();
         let ifree = free * INODES_PER_BLOCK;
-        let put = |at: i64, w: i64| sys::set_word(out, (at / 3) as usize, w);
+        // u32 division: the machine's own, where an i64's is a long loop.
+        let put = |at: i64, w: i64| sys::set_word(out, (at as u32 / 3) as usize, w);
         put(SF_BLOCKS, self.fs.blocks);
         put(SF_BFREE, free);
         put(SF_INODES, self.fs.inodes + ifree);
@@ -879,7 +881,7 @@ impl Server {
                     return Ok(0);
                 }
                 let mut cps = [0; NAME_LEN];
-                let n = it.key.name(&mut cps);
+                let n = it.key.name_with(&mut cps, sys::trytes);
                 name[..n].copy_from_slice(&cps[..n]);
                 self.files[h].after = it.key;
                 (it.value[DE_INO as usize], n, Cursor::After)
