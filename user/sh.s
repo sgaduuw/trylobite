@@ -1388,11 +1388,14 @@ do_exit:
         sys
 
 # ls [DIR]: each entry of DIR, or of the current directory, but those whose names start with
-# a dot: a file's size and name, a directory's name and a slash.
+# a dot: a file's size and name, a directory's name and a slash. ls with
+# an option (ls -l) is /bin/ls's.
 do_ls:  mv    a0, s4
         call  word
         mv    s5, a0                   # s5: the directory
         lt    t0, 0(s5)
+        li    t1, '-'
+        beq   t0, t1, ls_opt
         bnez  t0, 1f
         la    s5, sh_dot
 1:      call  open_s5
@@ -1790,6 +1793,18 @@ putn:   addi  sp, sp, -3               # it calls puts and putc
         lw    ra, 0(sp)
         addi  sp, sp, 3
         ret
+
+# ls_opt: ls was given an option: put back the space word ended the
+# option with, if more follows, and run /bin/ls with the line's words.
+ls_opt: mv    t0, s5
+1:      lt    t1, 0(t0)
+        beqz  t1, 2f
+        addi  t0, t0, 1
+        j     1b
+2:      beq   t0, a1, from_disk        # nothing followed
+        li    t1, ' '
+        st    t1, 0(t0)
+        j     from_disk
 
 # Each entry: the name, and where the built-in starts; 0 ends it.
 sh_builtins:

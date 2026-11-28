@@ -218,11 +218,14 @@ def build(
         *(["ip"] if ip else []),
     ]
     server = ""
+    shift = ""  # the file server's image takes FS_PAGES pages
     for k, name in enumerate(servers, 3):
         server += f"""
-        .section prog{k}, (P_PROG0 + {k}) * PAGE, V_USER
+        .section prog{k}, (P_PROG0 + {k}{shift}) * PAGE, V_USER
         .include "{SERVERS[name]}"
 """
+        if name == "fs":
+            shift = " + FS_PAGES - 1"
     init = "".join(start(k) for k in range(3, 3 + len(servers))) + init
     source = f"""
         .equ  NPROG, {3 + len(servers)}

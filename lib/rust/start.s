@@ -196,6 +196,19 @@ word_split:
         mv    a0, t1
         ret
 
+# word_put(address, low, high): store the word high * 2^32 + low at an
+# aligned address, low a u32 and high an i32: word_split the other way,
+# for the times utimes takes.
+word_put:
+        li    t0, I32_SIGN
+        bxor  a2, a2, t0
+        sub   a2, a2, t0
+        li    t0, 4294967296
+        mul   a2, a2, t0
+        add   a2, a2, a1
+        sw    a2, 0(a0)
+        ret
+
 # ticks(): the time CSR, split as word_split splits a word.
 ticks:  csrr  a0, time
         li    t0, I32_MASK

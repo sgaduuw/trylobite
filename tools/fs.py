@@ -11,6 +11,7 @@
     tools/fs.py put IMAGE FILE [PATH]         add a file, or replace it
     tools/fs.py mkdir IMAGE PATH              make a directory
     tools/fs.py rm IMAGE PATH                 remove a file or empty directory
+    tools/fs.py check IMAGE                   check it all (fsck)
 
 A file is text, each code point one tryte between 1 and 9,841, or a
 program: `put` given an image assembled by `detrytus asm` (a .dti file)
@@ -27,6 +28,8 @@ blocks, and block 0's boot record names them, so that detrytus' boot
 ROM loads them and starts the firmware at FW_BOOT (`detrytus run --disk
 IMAGE` with no program). The image is a detrytus disk
 file, two bytes per tryte, so `detrytus run --disk IMAGE` attaches it.
+The filesystem is lib/rust/tryfs's, which tools/rust/tryfs, a host
+tool built here with cargo (or $TRYFS), reads and writes.
 The format's numbers are read from
 include/layout.s, which the kernel and programs share.
 """
@@ -36,6 +39,7 @@ from __future__ import annotations
 import argparse
 import ast
 import contextlib
+import json
 import os
 import re
 import shutil
@@ -234,33 +238,81 @@ def write_blocks(path: Path, blocks: list[Block]) -> None:
 
 
 # --- the filesystem --------------------------------------------------------------
+#
+# The format is lib/rust/tryfs's, the code the file server runs; its host
+# tool, tools/rust/tryfs, does the work here, so the two cannot disagree.
+
+TRYFS_CRATE = Path(__file__).resolve().parent / "rust" / "tryfs"
+_tryfs: list[str] = []
+
+
+def tryfs_binary() -> str:
+    """The host tool: $TRYFS, or built with cargo (once a run; cargo
+    rebuilds it only when its crate or tryfs changed)."""
+    if not _tryfs:
+        given = os.environ.get("TRYFS")
+        if given:
+            _tryfs.append(given)
+        else:
+            cargo = shutil.which("cargo")
+            if cargo is None:
+                raise FsError("no cargo to build tools/rust/tryfs with (or set TRYFS)")
+            done = subprocess.run(
+                [cargo, "build", "--release", "--quiet"],
+                cwd=TRYFS_CRATE,
+                capture_output=True,
+                text=True,
+            )
+            if done.returncode:
+                raise FsError(f"building tools/rust/tryfs: {done.stderr.strip()}")
+            _tryfs.append(str(TRYFS_CRATE / "target" / "release" / "tryfs"))
+    return _tryfs[0]
+
+
+@dataclass
+class Time:
+    secs: int
+    nanos: int
 
 
 @dataclass
 class Inode:
+    """What stat says of a file or directory."""
+
     number: int
     type: int
+    mode: int
+    uid: int
+    gid: int
     links: int
     size: int
-    direct: list[int]
-    indirect: int
+    blocks: int  # data blocks it holds
+    parent: int  # a directory's parent
+    atime: Time
+    mtime: Time
+    ctime: Time
+    btime: Time
+    data: list[int]  # each file block's disk block, NO_BLOCK for a hole
 
+    @classmethod
+    def of(cls, j: dict) -> Inode:
+        return cls(
+            j["ino"],
+            j["type"],
+            j["mode"],
+            j["uid"],
+            j["gid"],
+            j["links"],
+            j["size"],
+            j["blocks"],
+            j["parent"],
+            *(Time(*j[t]) for t in ("atime", "mtime", "ctime", "btime")),
+            j.get("data", []),
+        )
 
-@dataclass
-class Entry:
-    """A directory entry: the name and the inode it names."""
-
-    name: str
-    ino: int
-
-
-def check_name(name: str) -> None:
-    if not 1 <= len(name) <= L["NAME_MAX"]:
-        raise FsError(f"a name is 1 to {L['NAME_MAX']} characters: {name!r}")
-    if any(ord(c) <= ord(" ") or ord(c) > HALF or c == "/" for c in name):
-        raise FsError(f"a name has no spaces, slashes or control characters: {name!r}")
-    if name in (".", ".."):
-        raise FsError(f"{name!r} is taken by every directory")
+    @property
+    def is_dir(self) -> bool:
+        return self.type == L["T_DIR"]
 
 
 def check_text(text: str, what: str) -> None:
@@ -275,371 +327,152 @@ def split_path(path: str) -> list[str]:
     return [name for name in path.split("/") if name]
 
 
-def inode_at(number: int) -> int:
-    return L["BLOCK_W0"] + L["INODE"] * number
+def _path(path: str) -> str:
+    return "/" + "/".join(split_path(path))
 
 
-def entry_at(slot: int) -> int:
-    """The offset of entry slot of a directory, within its block."""
-    return L["BLOCK_W0"] + L["DIRENT"] * (slot % L["DIRENTS"])
-
-
-def blocks_for(size: int) -> int:
-    """Data blocks for a file of size trytes."""
-    return -(-size // PAGE)
-
-
-def room_for(size: int) -> int:
-    """Blocks a file of size trytes takes: its data, and an indirect block
-    once it has more than NDIRECT."""
-    n = blocks_for(size)
-    return n + (n > L["NDIRECT"])
+def _trytes_bytes(trytes: list[int]) -> bytes:
+    return struct.pack(f"<{len(trytes)}h", *trytes)
 
 
 class Filesystem:
-    """A filesystem image, held in memory: change it, then save it."""
+    """A filesystem image, held in a file of its own: change it, then save
+    it. Each change is one transaction of the host tool."""
 
-    def __init__(self, blocks: list[Block]):
-        self.blocks = blocks
-        head = blocks[0] if blocks else Block.blank()
-        if head.word(L["FS_HEAD_MAGIC"]) != L["FS_MAGIC"]:
-            raise FsError("not a trylobite filesystem")
-        version = head.word(L["FS_HEAD_VERSION"])
-        if version != L["FS_VERSION"]:
-            raise FsError(f"filesystem version {version}, not {L['FS_VERSION']}")
-        self.count = head.word(L["FS_HEAD_BLOCKS"])
-        if not 3 <= self.count <= min(len(blocks), L["FS_MAX_BLOCKS"]):
-            raise FsError(f"the header claims {self.count} blocks")
-        self.head = head
-        self.table = blocks[L["FS_INODE_BLOCK"]]
-        self.check()
+    def __init__(self, data: bytes):
+        self._dir = tempfile.TemporaryDirectory(prefix="tryfs-")
+        self.image = Path(self._dir.name) / "disk.img"
+        self.image.write_bytes(data)
+
+    def _run(self, *args: str, stdin: bytes | None = None) -> str:
+        done = subprocess.run(
+            [tryfs_binary(), args[0], str(self.image), *args[1:]],
+            input=stdin,
+            capture_output=True,
+        )
+        if done.returncode:
+            message = done.stderr.decode(errors="replace").strip()
+            raise FsError(message.removeprefix("tryfs: "))
+        return done.stdout.decode()
+
+    def _file(self, name: str, trytes: list[int]) -> str:
+        file = Path(self._dir.name) / name
+        file.write_bytes(_trytes_bytes(trytes))
+        return str(file)
 
     @classmethod
-    def new(cls, count: int) -> Filesystem:
-        if not 3 <= count <= L["FS_MAX_BLOCKS"]:
-            raise FsError(f"a filesystem has 3 to {L['FS_MAX_BLOCKS']} blocks")
-        blocks = [Block.blank() for _ in range(count)]
-        head = blocks[0]
-        head.set_word(L["FS_HEAD_MAGIC"], L["FS_MAGIC"])
-        head.set_word(L["FS_HEAD_VERSION"], L["FS_VERSION"])
-        head.set_word(L["FS_HEAD_BLOCKS"], count)
-        for block in (0, L["FS_INODE_BLOCK"]):
-            head.set_tryte(L["FS_MAP"] + block, L["MAP_USED"])
-        made = object.__new__(cls)
-        made.blocks, made.count, made.head = blocks, count, head
-        made.table = blocks[L["FS_INODE_BLOCK"]]
-        root = L["ROOT_INO"]
-        made.put_inode(Inode(root, L["T_DIR"], 2, 0, [0] * L["NDIRECT"], 0))
-        made.add_entry(root, ".", root)
-        made.add_entry(root, "..", root)
-        made.check()
+    def new(cls, count: int, disk_blocks: int | None = None) -> Filesystem:
+        """A new filesystem of count blocks, on a disk of disk_blocks."""
+        made = cls(b"")
+        done = subprocess.run(
+            [tryfs_binary(), "new", str(made.image), str(count), str(disk_blocks or count)],
+            capture_output=True,
+            text=True,
+        )
+        if done.returncode:
+            raise FsError(done.stderr.strip().removeprefix("tryfs: "))
         return made
 
     @classmethod
     def load(cls, path: Path) -> Filesystem:
-        return cls(read_blocks(path))
+        """A disk's filesystem, checked first."""
+        made = cls(Path(path).read_bytes())
+        made.check()
+        return made
 
     def save(self, path: Path) -> None:
-        write_blocks(path, self.blocks)
+        Path(path).write_bytes(self.image.read_bytes())
 
-    # --- the map of free blocks
+    def raw(self) -> list[Block]:
+        """The disk's blocks, as they are."""
+        return read_blocks(self.image)
 
-    def used(self, block: int) -> bool:
-        return self.head.tryte(L["FS_MAP"] + block) == L["MAP_USED"]
+    def set_raw(self, blocks: list[Block]) -> None:
+        """Replace the disk's blocks (to damage it, in a test)."""
+        write_blocks(self.image, blocks)
 
-    def set_used(self, block: int, used: bool) -> None:
-        self.head.set_tryte(L["FS_MAP"] + block, L["MAP_USED" if used else "MAP_FREE"])
+    def check(self) -> None:
+        """Check it all (fsck): FsError says what is wrong."""
+        self._run("check")
+
+    def info(self) -> dict:
+        """The superblock, and the free blocks."""
+        return json.loads(self._run("info"))
+
+    @property
+    def count(self) -> int:
+        return self.info()["blocks"]
 
     def free_blocks(self) -> list[int]:
-        return [b for b in range(self.count) if not self.used(b)]
-
-    def allocate(self) -> int:
-        free = self.free_blocks()
-        if not free:
-            raise FsError("the disk is full")
-        self.set_used(free[0], True)
-        self.blocks[free[0]] = Block.blank()
-        return free[0]
+        return self.info()["free"]
 
     # --- the kernel to boot
 
     def boot_blocks(self) -> range:
         """The blocks block 0's boot record names, if it has one."""
-        head = self.head
-        if head.word(L["FS_HEAD_BOOT"]) != L["BOOT_MAGIC"]:
-            return range(0)
-        first, count = head.word(L["BOOT_FIRST"]), head.word(L["BOOT_COUNT"])
-        if count < 1 or first < 1 or first + count > self.count:
-            raise FsError(
-                f"the boot record names blocks {first} to {first + count - 1}"
-            )
-        return range(first, first + count)
+        boot = self.info()["boot"]
+        return range(boot[0], boot[0] + boot[1]) if boot else range(0)
 
     def set_boot(self, image: list[Block]) -> None:
         """Put a kernel's pages (boot_image) in the first run of free
         blocks that holds them, freeing the one there was, and point the
         boot record at them."""
-        for block in self.boot_blocks():
-            self.set_used(block, False)
-        n, run = len(image), 0
-        for block in range(self.count):
-            run = run + 1 if not self.used(block) else 0
-            if run == n:
-                break
-        else:
-            raise FsError(f"no {n} free blocks in a row for the kernel")
-        first = block - n + 1
-        for i, page in enumerate(image):
-            self.blocks[first + i] = Block(list(page.trytes))
-            self.set_used(first + i, True)
-        head = self.head
-        head.set_word(L["FS_HEAD_BOOT"], L["BOOT_MAGIC"])
-        head.set_word(L["BOOT_FIRST"], first)
-        head.set_word(L["BOOT_COUNT"], n)
-        head.set_word(L["BOOT_PAGE"], 1)
-        head.set_word(L["BOOT_ENTRY"], L["FW_BOOT"])
+        trytes = [t for block in image for t in block.trytes]
+        self._run("boot", self._file("boot", trytes), "1", str(L["FW_BOOT"]))
 
-    # --- inodes
+    # --- what is there
+
+    def stat(self, path: str) -> Inode:
+        return Inode.of(json.loads(self._run("stat", _path(path))))
 
     def inode(self, number: int) -> Inode:
-        at = inode_at(number)
-        w = self.table.word
-        return Inode(
-            number,
-            w(at + L["I_TYPE"]),
-            w(at + L["I_LINKS"]),
-            w(at + L["I_SIZE"]),
-            [w(at + L["I_DIRECT"] + 3 * k) for k in range(L["NDIRECT"])],
-            w(at + L["I_INDIRECT"]),
-        )
-
-    def put_inode(self, node: Inode) -> None:
-        at = inode_at(node.number)
-        s = self.table.set_word
-        s(at + L["I_TYPE"], node.type)
-        s(at + L["I_LINKS"], node.links)
-        s(at + L["I_SIZE"], node.size)
-        for k, block in enumerate(node.direct):
-            s(at + L["I_DIRECT"] + 3 * k, block)
-        s(at + L["I_INDIRECT"], node.indirect)
-
-    def new_inode(self, type_: int) -> Inode:
-        for number in range(L["ROOT_INO"] + 1, L["FS_INODES"]):
-            if self.inode(number).type == L["T_FREE"]:
-                node = Inode(number, type_, 0, 0, [0] * L["NDIRECT"], 0)
-                self.put_inode(node)
-                return node
-        raise FsError("no free inode")
-
-    def block_list(self, node: Inode) -> list[int]:
-        """The inode's data block numbers, in order, NO_BLOCK for a hole,
-        as many as its size needs."""
-        n = blocks_for(node.size)
-        found = node.direct[: min(n, L["NDIRECT"])]
-        if n > L["NDIRECT"]:
-            if node.indirect == L["NO_BLOCK"]:
-                found += [L["NO_BLOCK"]] * (n - L["NDIRECT"])
-            else:
-                table = self.blocks[node.indirect]
-                found += [
-                    table.word(L["BLOCK_W0"] + 3 * k) for k in range(n - L["NDIRECT"])
-                ]
-        return found
-
-    def contents(self, node: Inode) -> list[int]:
-        trytes: list[int] = []
-        for i, block in enumerate(self.block_list(node)):
-            n = min(PAGE, node.size - i * PAGE)
-            if block == L["NO_BLOCK"]:
-                trytes += [0] * n
-            else:
-                trytes += self.blocks[block].trytes[:n]
-        return trytes
-
-    def set_contents(self, node: Inode, trytes: list[int]) -> None:
-        """Give the inode these contents, in fresh blocks, freeing its old ones."""
-        need = blocks_for(len(trytes))
-        if room_for(len(trytes)) > len(self.free_blocks()) + len(self.owned(node)):
-            raise FsError(f"no room for {room_for(len(trytes))} blocks")
-        if need > L["NDIRECT"] + PAGE // 3:
-            raise FsError("too big for one file")
-        self.release(node)
-        blocks = [self.allocate() for _ in range(need)]
-        for i, block in enumerate(blocks):
-            chunk = trytes[i * PAGE : (i + 1) * PAGE]
-            self.blocks[block].trytes = chunk + [0] * (PAGE - len(chunk))
-        node.direct = (blocks + [0] * L["NDIRECT"])[: L["NDIRECT"]]
-        node.indirect = L["NO_BLOCK"]
-        if need > L["NDIRECT"]:
-            node.indirect = self.allocate()
-            table = self.blocks[node.indirect]
-            for k, block in enumerate(blocks[L["NDIRECT"] :]):
-                table.set_word(L["BLOCK_W0"] + 3 * k, block)
-        node.size = len(trytes)
-        self.put_inode(node)
-
-    def owned(self, node: Inode) -> list[int]:
-        """Every block the inode holds: its data and its indirect block."""
-        found = [b for b in self.block_list(node) if b != L["NO_BLOCK"]]
-        if node.indirect != L["NO_BLOCK"]:
-            found.append(node.indirect)
-        return found
-
-    def release(self, node: Inode) -> None:
-        for block in self.owned(node):
-            self.set_used(block, False)
-        node.direct = [0] * L["NDIRECT"]
-        node.indirect = L["NO_BLOCK"]
-        node.size = 0
-
-    # --- directories
-
-    def entries(self, ino: int) -> list[Entry]:
-        """A directory's entries, . and .. included, in their order."""
-        node = self.inode(ino)
-        if node.type != L["T_DIR"]:
-            raise FsError(f"inode {ino} is not a directory")
-        found = []
-        blocks = self.block_list(node)
-        for slot in range(node.size // L["DIRENT"]):
-            block = blocks[slot // L["DIRENTS"]]
-            if block == L["NO_BLOCK"]:
-                continue
-            data, at = self.blocks[block], entry_at(slot)
-            number = data.word(at + L["D_INO"])
-            if number == L["NO_INO"]:
-                continue
-            name = ""
-            for i in range(L["NAME_MAX"] + 1):
-                c = data.tryte(at + L["D_NAME"] + i)
-                if c == 0:
-                    break
-                name += chr(c) if c > 0 else "?"
-            found.append(Entry(name, number))
-        return found
-
-    def add_entry(self, dir_ino: int, name: str, ino: int) -> None:
-        """Name inode ino in directory dir_ino, in its first unused slot or
-        a new one at its end, which may take a new block."""
-        node = self.inode(dir_ino)
-        slots = node.size // L["DIRENT"]
-        blocks = self.block_list(node)
-        slot = next(
-            (
-                s
-                for s in range(slots)
-                if self.blocks[blocks[s // L["DIRENTS"]]].word(entry_at(s) + L["D_INO"])
-                == L["NO_INO"]
-            ),
-            slots,
-        )
-        if slot == slots:
-            if slot >= L["DIRENTS"]:  # one block, for now
-                raise FsError("the directory is full")
-            if slot == 0:
-                node.direct[0] = self.allocate()
-            node.size += L["DIRENT"]
-            self.put_inode(node)
-        data = self.blocks[self.block_list(node)[slot // L["DIRENTS"]]]
-        at = entry_at(slot)
-        for i in range(L["NAME_MAX"] + 1):
-            data.set_tryte(at + L["D_NAME"] + i, ord(name[i]) if i < len(name) else 0)
-        data.set_word(at + L["D_INO"], ino)
-
-    def drop_entry(self, dir_ino: int, name: str) -> None:
-        node = self.inode(dir_ino)
-        blocks = self.block_list(node)
-        for slot, entry in self._slots(node, blocks):
-            if entry.name == name:
-                data, at = self.blocks[blocks[slot // L["DIRENTS"]]], entry_at(slot)
-                for i in range(L["DIRENT"]):
-                    data.set_tryte(at + L["D_NAME"] + i, 0)
-                return
-        raise FsError(f"no such file: {name}")
-
-    def _slots(self, node: Inode, blocks: list[int]):
-        for slot in range(node.size // L["DIRENT"]):
-            data, at = self.blocks[blocks[slot // L["DIRENTS"]]], entry_at(slot)
-            number = data.word(at + L["D_INO"])
-            if number != L["NO_INO"]:
-                name = ""
-                for i in range(L["NAME_MAX"] + 1):
-                    c = data.tryte(at + L["D_NAME"] + i)
-                    if c == 0:
-                        break
-                    name += chr(c)
-                yield slot, Entry(name, number)
-
-    # --- paths
+        return Inode.of(json.loads(self._run("istat", str(number))))
 
     def lookup(self, path: str) -> int | None:
         """The inode a path names, or None."""
-        ino = L["ROOT_INO"]
-        for name in split_path(path):
-            if self.inode(ino).type != L["T_DIR"]:
+        try:
+            return self.stat(path).number
+        except FsError as e:
+            if f"({L['E_NOENT']})" in str(e) or f"({L['E_NOTDIR']})" in str(e):
                 return None
-            ino = next((e.ino for e in self.entries(ino) if e.name == name), None)
-            if ino is None:
-                return None
-        return ino
-
-    def parent_of(self, path: str) -> tuple[int, str]:
-        """The directory a new path would go in, and its last name."""
-        names = split_path(path)
-        if not names:
-            raise FsError("the root has no name")
-        check_name(names[-1])
-        if len("/" + "/".join(names)) > L["PATH_MAX"]:
-            raise FsError(f"a path has at most {L['PATH_MAX']} characters: {path}")
-        parent = self.lookup("/".join(names[:-1]))
-        if parent is None or self.inode(parent).type != L["T_DIR"]:
-            raise FsError(f"no such directory: /{'/'.join(names[:-1])}")
-        return parent, names[-1]
+            raise
 
     def is_dir(self, path: str) -> bool:
-        ino = self.lookup(path)
-        return ino is not None and self.inode(ino).type == L["T_DIR"]
+        try:
+            return self.stat(path).is_dir
+        except FsError:
+            return False
 
     def listdir(self, path: str = "/") -> list[tuple[str, Inode]]:
-        """Each entry of a directory but . and .., with its inode."""
-        ino = self.lookup(path)
-        if ino is None:
-            raise FsError(f"no such directory: {path}")
-        return [
-            (e.name, self.inode(e.ino))
-            for e in self.entries(ino)
-            if e.name not in (".", "..")
-        ]
-
-    def mkdir(self, path: str) -> int:
-        parent, name = self.parent_of(path)
-        if self.lookup(path) is not None:
-            raise FsError(f"{path} is already there")
-        node = self.new_inode(L["T_DIR"])
-        node.links = 2
-        self.put_inode(node)
-        self.add_entry(node.number, ".", node.number)
-        self.add_entry(node.number, "..", parent)
-        self.add_entry(parent, name, node.number)
-        up = self.inode(parent)
-        up.links += 1
-        self.put_inode(up)
-        return node.number
+        """Each entry of a directory but . and .., in order, with its inode."""
+        out = self._run("ls", _path(path))
+        found = []
+        for line in out.splitlines():
+            j = json.loads(line)
+            found.append((j["name"], Inode.of(j)))
+        return found
 
     def read_trytes(self, path: str) -> list[int]:
-        ino = self.lookup(path)
-        if ino is None:
-            raise FsError(f"no such file: {path}")
-        node = self.inode(ino)
-        if node.type != L["T_FILE"]:
-            raise FsError(f"{path} is a directory")
-        return self.contents(node)
+        done = subprocess.run(
+            [tryfs_binary(), "get", str(self.image), _path(path), "-"],
+            capture_output=True,
+        )
+        if done.returncode:
+            raise FsError(done.stderr.decode().strip().removeprefix("tryfs: "))
+        data = done.stdout
+        return list(struct.unpack(f"<{len(data) // 2}h", data))
 
     def read(self, path: str) -> str:
         trytes = self.read_trytes(path)
         if is_program(trytes):
             raise FsError(f"{path} is a program, not text")
         return "".join(chr(c) for c in trytes)
+
+    # --- changes
+
+    def mkdir(self, path: str) -> int:
+        self._run("mkdir", _path(path))
+        return self.stat(path).number
 
     def write(self, path: str, text: str) -> None:
         """Make a text file, or replace one at the same path."""
@@ -648,154 +481,23 @@ class Filesystem:
 
     def write_trytes(self, path: str, trytes: list[int]) -> None:
         """Make a file of any trytes, or replace one at the same path."""
-        parent, name = self.parent_of(path)
-        ino = self.lookup(path)
-        if ino is None:
-            if room_for(len(trytes)) > len(self.free_blocks()):
-                raise FsError(f"{path}: no room")
-            node = self.new_inode(L["T_FILE"])
-            try:
-                self.add_entry(parent, name, node.number)
-            except FsError:
-                node.type = L["T_FREE"]
-                self.put_inode(node)
-                raise
-            node.links = 1
-        else:
-            node = self.inode(ino)
-            if node.type != L["T_FILE"]:
-                raise FsError(f"{path} is a directory")
-        try:
-            self.set_contents(node, trytes)
-        except FsError:
-            if ino is None:  # undo the new name
-                self.drop_entry(parent, name)
-                node.type = L["T_FREE"]
-                self.put_inode(node)
-            raise
+        self._run("put", _path(path), self._file("put", trytes))
 
     def remove(self, path: str) -> None:
         """Remove a file, or a directory with nothing in it."""
-        parent, name = self.parent_of(path)
-        ino = self.lookup(path)
-        if ino is None:
-            raise FsError(f"no such file: {path}")
-        node = self.inode(ino)
-        if node.type == L["T_DIR"]:
-            if self.listdir(path):
-                raise FsError(f"{path} is not empty")
-            up = self.inode(parent)
-            up.links -= 1
-            self.put_inode(up)
-            node.links = 0
-        else:
-            node.links -= 1
-        self.drop_entry(parent, name)
-        if node.links == 0:
-            self.release(node)
-            node.type = L["T_FREE"]
-        self.put_inode(node)
+        self._run("rmdir" if self.is_dir(path) else "rm", _path(path))
 
-    # --- checking an image
+    def rename(self, old: str, new: str) -> None:
+        self._run("mv", _path(old), _path(new))
 
-    def check(self) -> None:
-        """Walk the tree from the root: every inode in use is reached, with
-        as many links as names; every block in use belongs to one inode,
-        and the map says so."""
-        for block in (0, L["FS_INODE_BLOCK"]):
-            if not self.used(block):
-                raise FsError(f"block {block} is marked free")
-        if self.inode(L["ROOT_INO"]).type != L["T_DIR"]:
-            raise FsError("the root is not a directory")
-        owner = self._fixed_owners()
-        links = self._walk(owner)
-        for number in range(1, L["FS_INODES"]):
-            node = self.inode(number)
-            if node.type == L["T_FREE"]:
-                continue
-            if number not in links:
-                raise FsError(f"inode {number} is in use but has no name")
-            if node.links != links[number]:
-                raise FsError(
-                    f"inode {number} has {node.links} links, not {links[number]}"
-                )
-        for block in range(self.count):
-            if self.used(block) != (block in owner):
-                state = "used" if self.used(block) else "free"
-                raise FsError(f"block {block} is marked {state}")
+    def chmod(self, path: str, mode: int) -> None:
+        self._run("chmod", _path(path), str(mode))
 
-    def _fixed_owners(self) -> dict[int, str]:
-        """The blocks that are not files': the header, the inodes and the
-        kernel to boot."""
-        owner = {0: "the header", L["FS_INODE_BLOCK"]: "the inodes"}
-        for block in self.boot_blocks():
-            self._own(block, "the boot image", owner)
-        return owner
+    def chown(self, path: str, uid: int, gid: int) -> None:
+        self._run("chown", _path(path), str(uid), str(gid))
 
-    def _walk(self, owner: dict[int, str]) -> dict[int, int]:
-        """Every inode the tree reaches, with the links it should have;
-        each one's blocks go in owner."""
-        root = L["ROOT_INO"]
-        links: dict[int, int] = {}
-        todo = [(root, root)]
-        while todo:
-            ino, parent = todo.pop()
-            if ino in links:
-                raise FsError(f"directory inode {ino} is reached twice")
-            links[ino] = 2
-            self._check_blocks(self.inode(ino), owner)
-            for e in self._dir_entries(ino, parent):
-                child = self.inode(e.ino)
-                if child.type == L["T_DIR"]:
-                    links[ino] += 1
-                    todo.append((e.ino, ino))
-                elif child.type != L["T_FILE"]:
-                    raise FsError(f"{e.name} names free inode {e.ino}")
-                elif e.ino in links:
-                    links[e.ino] += 1
-                else:
-                    links[e.ino] = 1
-                    self._check_blocks(child, owner)
-        return links
-
-    def _dir_entries(self, ino: int, parent: int) -> list[Entry]:
-        """A directory's entries but . and .., once those are checked."""
-        entries = self.entries(ino)
-        by_name = {e.name: e.ino for e in entries}
-        if len(by_name) != len(entries):
-            raise FsError(f"directory inode {ino} repeats a name")
-        if by_name.get(".") != ino or by_name.get("..") != parent:
-            raise FsError(f"directory inode {ino} has wrong . or ..")
-        others = [e for e in entries if e.name not in (".", "..")]
-        for e in others:
-            if not L["ROOT_INO"] < e.ino < L["FS_INODES"]:
-                raise FsError(f"{e.name}: no inode {e.ino}")
-        return others
-
-    def _check_blocks(self, node: Inode, owner: dict[int, str]) -> None:
-        what = f"inode {node.number}"
-        if node.size < 0 or blocks_for(node.size) > L["NDIRECT"] + PAGE // 3:
-            raise FsError(f"{what}: size {node.size}")
-        if node.type == L["T_DIR"] and node.size % L["DIRENT"]:
-            raise FsError(f"{what}: a directory's size is whole entries")
-        n = blocks_for(node.size)
-        extra = [b for b in node.direct[n:] if b != L["NO_BLOCK"]]
-        if n <= L["NDIRECT"] and node.indirect != L["NO_BLOCK"]:
-            extra.append(node.indirect)
-        if extra:
-            raise FsError(f"{what}: blocks past its size")
-        if node.indirect != L["NO_BLOCK"]:
-            self._own(node.indirect, what, owner)
-        for block in self.block_list(node):
-            if block != L["NO_BLOCK"]:
-                self._own(block, what, owner)
-
-    def _own(self, block: int, what: str, owner: dict[int, str]) -> None:
-        if not 0 < block < self.count:
-            raise FsError(f"{what}: no block {block}")
-        if block in owner:
-            raise FsError(f"{what}: block {block} is also {owner[block]}'s")
-        owner[block] = what
+    def utimes(self, path: str, atime: int, mtime: int) -> None:
+        self._run("utimes", _path(path), str(atime), str(mtime))
 
 
 # --- the command line --------------------------------------------------------------
@@ -995,6 +697,8 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("rm", help="remove a file or an empty directory")
     p.add_argument("image", type=Path)
     p.add_argument("path")
+    p = sub.add_parser("check", help="check the filesystem (fsck)")
+    p.add_argument("image", type=Path)
     args = parser.parse_args(argv)
 
     try:
@@ -1007,10 +711,12 @@ def main(argv: list[str] | None = None) -> int:
             fs.save(args.image)
         elif args.command == "ls":
             for name, node in Filesystem.load(args.image).listdir(args.path):
-                if node.type == L["T_DIR"]:
+                if node.is_dir:
                     print(f"{'':8} {name}/")
                 else:
                     print(f"{node.size:8} {name}")
+        elif args.command == "check":
+            Filesystem.load(args.image)
         elif args.command == "cat":
             sys.stdout.write(Filesystem.load(args.image).read(args.path))
         else:

@@ -92,6 +92,17 @@ impl SystemTime {
         SystemTime { secs, nanos: 0 }
     }
 
+    /// The moment `secs` seconds and `nanos` nanoseconds after the
+    /// epoch, as the file server keeps times.
+    pub fn from_unix_parts(secs: i64, nanos: u32) -> SystemTime {
+        SystemTime { secs: secs + (nanos / NANOS) as i64, nanos: nanos % NANOS }
+    }
+
+    /// The nanoseconds past `unix_seconds`.
+    pub fn subsec_nanos(&self) -> u32 {
+        self.nanos
+    }
+
     /// How long after `earlier` this is, or, if `earlier` is the later
     /// one, an error holding how much later.
     pub fn duration_since(&self, earlier: SystemTime) -> Result<Duration, SystemTimeError> {

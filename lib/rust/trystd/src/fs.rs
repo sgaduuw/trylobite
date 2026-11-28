@@ -8,6 +8,7 @@ use alloc::vec::Vec;
 
 use crate::io::{self, Read, Seek, SeekFrom, Write};
 use crate::sys::{self, CPath, FS, Words};
+use crate::time::SystemTime;
 
 /// A descriptor this program owns: closed when it is dropped.
 #[derive(Debug)]
@@ -242,6 +243,14 @@ pub struct Metadata {
     kind: FileType,
     links: i32,
     len: u64,
+    mode: u32,
+    uid: i32,
+    gid: i32,
+    blocks: i32,
+    atime: SystemTime,
+    mtime: SystemTime,
+    ctime: SystemTime,
+    btime: SystemTime,
 }
 
 impl Metadata {
@@ -275,19 +284,163 @@ impl Metadata {
     pub fn nlink(&self) -> i32 {
         self.links
     }
+
+    pub fn permissions(&self) -> Permissions {
+        Permissions(self.mode)
+    }
+
+    /// Its permission bits, 0o777 at most (Unix's st_mode without the type).
+    pub fn mode(&self) -> u32 {
+        self.mode
+    }
+
+    /// Its owner.
+    pub fn uid(&self) -> i32 {
+        self.uid
+    }
+
+    /// Its group.
+    pub fn gid(&self) -> i32 {
+        self.gid
+    }
+
+    /// The disk blocks its data takes.
+    pub fn blocks(&self) -> i32 {
+        self.blocks
+    }
+
+    /// When it was last written.
+    pub fn modified(&self) -> io::Result<SystemTime> {
+        Ok(self.mtime)
+    }
+
+    /// When it was last read (relatime: at most a day late).
+    pub fn accessed(&self) -> io::Result<SystemTime> {
+        Ok(self.atime)
+    }
+
+    /// When it was made.
+    pub fn created(&self) -> io::Result<SystemTime> {
+        Ok(self.btime)
+    }
+
+    /// When it last changed in any way, its inode too.
+    pub fn changed(&self) -> SystemTime {
+        self.ctime
+    }
+}
+
+/// A file's permission bits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Permissions(u32);
+
+impl Permissions {
+    pub fn from_mode(mode: u32) -> Permissions {
+        Permissions(mode & 0o777)
+    }
+
+    pub fn mode(&self) -> u32 {
+        self.0
+    }
+
+    /// Whether no one may write it.
+    pub fn readonly(&self) -> bool {
+        self.0 & 0o222 == 0
+    }
+
+    pub fn set_readonly(&mut self, readonly: bool) {
+        if readonly {
+            self.0 &= !0o222;
+        } else {
+            self.0 |= 0o200;
+        }
+    }
 }
 
 /// What the file at `path` is (FS_STAT).
 pub fn metadata<P: AsRef<[u8]>>(path: P) -> io::Result<Metadata> {
     let path = CPath::new(path.as_ref())?;
-    let words: Words<16> = Words::new();
+    let words: Words<{ sys::STAT as usize + 4 }> = Words::new();
     FS.call(sys::FS_STAT, &[path.ptr(), words.ptr() as i32])?;
+    let time = |at: i32| SystemTime::from_unix_parts(words.word_i64(at), words.word(at + 3) as u32);
     Ok(Metadata {
         ino: words.word(sys::ST_INO),
         kind: FileType(words.word(sys::ST_TYPE)),
         links: words.word(sys::ST_LINKS),
         len: words.word(sys::ST_SIZE) as u64,
+        mode: words.word(sys::ST_MODE) as u32,
+        uid: words.word(sys::ST_UID),
+        gid: words.word(sys::ST_GID),
+        blocks: words.word(sys::ST_BLOCKS),
+        atime: time(sys::ST_ATIME),
+        mtime: time(sys::ST_MTIME),
+        ctime: time(sys::ST_CTIME),
+        btime: time(sys::ST_BTIME),
     })
+}
+
+/// Give the file at `path` these permission bits (FS_CHMOD).
+pub fn set_permissions<P: AsRef<[u8]>>(path: P, perm: Permissions) -> io::Result<()> {
+    let path = CPath::new(path.as_ref())?;
+    FS.call(sys::FS_CHMOD, &[path.ptr(), perm.0 as i32]).map(|_| ())
+}
+
+/// Give the file at `path` an owner and group (FS_CHOWN), as Unix's
+/// std::os::unix::fs::chown; None leaves one as it is.
+pub fn chown<P: AsRef<[u8]>>(path: P, uid: Option<i32>, gid: Option<i32>) -> io::Result<()> {
+    let path = CPath::new(path.as_ref())?;
+    let (uid, gid) = (uid.unwrap_or(-1), gid.unwrap_or(-1));
+    FS.call(sys::FS_CHOWN, &[path.ptr(), uid, gid]).map(|_| ())
+}
+
+/// The times `set_times` gives a file: each one left as it is unless set.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FileTimes {
+    accessed: Option<SystemTime>,
+    modified: Option<SystemTime>,
+}
+
+impl FileTimes {
+    pub fn new() -> FileTimes {
+        FileTimes::default()
+    }
+
+    pub fn set_accessed(mut self, t: SystemTime) -> FileTimes {
+        self.accessed = Some(t);
+        self
+    }
+
+    pub fn set_modified(mut self, t: SystemTime) -> FileTimes {
+        self.modified = Some(t);
+        self
+    }
+}
+
+/// Set the access and modification times of the file at `path`
+/// (FS_UTIMES); its change time becomes now.
+pub fn set_times<P: AsRef<[u8]>>(path: P, times: FileTimes) -> io::Result<()> {
+    let path = CPath::new(path.as_ref())?;
+    let mut words: Words<{ 12 + 4 }> = Words::new();
+    for (at, t) in [(0, times.accessed), (6, times.modified)] {
+        let (secs, nanos) = match t {
+            Some(t) => (t.unix_seconds(), t.subsec_nanos() as i64),
+            None => (0, sys::UTIME_OMIT as i64),
+        };
+        words.set_word_i64(at, secs);
+        words.set_word_i64(at + 3, nanos);
+    }
+    FS.call(sys::FS_UTIMES, &[path.ptr(), words.ptr() as i32]).map(|_| ())
+}
+
+/// Set both times of the file at `path` to now (touch).
+pub fn touch_now<P: AsRef<[u8]>>(path: P) -> io::Result<()> {
+    let path = CPath::new(path.as_ref())?;
+    let mut words: Words<{ 12 + 4 }> = Words::new();
+    for at in [0, 6] {
+        words.set_word_i64(at, 0);
+        words.set_word_i64(at + 3, sys::UTIME_NOW as i64);
+    }
+    FS.call(sys::FS_UTIMES, &[path.ptr(), words.ptr() as i32]).map(|_| ())
 }
 
 /// Whether `path` names anything.

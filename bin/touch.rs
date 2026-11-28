@@ -1,10 +1,10 @@
-//! touch FILE...: make each FILE that is not there yet, empty, as Unix's
-//! touch does; one that is there is left as it is, since files have no
-//! times to bring up to date. Exit with 0, or with 1 if one cannot be
-//! made (said on standard error).
+//! touch FILE...: make each FILE that is not there yet, empty, and set
+//! the access and modification times of each one to now, as Unix's
+//! touch does. Exit with 0, or with 1 if one cannot be made or changed
+//! (said on standard error).
 #![no_std]
 
-use trystd::fs::OpenOptions;
+use trystd::fs::{self, OpenOptions};
 use trystd::prelude::*;
 
 trystd::main!(run);
@@ -17,7 +17,11 @@ fn run() -> i32 {
     }
     let mut status = 0;
     for name in names {
-        if let Err(e) = OpenOptions::new().read(true).create(true).open(name) {
+        let made = OpenOptions::new().read(true).create(true).open(name);
+        if let Err(e) = made.and_then(|f| {
+            drop(f);
+            fs::touch_now(name)
+        }) {
             Line::new().str("touch: ").str(name).str(": ").error(&e).eprint();
             status = 1;
         }
