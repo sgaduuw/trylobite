@@ -38,7 +38,8 @@ sea floor, living among the detritus.
   directories, a current directory per process, and a host tool to make
   disk images.
 - **A shell** with built-ins (`ls`, `cat`, `cd`, `pwd`, `mkdir`, ...),
-  programs run from `/bin` on the disk with arguments, `<`, `>` and
+  programs run from `$PATH` on the disk with arguments and an
+  environment, variables (`export`, `$NAME`, `$?`), `<`, `>` and
   `>>` redirection, `|` pipelines, quoting, line editing with history
   and Tab completion, and Ctrl-C to end a program.
 - **A network stack:** a driver for the network device and an IP
@@ -333,7 +334,7 @@ gateway needs a host that allows unprivileged ping sockets, or root.
 `ping`, `nc` and `host` take a name wherever they take an address.
 
 The programs on the disk are `hello`, `fail` (exits with 3), `spin`
-(loops for ever, for Ctrl-C), `echo`, `upper` (standard input to output
+(loops for ever, for Ctrl-C), `echo`, `printenv`, `upper` (standard input to output
 in capitals) and `wc` (lines, words and code points), `cp`, `mv`,
 `touch`, `head` and `grep` for files, system tools as on Unix: `ps`,
 `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df` and

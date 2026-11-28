@@ -80,9 +80,9 @@ def test_escape_sequences_leave_nothing_in_the_line(shell):
     assert "hello from a balanced-ternary machine" in result.console
 
 
-def test_a_long_line_keeps_its_first_sixty_characters(shell):
-    result = session(shell, "x" * 70 + "\n")
-    assert f"sh: no such program: {'x' * 60}\n" in result.console
+def test_a_long_line_keeps_its_first_240_characters(shell):
+    result = session(shell, "x" * 250 + "\n")
+    assert f"sh: no such program: {'x' * 240}\n" in result.console
 
 
 def test_pingpong_comes_back_to_the_prompt_once_both_are_done(shell):

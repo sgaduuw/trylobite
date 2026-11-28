@@ -632,6 +632,15 @@
         .equ  SF_SIG,   SF_MASK + 3       # the signal
         .equ  SIGFRAME, SF_SIG + 3        # trytes in a frame
 
+# The environment (docs/kernel.md, The environment): NAME=value strings a
+# process passes on to the programs it starts. See V_ENV.
+        .equ  SYS_ENVIRON, 53             # environ(address): make the block at
+                                          # a1 the caller's environment, which
+                                          # every process it starts from now on
+                                          # gets a copy of: 0, E_FAULT (not all
+                                          # in its memory), E_2BIG (no empty
+                                          # string ends it within ENV_MAX)
+
 # Files (docs/filesystem.md) come from the file server, which registers
 # as "fs" with protocol FS_PROTOCOL; a program looks it up once, and
 # treats a missing server, or another version, as no filesystem. A file
@@ -883,6 +892,8 @@
         .equ  E_RESET,  -26               # a connection: the other end reset it
         .equ  E_AGAIN,  -27               # futex: the word is not what was given
         .equ  E_INTR,   -28               # a call a caught signal interrupted
+        .equ  E_2BIG,   -29               # environ, spawn: the environment block
+                                          # runs past ENV_MAX
 
         .equ  O_RDONLY, 0                 # open: the access mode is the flags mod
         .equ  O_WRONLY, 1                 # 3. Add any of O_CREAT (make a file not
@@ -1024,7 +1035,9 @@
         .equ  PCB_SIGCATCH, PCB_SIGPEND + 3  # those it catches (SIG_CATCH)
         .equ  PCB_SIGIGN, PCB_SIGCATCH + 3   # those it ignores (SIG_IGN)
         .equ  PCB_SIGENTRY, PCB_SIGIGN + 3   # where caught signals run
-        .equ  PCB_SIZE,   PCB_SIGENTRY + 3
+        .equ  PCB_ENVP,   PCB_SIGENTRY + 3   # where its environment block is,
+                                          # in its memory (environ, V_ENV)
+        .equ  PCB_SIZE,   PCB_ENVP + 3
         .assert PCB_SIZE % 3 == 0, "PCB_SIZE is not whole words"
         .assert PCB_NOTES + NPROC <= PCB_TURN - 1, "PCB_NOTES runs into PCB_TURN's trytes"
         .assert (PCB_SIGNALS + 1) % 3 == 0, "receive reads PCB_SIGNALS a word at a time"
@@ -1147,3 +1160,15 @@
         .equ  V_ARGV, V_USER - 9840       # argv: the page's first word, and
                                           # ARG_MAX + 1 words from there
         .equ  V_ARGS, V_ARGV - 1 + 3 * (ARG_MAX + 1)   # the strings, after it
+
+# A program's environment. Its block is NAME=value strings, each ended by
+# a 0, and an empty string after the last, so an empty environment is a
+# single 0. Every spawn copies the parent's (the one PCB_ENVP names in the
+# parent's memory: so the file server's spawnw gives its client's) to
+# V_ENV in the child's page, after its arguments, and makes that the
+# child's own, so a program that never calls environ passes on what it
+# got. A process with no parent, as init, starts with an empty one.
+        .equ  ENV_MAX, 729                # trytes of environment, every 0 included
+        .equ  V_ENV, V_ARGS + ARG_MAX + 1 # its first tryte; the stack stops
+                                          # above V_ENV + ENV_MAX
+        .assert V_ENV + ENV_MAX < V_USER - 4096, "the environment leaves the stack too little of its half page"

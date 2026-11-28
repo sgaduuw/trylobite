@@ -176,6 +176,7 @@ is as it was, since the trap entry saves them all. Trice relies on this
 | 50 | `sigaction(sig, action, entry)` | what signal `sig` does to the caller's process from now: `SIG_DFL` (0) its default, `SIG_IGN` (1) nothing, `SIG_CATCH` (2) run `entry`, which becomes the process's signal entry (Signals): the action it had; −10 (`E_INVAL`) no such signal or action, or any but `SIG_DFL` for `SIGKILL` |
 | 51 | `sigmask(how, set)` | changes the calling thread's set of blocked signals, a bit 2^`sig` for each: `SIG_BLOCK` (0) adds `set`, `SIG_UNBLOCK` (1) takes it away, `SIG_SETMASK` (2) makes it `set`: the set it had; −10 another `how`, or `set` outside 0 to 2^`NSIG` − 1. `SIGKILL` is never blocked, and a signal it lets in is taken before the call returns |
 | 52 | `sigreturn(frame)` | goes back from a signal's handler to where the thread was, with the registers, coprocessor bank and mask the frame at `frame` keeps; does not return, but −12 if the frame is not all in the caller's memory |
+| 53 | `environ(address)` | makes the block at `address` the caller's process's environment, which every process it starts from then on gets a copy of (The environment): 0; −12 (`E_FAULT`) if the block is not all in its memory, −29 (`E_2BIG`) if no empty string ends it within `ENV_MAX` trytes |
 
 Numbers 9, 11, 12 and 14 are free: console input, blocks and
 files are not system calls but calls to the console server, the disk
@@ -551,6 +552,33 @@ should only set an atomic or end the process: printing or allocating
 can wait forever on a lock the interrupted code holds. `tests/rsig.rs`
 tries each.
 
+## The environment
+
+Each process has an environment: `NAME=value` strings, each ended by
+0, and an empty string after the last, so that an empty environment is
+a single 0, at most `ENV_MAX` (729) trytes in all. Its record holds
+where the block is in its memory (`PCB_ENVP`, in the process's first
+thread's record). Every spawn, of an image program (`spawn`) or a
+program file (`spawnw`), copies the parent's block to `V_ENV` in the
+child's page, after its arguments and below its stack, and makes that
+the child's; with `spawnw` for another process the parent is that
+process, so the file server starts a program with its client's
+environment. A spawn whose parent's block has no end within `ENV_MAX`
+fails with `E_2BIG`, or `E_FAULT` if it is not all in its memory, and
+starts nothing. Init, with no parent, starts with an empty one, and
+gives it to the servers and the shell.
+
+`environ(address)` names another block in the caller's memory, checked
+as a spawn checks it; the kernel reads it only when the process
+spawns, so the process keeps it there, unchanged, until it names
+another. A program that never calls it passes on what it was given.
+trystd (`trystd::env`) reads the environment with `var`, `var_bytes`,
+`vars` and `vars_bytes`; `set_var` and `remove_var` build a new block on
+the heap and name it, and `Command::env` and `env_remove` change a
+child's for its start alone. `Command` looks a name without a slash up
+in the directories of `$PATH`, as the shell does, `/bin` if it is not
+set.
+
 ## The console
 
 The console belongs to a process, the **console server**
@@ -837,15 +865,16 @@ it again until it gives up on it.
 
 The shell is a Rust program of `bin/` like the tools, over trystd
 (`bin/sh.rs`, with its parts in `bin/sh/`: the line editor, the lexer,
-running a line, the built-ins). It uses no heap, so it takes five pages
-(an image of some 20,000 trytes). Started with no standard input, as
-init starts it, it opens the console as descriptor 0 and copies it to 1
-and 2; started from another shell (`sh`), it keeps the descriptors it
-was given. It finds the pipe and file servers by name, does without
-the pipe server when it is missing, then reads a line at a time.
+expansion, variables, running a line, the built-ins). Its words,
+arguments and variables are on the heap. Started with no standard
+input, as init starts it, it opens the console as descriptor 0 and
+copies it to 1 and 2; started from another shell (`sh`), it keeps the
+descriptors it was given. It finds the pipe and file servers by name,
+does without the pipe server when it is missing, then reads a line at a
+time.
 
 **Line editing.** The shell echoes what is typed and edits the line
-(up to 60 characters) as a Unix shell's line editor does, telling the
+(up to 240 characters) as a Unix shell's line editor does, telling the
 terminal with backspaces, which move left, and characters printed over
 what is there, so any terminal follows:
 
@@ -872,21 +901,47 @@ adds nothing the shell rings the bell, and a second Tab lists them in
 columns, then prints the line again. Names starting with a dot are
 left out unless the word starts with one.
 
-**Built-ins:** `exit`, `ls [DIR]`, `cat [PATH]` (standard input without
-one), `write PATH TEXT`, `rm PATH`, `mkdir PATH`, `rmdir PATH`,
-`cd [DIR]` and `pwd`. The system tools are programs (System tools,
-above).
+**Built-ins:** `exit [CODE]`, `ls [DIR]`, `cat [PATH]` (standard input
+without one), `write PATH TEXT`, `rm PATH`, `mkdir PATH`, `rmdir PATH`,
+`cd [DIR]` (`$HOME` without one) and `pwd`; and for variables `export
+[NAME[=VALUE]]...`, `unset NAME...`, `env` (the environment) and `set`
+(every variable). The system tools are programs (System tools, above).
+
+**Variables.** `NAME=VALUE` alone sets a shell variable; before a
+command (`X=1 Y=2 prog`) it sets them in that command's environment
+alone. `export` makes a variable part of the environment of every
+program the shell starts from then on, and an exported variable's
+every change goes there at once (`trystd::env::set_var`). The shell
+starts with its own environment's variables, exported, and gives `PATH`
+(`/bin`) and `HOME` (`/`) those values if it came without them. In a
+word, `$NAME` and `${NAME}` are a variable's value, nothing if it is not
+set; `${NAME:-WORD}` is WORD when it is unset or empty, `${NAME-WORD}`
+when it is unset, `${#NAME}` its length; `$?` is the last command's
+status and `$$` the shell's process number; and a `~` starting a word,
+alone or before a `/`, is `$HOME`. Outside double quotes a value is
+split at blanks into several arguments, and an empty one gives none.
+
+**Status.** Every command leaves a status in `$?`: a program's exit
+code, 128 and the signal for one a signal ended, 255 for a fault, 127
+for a program not found and 126 for a file that is not a program, a
+built-in's own (0 done, 1 not, having said why), and 1 for a line the
+shell could not run (a quote not closed, a file it could not open to
+redirect). A pipeline's status is its last command's. `exit` with no
+code exits with `$?`.
 
 **Programs.** `pingpong` is in the kernel image. Any other word names a
-program file: a path if it holds a slash, else a file in `/bin`, which
-the file server starts as the shell's child, with the line's words as
-its arguments, the command first (`wc notes more`, `echo hi`). A program
+program file: a path if it holds a slash, else the first file of that
+name in the directories `$PATH` lists, separated by `:` (`/bin` when
+`PATH` is not set), which the file server starts as the shell's child,
+with the line's words as its arguments, the command first (`wc notes
+more`, `echo hi`), and the shell's environment. A program
 finds them as `argc` and `argv` at `V_ARGV` (docs/filesystem.md,
 Program arguments). Those in `bin/` behave as their Unix namesakes, in
 a small way, and say what fails on standard error as `NAME: why`:
 
 - `echo [WORD]...` says its arguments; `upper` copies standard input
-  with a to z made capitals.
+  with a to z made capitals; `printenv [NAME]...` says the environment
+  it was started with, or the values of the names given.
 - `wc [FILE]...` counts lines, words and code points; `head [-n N]
   [FILE]...` says the first N lines (10); `grep [-v] TEXT [FILE]...`
   says the lines holding TEXT, or with `-v` those that do not, as a
@@ -915,9 +970,10 @@ redirected.
 **Quoting** works as in a Unix shell: `echo "hello   world"` and
 `echo 'a | b'` give one argument each, keeping the spaces and the `|`,
 `\` makes the next character itself, and `""` is an empty argument.
+Inside `'...'` a `$` is itself; inside `"..."` it expands, and `\`
+makes a `$`, `"` or `\` after it itself.
 
-**Pipelines.** A `|` between commands makes one: `hello | upper | wc`,
-up to four commands. The shell starts every program of the line, each
+**Pipelines.** A `|` between commands makes one: `hello | upper | wc`. The shell starts every program of the line, each
 with its pipe ends as standard input and output, before it waits for
 any, and marks its own ends `FD_NOINHERIT` so that a reader sees the end
 when its writer goes. A built-in takes one place in a pipeline

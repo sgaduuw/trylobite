@@ -10,6 +10,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
+use crate::env;
 use crate::fs::{File, OwnedFd, dup2, is_open};
 use crate::io::{self, Read, Write};
 use crate::sys::{self, CPath, FS, PIPE};
@@ -71,12 +72,14 @@ pub struct Command {
     args: Vec<u8>,
     count: usize,
     stdio: [Option<Stdio>; 3],
+    /// Variables to set (Some) or take away (None) in its environment.
+    envs: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 }
 
 impl Command {
-    /// The program: a path if it has a slash, else the file of that name
-    /// in /bin, as the shell finds one. It is also the child's first
-    /// argument.
+    /// The program: a path if it has a slash, else the first file of
+    /// that name in the directories $PATH lists (/bin if it is not set),
+    /// as the shell finds one. It is also the child's first argument.
     pub fn new<S: AsRef<[u8]>>(program: S) -> Command {
         let program = program.as_ref();
         let mut command = Command {
@@ -84,6 +87,7 @@ impl Command {
             args: Vec::new(),
             count: 0,
             stdio: [None, None, None],
+            envs: Vec::new(),
         };
         command.arg(program);
         command
@@ -107,6 +111,19 @@ impl Command {
         self
     }
 
+    /// Give the program `key` = `val` in its environment, on top of this
+    /// program's.
+    pub fn env<K: AsRef<[u8]>, V: AsRef<[u8]>>(&mut self, key: K, val: V) -> &mut Command {
+        self.envs.push((key.as_ref().to_vec(), Some(val.as_ref().to_vec())));
+        self
+    }
+
+    /// Leave `key` out of the program's environment.
+    pub fn env_remove<K: AsRef<[u8]>>(&mut self, key: K) -> &mut Command {
+        self.envs.push((key.as_ref().to_vec(), None));
+        self
+    }
+
     pub fn stdin<T: Into<Stdio>>(&mut self, how: T) -> &mut Command {
         self.stdio[0] = Some(how.into());
         self
@@ -125,12 +142,6 @@ impl Command {
     /// Start it. Arguments past ARG_MAX trytes in all are E_INVAL, as the
     /// kernel says.
     pub fn spawn(&mut self) -> io::Result<Child> {
-        let mut path = Vec::new();
-        if !self.program.contains(&b'/') {
-            path.extend_from_slice(b"/bin/");
-        }
-        path.extend_from_slice(&self.program);
-        let path = CPath::new(&path)?;
         let _ = io::stdout().flush();
 
         // Each redirected descriptor: this program's own is kept aside
@@ -178,16 +189,24 @@ impl Command {
             redirected[fd] = true;
             // Dropping theirs closes this program's copy of it.
         }
+        // Its environment is this program's while it starts, changed.
+        let mut old = Vec::new();
         let started = result.and_then(|()| {
-            FS.call(
-                sys::FS_SPAWN,
-                &[
-                    path.ptr(),
-                    self.args.as_ptr() as i32,
-                    self.args.len() as i32,
-                ],
-            )
+            for (key, val) in &self.envs {
+                old.push((key.clone(), env::var_bytes(key)));
+                match val {
+                    Some(v) => env::set_var(key, v)?,
+                    None => env::remove_var(key)?,
+                }
+            }
+            self.start()
         });
+        for (key, val) in old.into_iter().rev() {
+            let _ = match val {
+                Some(v) => env::set_var(&key, &v),
+                None => env::remove_var(&key),
+            };
+        }
         for (fd, kept) in saved.iter_mut().enumerate() {
             if let Some(kept) = kept.take() {
                 let _ = dup2(kept.raw(), fd as i32);
@@ -205,6 +224,33 @@ impl Command {
             stdout: stdout.map(|fd| ChildStdout { fd }),
             stderr: stderr.map(|fd| ChildStderr { fd }),
         })
+    }
+
+    /// Ask the file server to start the program, searching $PATH for a
+    /// name without a slash.
+    fn start(&self) -> io::Result<i32> {
+        let spawn = |path: &[u8]| {
+            let path = CPath::new(path)?;
+            FS.call(sys::FS_SPAWN, &[path.ptr(), self.args.as_ptr() as i32, self.args.len() as i32])
+        };
+        if self.program.contains(&b'/') {
+            return spawn(&self.program);
+        }
+        let dirs = env::var_bytes("PATH").unwrap_or_else(|| Vec::from(&b"/bin"[..]));
+        let mut last = io::Error::from_raw(sys::E_NOENT);
+        for dir in dirs.split(|&c| c == b':') {
+            let mut path = Vec::from(if dir.is_empty() { &b"."[..] } else { dir });
+            path.push(b'/');
+            path.extend_from_slice(&self.program);
+            match spawn(&path) {
+                Ok(pid) => return Ok(pid),
+                Err(e) => match e.raw_os_error() {
+                    Some(sys::E_NOENT | sys::E_NOTDIR | sys::E_NAMETOOLONG) => last = e,
+                    _ => return Err(e),
+                },
+            }
+        }
+        Err(last)
     }
 
     /// Start it and wait for it to end.

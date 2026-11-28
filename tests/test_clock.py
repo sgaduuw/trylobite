@@ -66,10 +66,12 @@ def test_date_formats_and_other_moments(shell):
         "date -d @68719476736 +%F\n"
         "date -x\n"
     )
-    assert session(shell, typed) == (
-        "$ date +%F_%T_%s\n"
-        "2026-11-28_01:30:00_1795829400\n"
-        "$ date -d @0\n"
+    first, rest = session(shell, typed).split("$ date -d @0\n", 1)
+    # The clock runs on from NOW as the machine boots: a second may pass.
+    assert re.fullmatch(
+        r"\$ date \+%F_%T_%s\n2026-11-28_01:30:0([01])_179582940\1\n", first
+    )
+    assert rest == (
         "Thu Jan  1 00:00:00 UTC 1970\n"
         "$ date -u -d @951782400 '+%a %j %e %y %%'\n"
         "Tue 060 29 00 %\n"
