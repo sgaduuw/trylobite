@@ -116,7 +116,7 @@ pipe.
   Program images sit in pages from `P_PROG0`, and the free pages start
   after the last. **RAM size belongs to the machine**: the kernel reads
   it at boot (`page_init`), so no build names one; tests choose it with
-  `ram_pages=` (`build()`'s default, 40, or `SHELL_RAM_PAGES`, 81, for an
+  `ram_pages=` (`build()`'s default, 40, or `SHELL_RAM_PAGES`, 243, for an
   assembled file such as `shell.s`).
 - **Program 0 is init.** The kernel starts it and nothing else. In
   `demo.s` it is `user/demo-init.s`; in `shell.s` it is `user/init.s`,
@@ -124,29 +124,34 @@ pipe.
   to register: the console, disk and file servers always, then those
   `/etc/init` names (pipe, network, IP in the repository's `etc/init`,
   which `make` puts on the disk, and all of them when there is no such
-  file), then the programs it names, then the shell, as process 7 with
-  the default list; it exits when the shell does, and starts again a
+  file), then the programs it names, then the shell, `/bin/sh` from
+  the disk (`bin/sh.rs`, through the file server, as the programs), as
+  process 7 with the default list; it exits when the shell does, and starts again a
   server that ends (with what needs it), a program or a shell that
   faults, at most `INIT_RETRIES` (3) times each (docs/kernel.md, The
   shell). A server init must start is still a program of the image:
-  `/etc/init` only chooses among `init_rows`. The shell finds
+  `/etc/init` only chooses among `init_rows`. A test may give init a
+  shell of the image instead (`INIT_SH`, `tests/test_init.py`). The shell finds
   the servers with `lookup(LOOKUP_NOW)`; the programs it runs start at
   process 8. Tests build their own init with `run(init, ...)`, which
   starts the servers they ask for first (`tests/kernel.py`, `SERVERS`);
   `bin_disk(etc_init=...)` gives a `shell.s` test its own `/etc/init`.
 - **A new program goes in `bin/`, on the disk**, unless another program
-  spawns it by number (ping, pong, the servers and sh) or the kernel
-  starts it (init). Every program of `bin/` is Rust (`kill` is still
-  assembly) (`.rs`, `no_std`,
+  spawns it by number (ping, pong and the servers) or the kernel
+  starts it (init); the shell is one too (`bin/sh.rs`). Every program
+  of `bin/` is Rust (`.rs`, `no_std`,
   detrytus `docs/rust.md`), over **trystd**, the system library in
   `lib/rust/trystd`: a crate every Rust program depends on, with std's
   names for files (`fs`), standard I/O (`io`), arguments (`env`), child
   processes (`process`), sockets and the IP server's setup (`net`), the
-  kernel's reports on the machine and its processes (`os`), threads
+  kernel's reports on the machine and its processes (`os`), the
+  console's foreground (`console`), threads
   (`thread`, `sync`) and the time of day (`time`), the heap for `Vec`,
   `String` and `Box`, and `println!`. A program says `use
   trystd::prelude::*;` and `trystd::main!(run);` (`bin/echo.rs` is the
-  smallest, `bin/cp.rs` a full one, `bin/httpd.rs` a larger);
+  smallest, `bin/cp.rs` a full one, `bin/httpd.rs` a larger; one too
+  big for a file keeps its modules in a directory of its name, named
+  with `#[path]`, as `bin/sh.rs` does with `bin/sh/`);
   `tests/rstd.rs` tests the library from inside. Userland is meant to
   be Rust alone, so trystd sits on the kernel's calls with no C library
   under it; its numbers come from `include/layout.s`, which its
@@ -161,8 +166,10 @@ pipe.
   file, complaints on standard error as `NAME: what: why` (an
   `io::Error` says the why), and exit 1 when anything failed. Watch its
   size: a program's image shares its one page with its stack, so one
-  over about 9,800 trytes takes a fifth page, and a heap one more; the
-  81-page test machine then runs out in a pipeline of three. core::fmt
+  over about 9,800 trytes takes a fifth page, and a heap one more. The
+  test machine (243 pages) is roomy on purpose, so a test never fails
+  for want of memory; keep programs small anyway, as every page counts
+  on every machine. core::fmt
   is 6,000 trytes, brought in by `println!`, `write!`, `format!` or a
   `run` returning an `io::Result` (main! prints its error); a `&mut dyn
   Read` brings every default method of the trait. So the small tools
@@ -189,7 +196,7 @@ pipe.
   version. Never give a server a fixed process number.
 - **Files are the file server's, not the kernel's.** `user/fsd.s` is
   a program that registers as `fs`; a file call is a `SYS_CALL` to the
-  process `lookup` gives (the shell keeps it in `sh_fs`; tests write
+  process `lookup` gives (trystd keeps it in `sys::FS`; tests write
   `CALL_FS`, which `tests/kernel.py` expands, and pass `files=True` to
   `run`). The server shares its build's symbol
   table, so its labels all start with `fs_`. Each call starts on a fresh

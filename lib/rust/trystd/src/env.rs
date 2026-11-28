@@ -76,8 +76,13 @@ impl ExactSizeIterator for Args {}
 /// The current directory's path, from the root (FS_GETCWD).
 pub fn current_dir() -> io::Result<String> {
     let mut buf = [0u8; sys::PATH_MAX as usize + 1];
+    Ok(String::from_utf8_lossy(current_dir_in(&mut buf)?).into_owned())
+}
+
+/// The same into `buf`, without the heap: the path's bytes.
+pub fn current_dir_in(buf: &mut [u8]) -> io::Result<&[u8]> {
     let n = FS.call(sys::FS_GETCWD, &[buf.as_mut_ptr() as i32, buf.len() as i32])?;
-    Ok(String::from_utf8_lossy(&buf[..n as usize]).into_owned())
+    Ok(&buf[..n as usize])
 }
 
 /// Make `path` the current directory (FS_CHDIR), for this process and

@@ -3,7 +3,14 @@ or the disk, and reports how they ended."""
 
 import pytest
 
-from tests.kernel import ROOT, assemble_file, bin_disk, new_disk, run_image
+from tests.kernel import (
+    ROOT,
+    assemble_file,
+    bin_disk,
+    new_disk,
+    run_image,
+    shell_filesystem,
+)
 
 
 @pytest.fixture(scope="module")
@@ -94,10 +101,13 @@ def test_the_shell_exits_at_the_end_of_input(shell):
 
 def test_programs_come_from_the_disk(shell):
     # Only pingpong is in the kernel image; hello is a file, and without
-    # it, or without a filesystem at all, there is no such program.
+    # it there is no such program. The shell itself is /bin/sh.
     assert "hello from" in session(shell, "hello\n").console
-    blank = (new_disk(), 4)
-    assert "sh: no such program: hello\n" in session(shell, "hello\n", blank).console
+    bare, _ = shell_filesystem(8)
+    bare.save(path := new_disk())
+    result = session(shell, "hello\npingpong\n", (path, 8))
+    assert "sh: no such program: hello\n" in result.console
+    assert "pong: got 3" in result.console
 
 
 def test_a_text_file_is_not_a_program(shell):
@@ -115,10 +125,10 @@ def test_a_word_without_a_slash_is_looked_for_in_bin(shell):
 
 
 def test_ls_lists_the_programs_on_the_disk(shell):
-    # Thirty-eight programs, some of two blocks, take a while to list.
+    # Thirty-nine programs, some of two blocks, take a while to list.
     result = session(shell, "ls bin\nfail\n", max_steps=12_000_000)
     assert "sh: exit 3\n" in result.console
-    listed = result.after_boot.splitlines()[1:39]
+    listed = result.after_boot.splitlines()[1:40]
     assert [line.split()[1] for line in listed] == [
         "cp",
         "date",
@@ -146,6 +156,7 @@ def test_ls_lists_the_programs_on_the_disk(shell):
         "rsort",
         "rsqrt",
         "rthreads",
+        "sh",
         "sleep",
         "spin",
         "stty",

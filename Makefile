@@ -40,6 +40,8 @@ KERNEL_RUST := kernel/trykern.s
 KERNEL_SOURCES := $(shell find kernel/rust -type f -not -path '*/target/*') lib/rust/trystd/build.rs include/layout.s
 
 PROGRAMS := $(sort $(wildcard bin/*.s bin/*.tc bin/*.rs))
+# The modules of a program too big for one file, such as bin/sh/.
+MODULES := $(shell find bin -mindepth 2 -type f -name "*.rs")
 # What a program can include, import or link against.
 SOURCES := $(shell find lib include -type f -not -path '*/target/*')
 # What the kernel on the disk is built from.
@@ -56,7 +58,7 @@ kernel: $(KERNEL_RUST)
 $(KERNEL_RUST): $(KERNEL_SOURCES) tools/kernel.py
 	tools/kernel.py -o $@
 
-$(DISK): $(PROGRAMS) $(SOURCES) $(BOOT_SOURCES) etc/init tools/fs.py
+$(DISK): $(PROGRAMS) $(MODULES) $(SOURCES) $(BOOT_SOURCES) etc/init tools/fs.py
 	tools/fs.py new $@.tmp $(BLOCKS) $(PROGRAMS) --boot shell.s
 	tools/fs.py mkdir $@.tmp etc
 	tools/fs.py put $@.tmp etc/init etc/init

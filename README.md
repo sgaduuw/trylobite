@@ -360,8 +360,8 @@ add riscv32imac-unknown-none-elf`.
 
 The kernel asks the machine how much RAM it has (detrytus' RAM size
 register), so `--ram-pages` can be anything from enough for the
-programs (about 40 pages for `demo.s`, 81 for a few programs at a time
-in `shell.s`) up to 101,695, the most its direct map reaches; boot
+programs (about 40 pages for `demo.s`; the tests give `shell.s` 243,
+room to spare) up to 101,695, the most its direct map reaches; boot
 touches none of the free pages, so a large machine starts at once and
 costs the emulator only the pages programs use. Without `--ram-pages`
 detrytus gives the machine 59,049 pages, room for eighteen programs
@@ -383,8 +383,7 @@ while it runs, and the kernel reports each.
 
 | Process | Name | Job |
 |---------|------|-----|
-| `user/init.s` | | program 0: starts the console, disk and file servers, then the servers and programs `/etc/init` names, then the shell |
-| `user/sh.s` | | the shell |
+| `user/init.s` | | program 0: starts the console, disk and file servers, then the servers and programs `/etc/init` names, then the shell, `/bin/sh` |
 | `user/fsd.s` | `fs` | the file server: paths, directories, open files, starting programs from the disk |
 | `user/diskd.s` | `disk` | drives the block device, moving blocks by DMA |
 | `user/consd.s` | `console` | drives the console: input, output, Ctrl-C for the foreground program |
@@ -439,10 +438,10 @@ emulator, so trylobite has never run on hardware.
 | `kernel/lock.s` | the kernel lock |
 | `kernel/data.s` | the process table, buffers, messages |
 | `kernel/pagetables.s` | the boot address space and the kernel's shared leaf table |
-| `user/` | programs built into the kernel image: `demo-init`, `ping` and `pong` for the demo; `init`, `sh`, `pingpong` and the servers `fsd`, `diskd`, `consd`, `piped`, `netd` and `ipd` for the shell |
-| `bin/` | programs for the disk, in Rust over trystd, each built on its own: `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `cp`, `mv`, `touch`, the system tools `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`, `date`, `ntpd`, `ntpctl`, `ping`, `ifconfig`, `host` and `nc` for the network, and `rfact`, `rmandel`, `rsqrt`, `rsort`, `tee`, `xargs`, `fetch`, `httpd`, `vi` and `stty` |
+| `user/` | programs built into the kernel image: `demo-init`, `ping` and `pong` for the demo; `init`, `pingpong` and the servers `fsd`, `diskd`, `consd`, `piped`, `netd` and `ipd` for the shell |
+| `bin/` | programs for the disk, in Rust over trystd, each built on its own: the shell `sh` (its parts in `bin/sh/`), `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `cp`, `mv`, `touch`, the system tools `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`, `date`, `ntpd`, `ntpctl`, `ping`, `ifconfig`, `host` and `nc` for the network, and `rfact`, `rmandel`, `rsqrt`, `rsort`, `tee`, `xargs`, `fetch`, `httpd`, `vi` and `stty` |
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
-| `shell.s` | an 81-page machine starting the shell and its servers |
+| `shell.s` | a 243-page machine starting the shell and its servers |
 | `docs/` | the kernel and the filesystem, described |
 | `Makefile` | `make` builds `disk.img` with the kernel in its boot blocks and the programs of `bin/`, and the kernel's Rust part; `make run` boots it; `make benchmark` times the emulator |
 | `tools/fs.py` | makes and reads filesystem images on the host |
