@@ -278,7 +278,7 @@ Tasks:  10 total,   2 running,   0 ready,   8 waiting,   0 zombie
 %Cpu-1:  64.8 us,  35.2 sy,   0.0 id
 %Cpu0 :   0.4 us,   1.9 sy,  97.7 id
 %Cpu1 :   7.8 us,   9.1 sy,  83.1 id
-Mem   :   6561 pages total,   6483 free,     78 used  (19,683 trytes a page)
+Mem   :  59049 pages total,  58971 free,     78 used  (19,683 trytes a page)
 ```
 
 The time of day and the uptime are the real-time clock's (`SI_BOOTED`),
