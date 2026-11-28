@@ -634,7 +634,7 @@
 
 # The environment (docs/kernel.md, The environment): NAME=value strings a
 # process passes on to the programs it starts. See V_ENV.
-        .equ  SYS_ENVIRON, 53             # environ(address): make the block at
+        .equ  SYS_ENVIRON, 54             # environ(address): make the block at
                                           # a1 the caller's environment, which
                                           # every process it starts from now on
                                           # gets a copy of: 0, E_FAULT (not all

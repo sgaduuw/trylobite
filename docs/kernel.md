@@ -176,7 +176,7 @@ is as it was, since the trap entry saves them all. Trice relies on this
 | 50 | `sigaction(sig, action, entry)` | what signal `sig` does to the caller's process from now: `SIG_DFL` (0) its default, `SIG_IGN` (1) nothing, `SIG_CATCH` (2) run `entry`, which becomes the process's signal entry (Signals): the action it had; −10 (`E_INVAL`) no such signal or action, or any but `SIG_DFL` for `SIGKILL` |
 | 51 | `sigmask(how, set)` | changes the calling thread's set of blocked signals, a bit 2^`sig` for each: `SIG_BLOCK` (0) adds `set`, `SIG_UNBLOCK` (1) takes it away, `SIG_SETMASK` (2) makes it `set`: the set it had; −10 another `how`, or `set` outside 0 to 2^`NSIG` − 1. `SIGKILL` is never blocked, and a signal it lets in is taken before the call returns |
 | 52 | `sigreturn(frame)` | goes back from a signal's handler to where the thread was, with the registers, coprocessor bank and mask the frame at `frame` keeps; does not return, but −12 if the frame is not all in the caller's memory |
-| 53 | `environ(address)` | makes the block at `address` the caller's process's environment, which every process it starts from then on gets a copy of (The environment): 0; −12 (`E_FAULT`) if the block is not all in its memory, −29 (`E_2BIG`) if no empty string ends it within `ENV_MAX` trytes |
+| 54 | `environ(address)` | makes the block at `address` the caller's process's environment, which every process it starts from then on gets a copy of (The environment): 0; −12 (`E_FAULT`) if the block is not all in its memory, −29 (`E_2BIG`) if no empty string ends it within `ENV_MAX` trytes |
 
 Numbers 9, 11, 12 and 14 are free: console input, blocks and
 files are not system calls but calls to the console server, the disk
