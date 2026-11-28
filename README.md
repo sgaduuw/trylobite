@@ -347,7 +347,8 @@ sorted, as Unix's `sort`, in `Vec`s and `String`s on the heap), `tee`,
 `xargs`, `fetch` and `httpd`, an HTTP/1.0 client and server (`httpd -n
 1 notes | fetch -` serves a file to itself), `ntpd`, which sets the
 clock from an NTP server (`ntpd -n pool.ntp.org` shows how far off it
-is; `/etc/init` may start it to keep it right), and `vi`, a screen
+is; `/etc/init` starts it to keep it right, and `ntpctl` lists its
+sources, their offsets and round trips), and `vi`, a screen
 editor in the manner of Unix's (`vi notes`, then `:wq` to write and
 quit). Every one is written in Rust, translated from rustc's LLVM IR
 by `detrytus ll` (detrytus docs/rust.md) and built on trystd
@@ -438,7 +439,7 @@ emulator, so trylobite has never run on hardware.
 | `kernel/data.s` | the process table, buffers, messages |
 | `kernel/pagetables.s` | the boot address space and the kernel's shared leaf table |
 | `user/` | programs built into the kernel image: `demo-init`, `ping` and `pong` for the demo; `init`, `pingpong` and the servers `fsd`, `diskd`, `consd`, `piped`, `netd` and `ipd` for the shell |
-| `bin/` | programs for the disk, in Rust over trystd, each built on its own: the shell `sh` (its parts in `bin/sh/`), `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `cp`, `mv`, `touch`, the system tools `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`, `date`, `ntpd`, `ping`, `ifconfig`, `host` and `nc` for the network, and `rfact`, `rmandel`, `rsqrt`, `rsort`, `tee`, `xargs`, `fetch`, `httpd`, `vi` and `stty` |
+| `bin/` | programs for the disk, in Rust over trystd, each built on its own: the shell `sh` (its parts in `bin/sh/`), `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `cp`, `mv`, `touch`, the system tools `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`, `date`, `ntpd`, `ntpctl`, `ping`, `ifconfig`, `host` and `nc` for the network, and `rfact`, `rmandel`, `rsqrt`, `rsort`, `tee`, `xargs`, `fetch`, `httpd`, `vi` and `stty` |
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
 | `shell.s` | an 84-page machine starting the shell and its servers |
 | `docs/` | the kernel and the filesystem, described |

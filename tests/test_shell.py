@@ -147,6 +147,7 @@ def test_ls_lists_the_programs_on_the_disk(shell):
         "kill",
         "mv",
         "nc",
+        "ntpctl",
         "ntpd",
         "ping",
         "ps",

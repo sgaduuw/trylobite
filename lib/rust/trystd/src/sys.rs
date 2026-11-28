@@ -27,6 +27,8 @@ unsafe extern "C" {
     fn raw_ticks() -> u32;
     #[link_name = "sleep_until"]
     fn raw_sleep_until(low: u32, high: i32);
+    #[link_name = "alarm_until"]
+    fn raw_alarm_until(low: u32, high: i32);
     #[link_name = "argc"]
     fn raw_argc() -> i32;
     #[link_name = "argv"]
@@ -75,6 +77,52 @@ pub fn ticks() -> i64 {
 /// Wait until the time CSR reaches `until` (SYS_SLEEP, absolute).
 pub fn sleep_until(until: i64) {
     unsafe { raw_sleep_until(until as u32, (until >> 32) as i32) }
+}
+
+/// Have `receive` give a NOTE_ALARM notice once the time CSR reaches
+/// `until` (SYS_ALARM, absolute), in place of any alarm set before.
+pub fn alarm_until(until: i64) {
+    unsafe { raw_alarm_until(until as u32, (until >> 32) as i32) }
+}
+
+// --- serving ------------------------------------------------------------------
+
+/// What `receive` gave: a call to answer, or a notice from the kernel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Received {
+    /// Process `from` called with these words (its a2..a4), and waits
+    /// for `reply`.
+    Call { from: i32, words: [i32; 3] },
+    /// A NOTE_ notice and its word (FROM_KERNEL).
+    Notice { note: i32, about: i32 },
+}
+
+/// Take a name, 0-ended, for a server speaking protocol `version`
+/// (SYS_REGISTER), so that clients find it with `Server`.
+pub fn register(name: &'static [u8], version: i32) -> crate::io::Result<()> {
+    check(call(SYS_REGISTER, &[name.as_ptr() as i32, version])).map(|_| ())
+}
+
+/// Wait for a call or a notice (SYS_RECEIVE).
+pub fn receive() -> Received {
+    let from = call(SYS_RECEIVE, &[]);
+    let words = [more(0), more(1), more(2)];
+    if from == FROM_KERNEL {
+        Received::Notice { note: words[0], about: words[1] }
+    } else {
+        Received::Call { from, words }
+    }
+}
+
+/// Answer the call of process `to` with `value` (SYS_REPLY).
+pub fn reply(to: i32, value: i32) -> crate::io::Result<()> {
+    check(call(SYS_REPLY, &[to, value])).map(|_| ())
+}
+
+/// Copy `data` to `at` in the memory of process `to`, whose call this
+/// process holds (SYS_COPYOUT).
+pub fn copy_out(to: i32, data: &[u8], at: i32) -> crate::io::Result<()> {
+    check(call(SYS_COPYOUT, &[to, data.as_ptr() as i32, at, data.len() as i32])).map(|_| ())
 }
 
 /// main's arguments as the start code laid them out.
