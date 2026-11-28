@@ -111,6 +111,8 @@ pub enum State {
     Dying,
     /// Ended, until its parent waits.
     Zombie,
+    /// Stopped by a signal, until SIGCONT.
+    Stopped,
     /// A state this library does not know.
     Other(i32),
 }
@@ -131,6 +133,7 @@ impl State {
             sys::ST_JOIN => State::Join,
             sys::ST_DYING => State::Dying,
             sys::ST_ZOMBIE => State::Zombie,
+            sys::ST_STOPPED => State::Stopped,
             other => State::Other(other),
         }
     }
@@ -151,6 +154,7 @@ impl State {
             State::Join => "join",
             State::Dying => "dying",
             State::Zombie => "zombie",
+            State::Stopped => "stopped",
             State::Other(_) => "?",
         }
     }

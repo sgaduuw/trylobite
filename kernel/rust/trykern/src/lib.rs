@@ -14,6 +14,7 @@ mod devices;
 mod harts;
 mod info;
 mod ipc;
+mod jobs;
 mod kdata;
 mod mem;
 mod mm;

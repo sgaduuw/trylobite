@@ -17,7 +17,8 @@
 //! Some words are built in (sh/builtin.rs): exit; ls, cat, write, rm,
 //! mkdir, rmdir, cd and pwd, which use the filesystem through the file
 //! server; export, unset, env and set; true, false, :, test and [, read,
-//! shift, break, continue, return, wait, jobs, . and source, eval.
+//! shift, break, continue, return, wait, jobs, fg, bg, kill, . and
+//! source, eval.
 //! pingpong is a program of the kernel image. Any other word names a
 //! program file: a path if it has a slash, else the first file of that
 //! name in the directories $PATH lists; a file starting with #! runs
@@ -29,10 +30,18 @@
 //! The console is the console server's. A shell that has no standard
 //! input (as init starts it) opens the console as its standard input,
 //! output and error, which the programs it starts inherit; one started
-//! with them (sh from the shell) keeps its own. It gives each program it
-//! waits for the console's foreground, for Ctrl-C, if its standard input
-//! is the console (a remote shell's is a connection, bin/telnetd); at
-//! the prompt Ctrl-C drops the line. Its own complaints go to standard error, so they
+//! with them (sh from the shell) keeps its own.
+//!
+//! At its prompt the shell has job control (sh/run.rs): it leads a
+//! process group of its own, starts each job in a new group, and gives
+//! the job's group the console's foreground while it waits for it, if
+//! its standard input is the console (a remote shell's is a connection,
+//! bin/telnetd), so that Ctrl-C ends the whole job and Ctrl-Z stops it;
+//! at the prompt the console is the shell's, with Ctrl-C a key that
+//! drops the line. A stopped job, or one started with &, is listed by
+//! `jobs`, and `fg` and `bg` set it going again, in the foreground or
+//! not. A script runs without job control: its programs stay in the
+//! script's group, the job its own shell started. Its own complaints go to standard error, so they
 //! reach the console whatever a command redirects. It catches SIGPIPE,
 //! so that a built-in writing to a pipe whose reader has gone carries on,
 //! while the programs it starts have SIGPIPE's default.
@@ -155,7 +164,17 @@ pub struct Shell {
     /// $!: the last background job's last program.
     pub last_bg: Option<u32>,
     pub functions: Vec<(Vec<u8>, Rc<parse::Command>)>,
-    pub jobs: Vec<run::BgJob>,
+    pub jobs: Vec<run::JobEntry>,
+    /// The group the shell's next children join (job control), and
+    /// whether they start stopped (a foreground job's).
+    pub child_group: (process::Group, bool),
+    /// A foreground job's group while its programs start, stopped until
+    /// it has the console (run.rs, release).
+    pub held: Option<u32>,
+    /// Lines typed so far, and the one at which exit last warned that
+    /// jobs are stopped: exit right after that one exits all the same.
+    pub lines: u32,
+    pub exit_warned: Option<u32>,
     /// A break, continue or return under way.
     pub flow: Option<run::Flow>,
     /// Reading lines typed at the prompt, not a script.
@@ -182,6 +201,10 @@ impl Shell {
             last_bg: None,
             functions: Vec::new(),
             jobs: Vec::new(),
+            child_group: (process::Group::Same, false),
+            held: None,
+            lines: 0,
+            exit_warned: None,
             flow: None,
             interactive: false,
             testing: 0,
@@ -194,6 +217,15 @@ impl Shell {
     /// Read lines at the prompt and run them, until the end of input.
     fn interactive(&mut self) -> i32 {
         self.interactive = true;
+        // Job control: a group of its own, whose jobs each get another;
+        // the shell itself is not stopped by the keys or reads meant for
+        // a job (its handlers do nothing, and its children take the
+        // default again).
+        let _ = process::set_group(None, process::Group::New);
+        for sig in [signal::SIGTSTP, signal::SIGTTIN, signal::SIGTTOU] {
+            let _ = signal::signal(sig, signal::Handler::Catch(|_| {}));
+        }
+        self.take_console();
         // Only this function touches it, and only from here on.
         let editor = unsafe { &mut *core::ptr::addr_of_mut!(EDITOR) };
         let mut text: Vec<u8> = Vec::new();
@@ -216,6 +248,7 @@ impl Shell {
                 }
                 Got::Line => {}
             }
+            self.lines += 1;
             text.extend_from_slice(editor.line());
             text.push(b'\n');
             // A line ending in an odd number of \ goes on to the next.
@@ -334,8 +367,13 @@ impl Shell {
         }
         drop(file);
         if redirected {
+            // No job control in it, and its programs join the shell's
+            // own group, not that of a job starting meanwhile.
             let interactive = core::mem::replace(&mut self.interactive, false);
+            let (group, held) = self.child_group;
+            self.set_child_group(process::Group::Same, false);
             self.source(text, b"$(...)");
+            self.set_child_group(group, held);
             self.interactive = interactive;
             self.flow = None;
         }

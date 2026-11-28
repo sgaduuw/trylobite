@@ -9,11 +9,11 @@ use crate::kdata;
 use crate::layout::*;
 use crate::proc::Proc;
 use crate::word::{Word, load_at};
-use crate::{desc, devices, ipc, names, signal};
+use crate::{desc, devices, ipc, jobs, names, signal};
 
 /// Process `pid` if it is a child of process `parent`, ended or not;
 /// else E_NOCHILD.
-fn child(pid: Word, parent: Word) -> Result<Proc, Word> {
+pub fn child(pid: Word, parent: Word) -> Result<Proc, Word> {
     if !(0..NPROC).contains(&pid) {
         return Err(E_NOCHILD);
     }
@@ -48,6 +48,29 @@ pub extern "C" fn rk_sys_wait(p: *mut u8) -> i32 {
             1
         }
     }
+}
+
+/// waitpid(pid, options): wait, but with WAIT_UNTRACED also come back
+/// when the child stops, once for each stop (jobs::stopped hands it to
+/// a parent already waiting). As wait, 1 when it blocks.
+pub fn sys_waitpid(p: Proc) -> i32 {
+    let opts = p.get(PCB_A2);
+    if opts != 0 && opts != WAIT_UNTRACED {
+        p.set(PCB_A0, E_INVAL);
+        return 0;
+    }
+    if opts == WAIT_UNTRACED
+        && let Ok(c) = child(p.get(PCB_A1), p.space().pid())
+        && !c.is(ST_ZOMBIE)
+        && c.get(PCB_STOP) != 0
+        && c.get(PCB_STOPWAIT) != 0
+    {
+        c.set(PCB_STOPWAIT, 0);
+        p.set(PCB_A0, WAIT_STOPPED);
+        p.set(PCB_A1, c.get(PCB_STOP));
+        return 0;
+    }
+    rk_sys_wait(p.0)
 }
 
 /// kill(pid, for, sig): send signal sig to pid, a child of the caller,
@@ -135,6 +158,8 @@ pub fn bury(p: Proc) {
             q.set(PCB_PARENT, NO_PARENT);
             if q.is(ST_ZOMBIE) {
                 q.set(PCB_STATE, ST_EXITED);
+            } else if !q.is_thread() {
+                jobs::orphaned(q);
             }
         } else if q.is(ST_ZOMBIE) && q != p && q.get(PCB_SPACE) == pid {
             q.set(PCB_STATE, ST_EXITED); // a thread nobody joined

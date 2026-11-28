@@ -89,6 +89,7 @@
         .equ  P_CONSOLE, -1               # the console's physical page
         .equ  CTRL_C, 3                   # typed while the console has a
                                           # foreground process: kills it
+        .equ  CTRL_Z, 26                  # ... and this stops it (SIGTSTP)
         .equ  V_USER, SUPER               # every process runs from here
         .equ  NXPAGE, 9                   # pages a program file's image may take
                                           # above its own, V_USER + PAGE * k for
@@ -256,6 +257,8 @@
         .equ  KILL_ENDED, 1               # kill: nothing to end, only to wait for
         .equ  KILL_CAUGHT, 2              # kill: sent, and caught, ignored or
                                           # blocked: the process goes on
+        .equ  KILL_STOPPED, 3             # kill: sent, and the process stopped
+                                          # (SIGSTOP, SIGTSTP, SIGTTIN, SIGTTOU)
         # 14 was foreground: the console server keeps the foreground now
         .equ  SYS_SPAWNW, 15              # start the program file whose first
                                           # block is in block window a1 (see
@@ -609,7 +612,14 @@
         .equ  SIGPIPE, 13                 # a write to a pipe nobody reads
         .equ  SIGALRM, 14                 # an alarm set with ALARM_SIGNAL
         .equ  SIGTERM, 15                 # bin/kill's default
-        .equ  SIGCHLD, 17                 # a child ended; ignored by default
+        .equ  SIGCHLD, 17                 # a child ended or stopped; ignored by
+                                          # default
+        .equ  SIGCONT, 18                 # go on, if stopped; ignored by default
+        .equ  SIGSTOP, 19                 # stop: as SIGKILL, it cannot be caught,
+                                          # ignored or blocked
+        .equ  SIGTSTP, 20                 # stop: Ctrl-C's sibling, Ctrl-Z
+        .equ  SIGTTIN, 21                 # stop: a background read of the console
+        .equ  SIGTTOU, 22                 # stop (nothing sends it yet)
         .equ  NSIG,    31                 # signals are 1 to NSIG - 1: a set of
                                           # them is a word with bit 2^sig for each
         .equ  SYS_SIGACTION, 50           # sigaction(sig, action, entry): what
@@ -651,6 +661,51 @@
                                           # gets a copy of: 0, E_FAULT (not all
                                           # in its memory), E_2BIG (no empty
                                           # string ends it within ENV_MAX)
+
+# Job control (docs/kernel.md, Job control). A stopped process runs no
+# thread until SIGCONT; a thread stops on its way back to user mode, so
+# one blocked in a call stays blocked, and stops once the call ends.
+# Every process is in a process group, named by its leader's number:
+# a new process joins its parent's, unless the parent chose otherwise
+# for its children (setpgrp with PGRP_CHILDREN), which is how the shell
+# puts each job in a group of its own before any of it runs.
+        .equ  SYS_WAITPID, 55             # waitpid(pid, options): wait, as
+                                          # SYS_WAIT, but with WAIT_UNTRACED also
+                                          # come back when child a1 stops: a0 =
+                                          # WAIT_STOPPED, a1 = the signal; each
+                                          # stop is reported once
+        .equ  WAIT_UNTRACED, 1
+        .equ  SYS_SETPGRP, 56             # setpgrp(pid, pgrp): put process a1, the
+                                          # caller (or FOR_SELF) or a child of it,
+                                          # in group a2: PGRP_NEW for one of its
+                                          # own, led by it, or a group in which the
+                                          # caller or one of its descendants is
+                                          # already; with a1 = PGRP_CHILDREN, the
+                                          # group the caller's next children join:
+                                          # PGRP_NEW (each leads its own), a group
+                                          # as above, or PGRP_SAME (the caller's,
+                                          # as at first), and with a3 = 1 they
+                                          # start held: stopped, though nobody is
+                                          # told, until setpgrp(PGRP_RELEASE, g)
+                                          # lets group g go (or SIGCONT); a stop
+                                          # signal while held is a stop as any
+                                          # other, which the release leaves: 0,
+                                          # E_NOCHILD, E_PERM, E_INVAL
+        .equ  PGRP_NEW, -1
+        .equ  PGRP_SAME, -2
+        .equ  PGRP_CHILDREN, -3
+        .equ  PGRP_RELEASE, -4
+        .equ  SYS_GETPGRP, 57             # getpgrp(pid): the group of process a1,
+                                          # or the caller's (FOR_SELF): E_NOPROC
+        .equ  SYS_KILLPG, 58              # killpg(pgrp, for, sig): send signal a3
+                                          # to each process of group a1 that
+                                          # descends from the caller (a2 =
+                                          # FOR_SELF) or, for a driver, from
+                                          # process a2, or with KILL_ANY each but
+                                          # init: KILL_STOPPED if one stopped, else
+                                          # KILL_CAUGHT if one went on, else 0
+                                          # (each ends); E_NOPROC (no such
+                                          # process), E_INVAL, E_PERM
 
 # Files (docs/filesystem.md) come from the file server, which registers
 # as "fs" with protocol FS_PROTOCOL; a program looks it up once, and
@@ -745,9 +800,19 @@
                                           # E_FAULT
         .equ  CN_FOREGROUND, 2            # foreground(pid): give the console to
                                           # child pid of the caller, so that Ctrl-C
-                                          # kills it, or to nobody with
-                                          # NO_FOREGROUND: 0, E_INVAL. The server
+                                          # sends it SIGINT and Ctrl-Z SIGTSTP, or
+                                          # to nobody with NO_FOREGROUND: 0,
+                                          # E_INVAL. A pid that leads its process
+                                          # group stands for the whole group: each
+                                          # member is signalled, and a member of
+                                          # another group that reads the console
+                                          # meanwhile gets SIGTTIN. The server
                                           # takes it back when the process ends
+                                          # (a group's leader: when the one that
+                                          # named it ends)
+        .equ  CN_KEYS,    4               # keys(pid): as foreground, but Ctrl-C
+                                          # and Ctrl-Z are read as keys: the shell
+                                          # at its prompt
 
 # Frames come from the network server, which registers as "net" with
 # protocol NET_PROTOCOL and drives SRC_NET. A network call is a call to
@@ -933,6 +998,8 @@
         .equ  WAIT_EXITED,  0             # a1 = the code it gave exit
         .equ  WAIT_FAULTED, 1             # a1 = the trap cause that ended it
         .equ  WAIT_KILLED,  2             # a1 = the signal that ended it
+        .equ  WAIT_STOPPED, 3             # it has stopped (SYS_WAITPID with
+                                          # WAIT_UNTRACED): a1 = the signal
 
 # --- the process table ---------------------------------------------------------
 # One record per process, in words. Register r is saved at 3 * (r + 13), so
@@ -1048,7 +1115,15 @@
         .equ  PCB_SIGENTRY, PCB_SIGIGN + 3   # where caught signals run
         .equ  PCB_ENVP,   PCB_SIGENTRY + 3   # where its environment block is,
                                           # in its memory (environ, V_ENV)
-        .equ  PCB_SIZE,   PCB_ENVP + 3
+        .equ  PCB_PGRP,   PCB_ENVP + 3    # its process group
+        .equ  PCB_CPGRP,  PCB_PGRP + 3    # the group its children join: 0 its
+                                          # own, 1 each a new one, g + 2 group g
+        .equ  PCB_CHELD,  PCB_CPGRP + 3   # 1: its children start stopped
+        .equ  PCB_HELD,   PCB_CHELD + 3   # 1 while held, as it started
+        .equ  PCB_STOP,   PCB_HELD + 3    # the signal that stopped it, or 0
+        .equ  PCB_STOPWAIT, PCB_STOP + 3  # 1 while that stop is for waitpid to
+                                          # report
+        .equ  PCB_SIZE,   PCB_STOPWAIT + 3
         .assert PCB_SIZE % 3 == 0, "PCB_SIZE is not whole words"
         .assert PCB_NOTES + NPROC <= PCB_TURN - 1, "PCB_NOTES runs into PCB_TURN's trytes"
         .assert (PCB_SIGNALS + 1) % 3 == 0, "receive reads PCB_SIGNALS a word at a time"
@@ -1076,6 +1151,8 @@
         .equ  ST_RECEIVE, -9              # blocked in SYS_RECEIVE
         .equ  ST_LOOKUP, -10              # blocked in SYS_LOOKUP, waiting
         .equ  ST_SLEEP,  -11              # blocked in SYS_SLEEP, until its saved a1
+        .equ  ST_STOPPED, -12             # its process is stopped (PCB_STOP): it
+                                          # runs again at SIGCONT
         .equ  NO_FOREGROUND, -1           # CN_FOREGROUND: the console is nobody's
         .equ  NO_PARENT, -1               # PCB_PARENT of init and of orphans:
                                           # process numbers are never negative

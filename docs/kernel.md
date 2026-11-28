@@ -138,7 +138,7 @@ is as it was, since the trap entry saves them all. Trice relies on this
 | 7 | `spawn(program)` | the new process's number; −1 no free slot, −2 no such program, −3 not enough memory |
 | 8 | `hart()` | the number of the hart running the caller, −4 to +4 |
 | 10 | `wait(pid)` | how child `pid` ended, once it has: `a0` 0 exited, 1 faulted or 2 killed, `a1` its exit code, trap cause, or the signal that ended it; `a0` −2 if `pid` is not the caller's child |
-| 13 | `kill(pid, for, sig)` | sends signal `sig` (Signals; 0 only checks) to `pid`'s process, a child of the caller when `for` is `FOR_SELF` (−1), or, for a driver, a child of process `for`: 0, and it ends before it runs again; 2 (`KILL_CAUGHT`) it goes on, catching, ignoring or blocking the signal; 1 (`KILL_ENDED`) if it had ended already; −2 if `pid` is not that process's child, −10 no such signal, −21 `for` from a process that drives nothing. With `for` `KILL_ANY` (−2), any process but init: as before, or −2 none, or it has ended; −21 for init |
+| 13 | `kill(pid, for, sig)` | sends signal `sig` (Signals; 0 only checks) to `pid`'s process, a child of the caller when `for` is `FOR_SELF` (−1), or, for a driver, a child of process `for`: 0, and it ends before it runs again; 2 (`KILL_CAUGHT`) it goes on, catching, ignoring or blocking the signal; 3 (`KILL_STOPPED`) it stopped (Job control); 1 (`KILL_ENDED`) if it had ended already; −2 if `pid` is not that process's child, −10 no such signal, −21 `for` from a process that drives nothing. With `for` `KILL_ANY` (−2), any process but init: as before, or −2 none, or it has ended; −21 for init |
 | 15 | `spawnw(window, for, args, n)` | starts the program file whose first block is in block window `window`, and each next block in the next window (docs/filesystem.md), as the caller's child when `for` is `FOR_SELF` (−1), or as the child of process `for`, whose call the caller holds, with the `n` trytes of arguments at `args` in that parent's memory (docs/filesystem.md, Program arguments): as `spawn`, with −2 when there is no window or no program in it, its image is larger than `EXEC_MAX` or runs past the windows the caller has, or `for` is not waiting for the caller, −10 (`E_INVAL`) for `n` below 0 or above `ARG_MAX`, −12 (`E_FAULT`) for arguments not all in the parent's memory |
 | 16 | `close(fd)` | empties descriptor `fd`: 0; −8 if it names nothing |
 | 17 | `give(pid, handle)` | puts the caller's `handle`, 0 to 26, in the lowest free descriptor of process `pid`, whose call the caller holds: the descriptor; −9 none free, −2 `pid` is not waiting for the caller, −10 no such handle |
@@ -178,6 +178,10 @@ is as it was, since the trap entry saves them all. Trice relies on this
 | 52 | `sigreturn(frame)` | goes back from a signal's handler to where the thread was, with the registers, coprocessor bank and mask the frame at `frame` keeps; does not return, but −12 if the frame is not all in the caller's memory |
 | 53 | `monotonic()` | the machine's monotonic clock, for intervals: `a0` whole seconds since the machine started, `a1` the nanoseconds past that second, 0 to 999,999,999; real time, steady, and never stepped; it cannot fail (The time of day) |
 | 54 | `environ(address)` | makes the block at `address` the caller's process's environment, which every process it starts from then on gets a copy of (The environment): 0; −12 (`E_FAULT`) if the block is not all in its memory, −29 (`E_2BIG`) if no empty string ends it within `ENV_MAX` trytes |
+| 55 | `waitpid(pid, options)` | as `wait`, and with `options` `WAIT_UNTRACED` (1) also when child `pid` stops: `a0` 3 (`WAIT_STOPPED`), `a1` the signal, once for each stop (Job control); −10 another option |
+| 56 | `setpgrp(pid, pgrp, held)` | puts process `pid`, the caller (or `FOR_SELF`) or a child of it, in process group `pgrp`: `PGRP_NEW` (−1) a new one it leads, or a group the caller or one of its descendants is in; with `pid` `PGRP_CHILDREN` (−3), chooses the group the caller's next children join, from their first instruction: `PGRP_NEW` (each its own), such a group, or `PGRP_SAME` (−2, the caller's), and with `held` 1 they start held, stopped until released; with `pid` `PGRP_RELEASE` (−4), lets the caller's held descendants in group `pgrp` go: 0; −2 not a child, −21 (`E_PERM`) a group it may not join, −10 |
+| 57 | `getpgrp(pid)` | the process group of process `pid`, or the caller's with `FOR_SELF`; −2 no such process |
+| 58 | `killpg(pgrp, for, sig)` | sends `sig` to each process of group `pgrp` that descends from the caller (`FOR_SELF`), or for a driver from process `for`, or with `KILL_ANY` each but init: 3 (`KILL_STOPPED`) if one stopped, else 2 (`KILL_CAUGHT`) if one went on, else 0; −2 none, −10, −21 as `kill` |
 
 Numbers 9, 11, 12 and 14 are free: console input, blocks and
 files are not system calls but calls to the console server, the disk
@@ -506,16 +510,20 @@ primes in threads on two harts.
 Signals are POSIX's, kept small (`kernel/rust/trykern/src/signal.rs`),
 and numbered as Linux numbers them: `SIGHUP` 1, `SIGINT` 2, `SIGQUIT` 3,
 `SIGKILL` 9, `SIGUSR1` 10, `SIGUSR2` 12, `SIGPIPE` 13, `SIGALRM` 14,
-`SIGTERM` 15 and `SIGCHLD` 17, any of 1 to `NSIG` − 1 (30) being one. A
+`SIGTERM` 15, `SIGCHLD` 17, and for job control `SIGCONT` 18,
+`SIGSTOP` 19, `SIGTSTP` 20, `SIGTTIN` 21 and `SIGTTOU` 22, any of 1 to
+`NSIG` − 1 (30) being one. A
 set of signals is a word with the bit 2^`sig` for each. `kill(pid, for,
 sig)` sends one to a whole process; who may send to whom is as `kill`
 always allowed.
 
 Each signal does one of three things to a process, which `sigaction`
 sets: its **default**, which ends the process (and its parent's `wait`
-says `WAIT_KILLED` with the signal in `a1`), or for `SIGCHLD` nothing;
+says `WAIT_KILLED` with the signal in `a1`), for the stop signals
+stops it (Job control), or for `SIGCHLD` and `SIGCONT` nothing;
 **nothing** (`SIG_IGN`); or it is **caught** (`SIG_CATCH`). `SIGKILL`
-always ends the process. The kernel keeps, in the process's record,
+always ends the process, and `SIGSTOP` always stops it: neither can be
+caught, ignored or blocked. The kernel keeps, in the process's record,
 the signals sent and not yet taken (`PCB_SIGPEND`), the sets it catches
 and ignores, and one **signal entry** for every caught signal, the
 address the last `SIG_CATCH` gave: which handler runs for which signal
@@ -550,16 +558,21 @@ still to come. Such a call had not happened yet, so calling again is
 always right, and trystd's system-call entry does, as Unix's
 `SA_RESTART`; nothing else ever sees `E_INTR`, since only a process that
 catches a signal is interrupted. A held read of the console is the
-console server's to end: it answers it with `E_INTR` at Ctrl-C (The
-console).
+console server's to end: it answers it with `E_INTR` at Ctrl-C or
+Ctrl-Z (The console). trystd's entry keeps a call's arguments to call
+again with, since a descriptor call (`read`, `iocall`) comes back with
+its registers made a `call`'s.
 
-Where the signals come from: Ctrl-C is `SIGINT` to the console's
-foreground process; the pipe server sends `SIGPIPE` to a process
+Where the signals come from: Ctrl-C is `SIGINT` and Ctrl-Z `SIGTSTP`
+to the console's foreground, and a background read of the console
+`SIGTTIN`; the pipe server sends `SIGPIPE` to a process
 writing to a pipe nobody can read, as well as failing the write with
 `E_PIPE`; `alarm(until, ALARM_SIGNAL)` sends `SIGALRM`; a child's end
-sends its parent `SIGCHLD`; `bin/kill` sends any. A fault is not a
-signal: it ends the process as `WAIT_FAULTED`. There is no `SIGSTOP` or
-`SIGCONT`, and no signal reaches one thread alone.
+or stop sends its parent `SIGCHLD`; `bin/kill` and the shell's `kill`
+send any. A fault is not a
+signal: it ends the process as `WAIT_FAULTED`. No signal reaches one
+thread alone, and nothing sends `SIGTTOU` yet: a background job may
+write to the console.
 
 The shell catches `SIGPIPE`, so that a built-in writing into a pipeline
 whose reader has gone gets `E_PIPE` and the shell lives on; catching
@@ -573,6 +586,50 @@ and `Child::signal` and `ExitStatus::signal` in `process`. A handler
 should only set an atomic or end the process: printing or allocating
 can wait forever on a lock the interrupted code holds. `tests/rsig.rs`
 tries each.
+
+## Job control
+
+A process **stops** at `SIGSTOP`, and at `SIGTSTP`, `SIGTTIN` and
+`SIGTTOU` unless it catches, ignores or blocks them, and goes on at
+`SIGCONT`, whatever `SIGCONT` itself then does (`signal.rs`); a stop
+and a continue each throw away the other waiting. Stopping sets
+`PCB_STOP` to the signal and the note of each thread, and each thread
+parks as `ST_STOPPED` the next time `resume` would take it back to user
+mode, so one running on another hart stops within a timer slice, and
+one blocked in a call stays blocked and parks once the call ends.
+Signals sent meanwhile wait: a stopped thread is not cut short with
+`E_INTR`, and takes them after `SIGCONT`, `SIGKILL` excepted, which
+ends it at once. `proc` reports a stopped process as `ST_STOPPED`
+(`ps` says `stopped`), whatever its threads were doing.
+
+Its parent hears of each stop once: `waitpid(pid, WAIT_UNTRACED)`
+answers `WAIT_STOPPED` and the signal, at once if the stop has not been
+told yet, and the parent is sent `SIGCHLD`. `wait`, and `waitpid`
+without the option, go on waiting for the end. A stopped process whose
+parent ends is sent `SIGHUP` and `SIGCONT`, as Unix does to a stopped
+group its session leaves, since nobody is left to set it going.
+
+**Process groups** (`jobs.rs`) are named by the leader's number, kept
+in each member's record (`PCB_PGRP`). Init leads group 0, which the
+servers join; a new process joins its parent's group unless the parent
+chose another for its children with `setpgrp(PGRP_CHILDREN, ...)`
+(`PCB_CPGRP`), and `setpgrp` moves the caller or a child to a new
+group or one its own family is in. `killpg` signals a group's members,
+those that descend from the sender (or, for a driver, from the process
+it acts for), and `getpgrp` says which group a process is in.
+
+The shell starts a foreground job's first program in a new group and
+the rest in that one, all **held** (`PCB_CHELD`, `PCB_HELD`): stopped
+from their first instruction, with nobody told. It gives the group the
+console, then releases it (`setpgrp(PGRP_RELEASE, g)`), so no program
+of the job can read the console before its group has it. Held is not
+stopped: a Ctrl-Z that reaches the group before the release stops it
+for real, and the release leaves it so. A background job is started
+in a new group, not held.
+
+trystd has it as `process::set_group`, `set_children_group`,
+`release_group` and `group`, `signal::kill_group`, `Child::wait_or_stop`
+and `ExitStatus::stopped`, and `os::State::Stopped`.
 
 ## The environment
 
@@ -616,19 +673,33 @@ in `detrytus debug` the console stays open, `input TEXT` types more
 while a program waits, and `eof` closes it. The kernel still writes its own messages, and `putc` and
 `puts`, to the console's output directly: they are its log.
 
-Ctrl-C (code point 3) sends `SIGINT` to the console's **foreground
-process**, which `CN_FOREGROUND` names; the shell gives it each program
-it runs and takes the console back after, and the server lets go of a
-foreground process that ends. The server sends it with `kill` on behalf
+Ctrl-C (code point 3) sends `SIGINT`, and Ctrl-Z (26) `SIGTSTP`, to
+the console's **foreground**, which `CN_FOREGROUND` names: a process,
+or, when it leads its process group (init's excepted), the whole group
+(Job control), so that Ctrl-C ends every program of a pipeline. The
+shell gives it each job it runs and takes the console back after, and
+the server lets go of a foreground process that ends (a group's
+leader only when the process that named it ends). The server sends
+it with `kill`, or `killpg` for a group, on behalf
 of the process that named it, which the kernel allows a driver, so it
-can reach only that process's children. `SIGINT`'s default ends the
-process, and the console is nobody's after; a process that catches or
-ignores it (`KILL_CAUGHT`) keeps the console, and a read of its that
+can reach only that process's descendants. `SIGINT`'s default ends the
+process, and the console is nobody's after; a foreground that catches or
+ignores it (`KILL_CAUGHT`), or stops (`KILL_STOPPED`), keeps the
+console, and each read of the foreground's that
 the server holds is answered with `E_INTR`, so its handler runs at once
-and trystd reads again. To see a Ctrl-C while nobody reads, the server reads
+and trystd reads again, or a stopped reader leaves the input to the
+shell. `CN_KEYS` names a foreground as `CN_FOREGROUND` does, but with
+Ctrl-C and Ctrl-Z read as keys: the shell's, at its prompt.
+
+While the console has a foreground, a process of another group that
+reads it (init's group aside) is a background job: the server sends
+its group `SIGTTIN`, which stops it, and answers its read with
+`E_INTR`, so that it reads again once it goes on, in the foreground or
+to be stopped again; if it did not stop, the read fails with `E_IO`.
+To see a Ctrl-C while nobody reads, the server reads
 console input into a buffer of its own, but only while a reader waits
 (as much as the readers need) or a foreground process runs (all of it).
-Ctrl-C throws away what was typed before it, as a terminal does; with no
+Ctrl-C and Ctrl-Z throw away what was typed before them, as a terminal does; with no
 foreground process it is an ordinary code point, and one that ended
 nothing (the process had ended already) waits in the buffer for the next
 foreground process.
@@ -971,7 +1042,8 @@ and `[ EXPR ]` (`-e -f -d -s FILE`, `-z -n S`, `S = T`, `S != T`, `N
 -eq M` and `-ne -lt -le -gt -ge`, `!`, `-a`, `-o`), `read [-r]
 NAME...` (a line of standard input, split at blanks, read a character
 at a time so the rest stays for the next reader), `shift [N]`, `break
-[N]`, `continue [N]`, `return [N]`, `wait [%N|PID]...`, `jobs`, `. FILE
+[N]`, `continue [N]`, `return [N]`, `wait [%JOB|PID]...`, `jobs`, `fg
+[%JOB]`, `bg [%JOB]...`, `kill [-SIG] %JOB|PID...`, `. FILE
 [ARG...]` (and `source`) and `eval WORD...`. The system tools are
 programs (System tools, above).
 
@@ -1027,10 +1099,28 @@ signals.
 on without waiting; at the prompt the shell says `[1] PID` (the job's
 number and its last program's), and before a later prompt `[1] done
 a | b`, or `[1] exit N ...`, once each of its programs has ended (the
-process table says so without waiting). `jobs` lists those running,
-and `wait` waits for them all, or `wait %1` or `wait PID` for one: the
+process table says so without waiting). `wait` waits for every job
+that is running, or `wait %1` or `wait PID` for one: the
 last one's status. Only programs run in the background; a built-in,
 function or compound command in the line is refused.
+
+**Job control.** At the prompt (not in a script) the shell leads a
+process group, and each job gets one of its own (Job control, above),
+so that Ctrl-C ends and **Ctrl-Z stops** the whole job; the shell says
+`[1]+ stopped  a | b` and gives the prompt back, the status 128 and the
+signal (148). A background job that reads the console is stopped too
+(`SIGTTIN`), and the shell says so before the next prompt. `jobs`
+lists the jobs, `[1]+ stopped  a | b` or `[2]- running  c`, `+`
+marking the current job (the last to stop or start) and `-` the one
+before; `fg` sets a job going in the foreground, giving it the console,
+and waits for it; `bg` sets stopped jobs going in the background; and
+`kill` signals a job's whole group, or a process (`kill %1`, `kill
+-CONT %2`, `kill -9 23`, `kill -l`). A job is named `%N` (its number;
+`fg` and `bg` take `N` too), `%%` or `%+` the current one, `%-` the
+one before, or `%TEXT` the last whose command starts with TEXT; `fg`
+and `bg` with none take the current one. `exit` with jobs stopped says
+`sh: there are stopped jobs` the first time; exit again at once, and
+the shell ends, its stopped jobs sent `SIGHUP` and `SIGCONT`.
 
 The shell moves to a stack of 177,147 trytes from the heap as it
 starts (`trystd::thread::with_stack`, nine pages, not zeroed), since a
@@ -1138,9 +1228,10 @@ or compound command. A process has nine descriptors, so a pipeline
 with a command that runs in the shell, inside redirections, can run
 out: `sh: no descriptor left to redirect with`.
 
-**Ctrl-C** sends `SIGINT` to the program the shell is waiting for (in a
-pipeline the line's first program first), which ends it unless it
-catches the signal, and at the prompt drops the line typed so far.
+**Ctrl-C** sends `SIGINT` to the job the shell is waiting for, every
+program of it, which ends each unless it catches the signal, and at
+the prompt drops the line typed so far. **Ctrl-Z** stops the job (Job
+control, above).
 
 ```bash
 tools/fs.py new disk.img 100 notes.txt bin/*.rs
@@ -1162,7 +1253,7 @@ and the small calls `putc`, `puts`, `getpid`, `hart`, `yield` and
 `exit`), `info` (the
 `log` and `info` calls above), `names` (`register` and `lookup`),
 `desc` (descriptors), `procinfo` (`proc`, `name`, `sleep`, `alarm`),
-`wait` (`wait`, `kill`, and burying a process), `signal` (`sigaction`, `sigmask`, `sigreturn`, sending and taking signals), `sched` (which
+`wait` (`wait`, `waitpid`, `kill`, and burying a process), `signal` (`sigaction`, `sigmask`, `sigreturn`, sending and taking signals, stopping and continuing), `jobs` (process groups: `setpgrp`, `getpgrp`, `killpg`, and telling a parent of a stop), `sched` (which
 process runs next, and the sleepers the clock wakes) and `ipc` (`send`,
 `recv`, `call`, `receive`, `reply`, `copyin`, `copyout`, `notify`, and
 what servers hear when a process ends) and `mm` (the page allocator,

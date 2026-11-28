@@ -6,7 +6,7 @@
 
 use trystd::fs::{self, File, OpenOptions};
 use trystd::prelude::*;
-use trystd::sys;
+use trystd::{signal, sys};
 
 use crate::expand::Arg;
 use crate::run::{Flow, WaitFor};
@@ -43,6 +43,9 @@ pub const BUILTINS: &[(&[u8], Builtin)] = &[
     (b"return", return_),
     (b"wait", wait),
     (b"jobs", jobs),
+    (b"fg", fg),
+    (b"bg", bg),
+    (b"kill", kill),
     (b".", source),
     (b"source", source),
     (b"eval", eval),
@@ -61,7 +64,15 @@ fn arg(args: &[Arg], k: usize) -> Option<&[u8]> {
 }
 
 /// exit [CODE]: end the shell, with CODE or the last command's status.
+/// At the prompt, with jobs stopped, it says so the first time instead;
+/// exit again at once, and the shell ends (its stopped jobs are sent
+/// SIGHUP and SIGCONT as they lose their parent).
 fn exit(sh: &mut Shell, args: &[Arg]) -> i32 {
+    if sh.interactive && sh.jobs.iter().any(|j| j.stopped) && sh.exit_warned != Some(sh.lines.wrapping_sub(1)) {
+        Out::err().b(b"sh: there are stopped jobs").nl();
+        sh.exit_warned = Some(sh.lines);
+        return 1;
+    }
     let code = match arg(args, 1) {
         None => sh.status,
         Some(n) => match parse_number(n) {
@@ -579,17 +590,18 @@ fn return_(sh: &mut Shell, args: &[Arg]) -> i32 {
     status
 }
 
-/// wait [%N | PID]...: wait for those background jobs, or every one;
-/// the last one's status.
+/// wait [%JOB | PID]...: wait for those background jobs, or every one
+/// that is running; the last one's status.
 fn wait(sh: &mut Shell, args: &[Arg]) -> i32 {
     if args.len() == 1 {
         return sh.wait_jobs(None);
     }
     let mut status = 0;
     for a in &args[1..] {
-        let which = match a.text.strip_prefix(b"%") {
-            Some(n) => parse_number(n).map(|n| WaitFor::Job(n as u32)),
-            None => parse_number(&a.text).map(|n| WaitFor::Pid(n as u32)),
+        let which = if a.text.starts_with(b"%") {
+            sh.find_job(Some(&a.text)).map(WaitFor::Job)
+        } else {
+            parse_number(&a.text).map(|n| WaitFor::Pid(n as u32))
         };
         let Some(which) = which else {
             Out::err().b(b"sh: wait: not a job: ").b(&a.text).nl();
@@ -600,14 +612,138 @@ fn wait(sh: &mut Shell, args: &[Arg]) -> i32 {
     status
 }
 
-/// jobs: the background jobs that have not been waited for.
+/// jobs: the jobs running in the background or stopped, the current
+/// one (%+) marked +, the one before it -.
 fn jobs(sh: &mut Shell, _: &[Arg]) -> i32 {
     sh.check_jobs();
     let mut out = Out::new(1);
-    for job in &sh.jobs {
-        out.c(b'[').n(job.id as i32).b(b"] running  ").b(&job.text).nl();
+    let n = sh.jobs.len();
+    for (k, job) in sh.jobs.iter().enumerate() {
+        let mark = if k + 1 == n { b'+' } else if k + 2 == n { b'-' } else { b' ' };
+        let state: &[u8] = if job.stopped { b"stopped" } else { b"running" };
+        out.c(b'[').n(job.id as i32).c(b']').c(mark).c(b' ').b(state).b(b"  ").b(&job.text).nl();
     }
     0
+}
+
+/// The job argument `k` names (current with none), or why not, said.
+fn job_arg(sh: &Shell, args: &[Arg], k: usize, who: &[u8]) -> Option<usize> {
+    if !sh.interactive {
+        Out::err().b(b"sh: ").b(who).b(b": no job control").nl();
+        return None;
+    }
+    let spec = arg(args, k);
+    let found = sh.find_job(spec);
+    if found.is_none() {
+        let mut out = Out::err();
+        out.b(b"sh: ").b(who).b(b": ");
+        match spec {
+            Some(s) => out.b(b"no such job: ").b(s).nl(),
+            None => out.b(b"no current job").nl(),
+        };
+    }
+    found
+}
+
+/// fg [%JOB]: set the job going in the foreground, giving it the
+/// console, and wait for it: its status, as if typed again.
+fn fg(sh: &mut Shell, args: &[Arg]) -> i32 {
+    let Some(k) = job_arg(sh, args, 1, b"fg") else { return 1 };
+    let job = sh.jobs.remove(k);
+    Out::new(1).b(&job.text).nl();
+    sh.wait_job(job, true)
+}
+
+/// bg [%JOB]...: set the stopped jobs going in the background.
+fn bg(sh: &mut Shell, args: &[Arg]) -> i32 {
+    let specs = args.len().max(2) - 1;
+    let mut status = 0;
+    for k in 1..=specs {
+        let Some(at) = job_arg(sh, args, k, b"bg") else {
+            status = 1;
+            continue;
+        };
+        let job = &mut sh.jobs[at];
+        crate::run::signal_job(job, sys::SIGCONT);
+        job.stopped = false;
+        Out::new(1).c(b'[').n(job.id as i32).b(b"] ").b(&job.text).b(b" &").nl();
+    }
+    status
+}
+
+/// kill [-SIGNAL | -s SIGNAL] (%JOB | PID)... and kill -l: as bin/kill,
+/// and a job spec signals the job's programs, its whole group.
+fn kill(sh: &mut Shell, args: &[Arg]) -> i32 {
+    let text = |k: usize| core::str::from_utf8(arg(args, k).unwrap_or(b"")).unwrap_or("");
+    let parse = |s: &str| match parse_number(s.as_bytes()) {
+        Some(n) => (0..sys::NSIG).contains(&n).then_some(n),
+        None => signal::by_name(s),
+    };
+    let mut sig = sys::SIGTERM;
+    let mut first = 1;
+    match text(1) {
+        "-l" => {
+            let mut out = Out::new(1);
+            for (n, name) in signal::NAMES {
+                if n < 10 {
+                    out.c(b' ');
+                }
+                out.n(n).c(b' ').b(name.as_bytes()).nl();
+            }
+            return 0;
+        }
+        "-s" => {
+            let Some(s) = parse(text(2)) else {
+                Out::err().b(b"sh: kill: no such signal: ").b(text(2).as_bytes()).nl();
+                return 2;
+            };
+            sig = s;
+            first = 3;
+        }
+        opt if opt.len() > 1 && opt.starts_with('-') => {
+            let Some(s) = parse(&opt[1..]) else {
+                Out::err().b(b"sh: kill: no such signal: ").b(opt.as_bytes()).nl();
+                return 2;
+            };
+            sig = s;
+            first = 2;
+        }
+        _ => {}
+    }
+    if args.len() <= first {
+        Out::err().b(b"usage: kill [-SIGNAL] PID|%JOB... | kill -l").nl();
+        return 2;
+    }
+    let mut status = 0;
+    for a in &args[first..] {
+        let r = if a.text.starts_with(b"%") {
+            match sh.find_job(Some(&a.text)) {
+                Some(k) => {
+                    let job = &mut sh.jobs[k];
+                    crate::run::signal_job(job, sig);
+                    if sig == sys::SIGCONT {
+                        job.stopped = false;
+                    }
+                    Ok(())
+                }
+                None => Err(&b"no such job"[..]),
+            }
+        } else {
+            match parse_number(&a.text) {
+                Some(pid) => signal::kill(pid, sig).map(|_| ()).map_err(|e| match e.raw_os_error() {
+                    Some(sys::E_NOPROC) => &b"no such process"[..],
+                    Some(sys::E_PERM) => &b"not allowed"[..],
+                    _ => &b"cannot signal it"[..],
+                }),
+                None => Err(&b"not a process or job"[..]),
+            }
+        };
+        if let Err(why) = r {
+            Out::err().b(b"sh: kill: ").b(&a.text).b(b": ").b(why).nl();
+            status = 1;
+        }
+    }
+    status
 }
 
 /// . FILE [ARG...], source FILE: run the file's commands in this shell.
