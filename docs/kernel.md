@@ -73,7 +73,11 @@ into which `spawn` copies the program image loaded at boot, or
 half of its page (below its arguments, for a program file). A program
 file's image may go on past its own page, through up to `NXPAGE` (9)
 pages above it, which `spawnw` makes as it needs them: `rsqrt`, whose
-float formatting comes to about 22,000 trytes, takes one. Block
+float formatting comes to about 22,000 trytes, takes one. A program
+of the kernel image may take more than its page the same way: its first
+word, at `V_USER + IMAGE_PAGES` (the far end of the stack's half of its
+page), says how many pages its image takes in all, and `spawn` copies
+them all. Block
 windows take up to nine more pages, as a process asks for them, from
 `V_BLOCK`, past those; a driver also has its device's registers mapped
 past them, at `V_DEVICE`. Past the devices' pages is the **heap**, from
@@ -98,8 +102,8 @@ the hart's bank is still that process's (`fpu_owner`).
 | 1 | kernel data and stack |
 | 2, 3, 4 | kernel code (`NKCODE` pages from `P_KCODE`); the firmware in the last `FW_ROOM` trytes of page 4, from `FW_BOOT` |
 | 5, 6, 7 | the boot address space; the kernel's shared leaf table |
-| 8 .. 7 + `NPROG` | program images 0 to `NPROG` − 1, at most 27 (`NPROG_MAX`; the demo has 3, the shell build 11) |
-| 8 + `NPROG` .. the machine's last | free pages, handed out by the allocator |
+| 8 and on | program images 0 to `NPROG` − 1, at most 27 (`NPROG_MAX`; the demo has 3, the shell build 11), one after another, a page each unless an image's `IMAGE_PAGES` word says more |
+| after the last image .. the machine's last | free pages, handed out by the allocator |
 
 No kernel structure grows with memory. Free pages are those never yet
 handed out, counted by `fresh_page` up to `ram_pages`, plus a list of

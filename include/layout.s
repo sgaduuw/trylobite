@@ -27,13 +27,22 @@
         .equ  P_BOOTROOT, P_KCODE + NKCODE   # the boot address space's root table
         .equ  P_BOOTMID,  P_BOOTROOT + 1  # ... and its mid table
         .equ  P_KLEAF,    P_BOOTROOT + 2  # the kernel's leaf table, shared by all
-        .equ  P_PROG0,    P_BOOTROOT + 3  # program images, as loaded: program n's
-                                          # at page P_PROG0 + n, NPROG of them, as
-                                          # the build declares. The kernel copies
-                                          # one into a fresh page for each process
-                                          # it spawns. (P_FREE, the first free page,
-                                          # is include/kernel.s's: it needs NPROG)
+        .equ  P_PROG0,    P_BOOTROOT + 3  # program images, as loaded: NPROG of
+                                          # them, as the build declares, one after
+                                          # another from here, a page each unless
+                                          # one says it takes more (IMAGE_PAGES).
+                                          # The kernel copies one into fresh pages
+                                          # for each process it spawns; the pages
+                                          # after the last image are free
         .equ  NPROG_MAX, 27               # programs a build may add
+        .equ  IMAGE_PAGES, -9840          # a program image's first word, from its
+                                          # page's centre: 0 for an image of one
+                                          # page, else how many pages it takes, at
+                                          # most 1 + NXPAGE, the next image starting
+                                          # after its last. A program of several
+                                          # sets it with .org V_USER + IMAGE_PAGES:
+                                          # the stack's end of its first page, which
+                                          # the kernel reads before the stack grows
         .equ  POWER_PA, -2 * PAGE         # power-off register, for firmware
         .equ  POWER_RAM, 3                # with the power-off register: reads
                                           # how many RAM pages the machine has
