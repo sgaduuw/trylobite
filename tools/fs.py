@@ -46,6 +46,11 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+try:
+    from tools import toolchain
+except ImportError:  # run as a script: tools/ is on the path, not the repository
+    import toolchain  # type: ignore[no-redef]
+
 LAYOUT = Path(__file__).resolve().parent.parent / "include" / "layout.s"
 
 
@@ -856,16 +861,12 @@ def rust_ir(source: Path) -> list[Path]:
     (project / "Cargo.toml").write_text(
         _CARGO_TOML.format(name=name, source=source.resolve(), trystd=TRYSTD)
     )
-    target = work / "target"
+    # The pinned toolchain: rustup reads the copy here (tools/toolchain.py).
+    (project / "rust-toolchain.toml").write_text(toolchain.TOOLCHAIN_FILE.read_text())
+    env, target = toolchain.cargo_env(project, work / "target")
     # Where cargo leaves the IR moved in 1.100 (deps/ before, build/<crate>/
     # <hash>/out/ since), so look under the whole release directory.
     release = target / RUST_TARGET / "release"
-    env = {
-        **os.environ,
-        "RUSTC_BOOTSTRAP": "1",
-        "RUSTFLAGS": "--emit=llvm-ir,link -Zunstable-options -Cpanic=immediate-abort",
-        "CARGO_TARGET_DIR": str(target),
-    }
     target_args = ["--release", "--target", RUST_TARGET]
     # Cleaned first, so its IR is written afresh: a build cargo thinks is
     # up to date writes none.
