@@ -1,7 +1,8 @@
-//! rstd [net]: a test of trystd, the Rust system library, from the inside:
-//! each check prints a line saying what it found, which tests/test_trystd.py
-//! compares with what it should be. With `net`, the sockets too, against
-//! the IP server's echo service on port 7 (a machine with a link).
+//! rstd [net | threads]: a test of trystd, the Rust system library, from
+//! the inside: each check prints a line saying what it found, which
+//! tests/test_trystd.py compares with what it should be. With `net`, the
+//! sockets too, against the IP server's echo service on port 7 (a
+//! machine with a link); with `threads`, threads and their locks alone.
 #![no_std]
 
 use trystd::fs::{self, File, OpenOptions};
@@ -9,12 +10,18 @@ use trystd::io::{BufReader, SeekFrom};
 use trystd::net::{Ipv4Addr, TcpStream, UdpSocket};
 use trystd::prelude::*;
 use trystd::process::{Command, Stdio};
+use trystd::sync::{Arc, Condvar, Mutex};
 
 trystd::main!(run);
 
 fn run() -> io::Result<()> {
     let args: Vec<&str> = env::args().collect();
     println!("args {args:?}");
+    if args.get(1) == Some(&"threads") {
+        threads()?;
+        println!("done");
+        return Ok(());
+    }
     files()?;
     directories()?;
     processes()?;
@@ -162,5 +169,71 @@ fn sockets() -> io::Result<()> {
         "1.2.3".parse::<Ipv4Addr>().is_err(),
         Ipv4Addr::new(192, 0, 2, 200)
     );
+    Ok(())
+}
+
+fn threads() -> io::Result<()> {
+    let h = thread::spawn(|| 6 * 7);
+    println!("joined {}", h.join()?);
+
+    // A count three threads add to, behind a lock.
+    let n = Arc::new(Mutex::new(0u32));
+    let hs: Vec<_> = (0..3)
+        .map(|_| {
+            let n = n.clone();
+            thread::spawn(move || {
+                for _ in 0..200 {
+                    *n.lock().unwrap() += 1;
+                    thread::yield_now();
+                }
+            })
+        })
+        .collect();
+    for h in hs {
+        h.join()?;
+    }
+    println!("counted {}", *n.lock().unwrap());
+
+    // A thread asleep on a Condvar until the flag is set.
+    let pair = Arc::new((Mutex::new(false), Condvar::new()));
+    let theirs = pair.clone();
+    let h = thread::spawn(move || {
+        let (m, c) = &*theirs;
+        *c.wait_while(m.lock().unwrap(), |ready| !*ready).unwrap()
+    });
+    {
+        let (m, c) = &*pair;
+        *m.lock().unwrap() = true;
+        c.notify_one();
+    }
+    println!("woken {}", h.join()?);
+
+    // Its own number, its process's, and its process's directory.
+    let (tid, pid) = thread::spawn(|| (thread::current_id(), trystd::process::id())).join()?;
+    println!(
+        "numbers: own {} process same {}",
+        tid != pid as i32,
+        pid == trystd::process::id()
+    );
+    fs::create_dir("/thr")?;
+    env::set_current_dir("/thr")?;
+    fs::write("f", "in thr\n")?;
+    let read = thread::spawn(|| fs::read_to_string("f")).join()?;
+    println!("relative {read:?}");
+    env::set_current_dir("/")?;
+
+    // More threads than the process table has slots, half of them let
+    // go without join: their slots come back all the same.
+    for k in 0..40 {
+        let h = thread::Builder::new().stack_size(1000).spawn(move || k)?;
+        if k % 2 == 0 {
+            drop(h);
+            thread::yield_now();
+        } else {
+            h.join()?;
+        }
+    }
+    println!("forty threads");
+    thread::spawn(|| println!("printed by a thread")).join()?;
     Ok(())
 }

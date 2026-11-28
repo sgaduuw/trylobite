@@ -73,6 +73,7 @@ fs_start:
         beq   a0, t0, fs_notice
         mv    s0, a0                   # s0: the caller
         sw    a0, fs_caller
+        sw    a5, fs_whose             # its process: a thread's is another
         sw    a2, fs_a1
         sw    a3, fs_a2
         sw    a4, fs_a3
@@ -532,7 +533,7 @@ fs_spawn:
         sys
         bltz  a0, fs_reply
         mv    s2, a0                   # s2: the child, which starts in the
-        call  fs_cwdaddr               # caller's directory
+        call  fs_mycwd                 # caller's directory
         lw    s3, 0(a0)
         mv    s0, s2
         call  fs_cwdaddr
@@ -874,7 +875,7 @@ fs_chdir:
         lw    t0, I_TYPE(a0)
         li    t1, T_DIR
         bne   t0, t1, fs_notdir
-        call  fs_cwdaddr
+        call  fs_mycwd
         sw    s2, 0(a0)
         j     fs_none
 
@@ -885,7 +886,7 @@ fs_chdir:
 # name.
 fs_getcwd:
         call  fs_enter
-        call  fs_cwdaddr
+        call  fs_mycwd
         lw    s2, 0(a0)                # s2: the directory reached
         bnez  s2, 0f
         li    s2, ROOT_INO
@@ -1201,6 +1202,17 @@ fs_dirfind:
 fs_cwdaddr:
         li    t0, 3
         mul   t0, s0, t0
+        la    a0, fs_cwd
+        add   a0, a0, t0
+        ret
+
+# fs_mycwd: the same for the caller's process, which receive gave: the
+# threads of a process share its current directory (docs/kernel.md,
+# Threads). Clobbers t0.
+fs_mycwd:
+        lw    t0, fs_whose
+        li    a0, 3
+        mul   t0, t0, a0
         la    a0, fs_cwd
         add   a0, a0, t0
         ret
@@ -1823,7 +1835,7 @@ fs_namei_parent:
         beqz  t0, fs_noent             # an empty path names nothing
         li    t1, '/'
         beq   t0, t1, 1f
-        call  fs_cwdaddr               # no slash first: from the caller's
+        call  fs_mycwd                 # no slash first: from the caller's
         lw    t0, 0(a0)                # directory, 0 while it is the root
         beqz  t0, 1f
         mv    s3, t0
@@ -1952,6 +1964,7 @@ fs_ioops: .word fs_inval, fs_readdir, fs_lseek, fs_write, fs_read   # from IO_FI
                                        # has the number, so a call is E_NOPROC
 fs_disk: .word FS_NODISK               # the disk server
 fs_caller: .word 0                     # who made the call
+fs_whose:  .word 0                     # ... and its process (receive's a5)
 fs_a1:  .word 0                        # the call's arguments
 fs_a2:  .word 0
 fs_a3:  .word 0

@@ -133,7 +133,7 @@ is as it was, since the trap entry saves them all. Trice relies on this
 | 2 | `recv()` | the value; waits until one arrives |
 | 3 | `yield()` | 0 |
 | 4 | `exit(code)` | does not return |
-| 5 | `getpid()` | this process's number |
+| 5 | `getpid()` | this process's number; in a thread, its process's (`gettid`) |
 | 6 | `puts(address)` | 0; −2 if the string is outside the process's page and block windows |
 | 7 | `spawn(program)` | the new process's number; −1 no free slot, −2 no such program, −3 not enough memory |
 | 8 | `hart()` | the number of the hart running the caller, −4 to +4 |
@@ -148,7 +148,7 @@ is as it was, since the trap entry saves them all. Trice relies on this
 | 21 | `write(fd, buffer, n)` | `iocall` with `IO_WRITE`: how many were written |
 | 22 | `fdflags(fd, flags)` | sets descriptor `fd`'s flags: `FD_NOINHERIT` (1), a child does not get a copy, or 0: 0; −8 if `fd` names nothing, −10 another flag |
 | 23 | `call(pid, w1, w2, w3, w4)` | sends four words to process `pid` and waits for its reply: the reply's four words in `a0` to `a3`; `a0` −2 if there is no such process or it ends first, −3 if `pid` is the caller, −10 if `w1` is negative (an `IO_` operation, which only a descriptor sends) |
-| 24 | `receive()` | waits for a call: `a0` the caller, `a1` to `a4` its words; or `a0` `FROM_KERNEL` (−1) and `a1` `NOTE_ENDED` (0), `a2` a process that ended, or `a1` `NOTE_IRQ` (1), `a2` a device source the caller drives that interrupted, or `a1` `NOTE_CLOSED` (2), `a2` a handle of the caller's that no descriptor names any more, or `a1` `NOTE_SIGNAL` (3), `a2` a process that notified the caller, or `a1` `NOTE_ALARM` (4), the caller's alarm went off |
+| 24 | `receive()` | waits for a call: `a0` the caller, `a1` to `a4` its words, `a5` its process (the caller's own number, unless it is a thread); or `a0` `FROM_KERNEL` (−1) and `a1` `NOTE_ENDED` (0), `a2` a process that ended, or `a1` `NOTE_IRQ` (1), `a2` a device source the caller drives that interrupted, or `a1` `NOTE_CLOSED` (2), `a2` a handle of the caller's that no descriptor names any more, or `a1` `NOTE_SIGNAL` (3), `a2` a process that notified the caller, or `a1` `NOTE_ALARM` (4), the caller's alarm went off |
 | 25 | `reply(pid, w1, w2, w3, w4)` | ends the call of process `pid`, which this process received: 0; −2 if `pid` is not waiting for its reply |
 | 26 | `copyin(pid, from, to, n)` | copies `n` trytes from `from` in process `pid`, whose call this process holds, to its own `to`: 0; −2 as `reply`, −12 if either range is not all mapped, when nothing is copied |
 | 27 | `copyout(pid, from, to, n)` | copies `n` trytes from its own `from` to `to` in process `pid`: as `copyin` |
@@ -167,6 +167,11 @@ is as it was, since the trap entry saves them all. Trice relies on this
 | 40 | `alarm(until)` | when the `time` CSR reaches `until`, the caller's `receive` gives a `NOTE_ALARM` notice; a later alarm replaces an earlier one, and `NO_ALARM` (−1) cancels it: 0 |
 | 41 | `brk(end)` | makes the caller's heap reach `end`, in whole zeroed pages from `HEAP_START`: the break, the first address past the heap; an `end` inside the heap, or `BRK_QUERY` (0), only asks, since the heap never shrinks; −10 (`E_INVAL`) for an `end` below `HEAP_START` or past `HEAP_MAX` pages, −3 (`E_NOMEM`) when the pages are not there, and then it maps none |
 | 42 | `clock()` | the time of day, from the machine's real-time clock: `a0` whole seconds since 1970-01-01 00:00:00 UTC (Unix time, negative before 1970), `a1` the microseconds past that second, 0 to 999,999; it cannot fail (System tools, The time of day) |
+| 44 | `thread(entry, stack, arg, tp)` | starts a thread of the caller's process at `entry`, with `sp` = `stack`, `a0` = `arg`, `tp` = `tp` and the caller's `gp` (Threads): its number; −1 (`E_NOSLOT`) |
+| 45 | `thread_exit(code)` | ends the calling thread alone, its code kept for `join`; −21 (`E_PERM`) in a process's first thread |
+| 46 | `join(tid, how)` | `a0` 0 and `a1` the code thread `tid` gave `thread_exit`, once it has: `JOIN_WAIT` (0) waits, `JOIN_POLL` (1) gives −19 (`E_BUSY`) while it runs; −2 (`E_NOCHILD`) for what is not another thread of the caller's process, or was joined, −10 (`E_INVAL`) for the caller itself or another `how` |
+| 47 | `futex(address, op, value)` | `FUTEX_WAIT` (0): sleeps while the `u32` at `address` (four trytes, low byte first) is `value`, until a `FUTEX_WAKE`: 0, or −27 (`E_AGAIN`) at once if it is not; `FUTEX_WAKE` (1): wakes at most `value` threads of the caller's process sleeping at `address`: how many; −12 (`E_FAULT`), −10 (`E_INVAL`) |
+| 48 | `gettid()` | the calling thread's number; a process's first thread's is the process's (`getpid`) |
 
 Numbers 9, 11, 12 and 14 are free: console input, blocks and
 files are not system calls but calls to the console server, the disk
@@ -341,6 +346,47 @@ program it runs reads and prints through them: `bin/hello` is a single
 `write(STDOUT, ...)`. A console `read` gives what has been typed, at
 least one code point and at most `n`, one to a tryte; `getc` is still
 there for a code point too large for a tryte.
+
+## Threads
+
+A process may run more than one thread: `thread(entry, stack, arg,
+tp)` starts one at `entry`, with `sp` = `stack`, `a0` = `arg`, `tp` =
+`tp` and the caller's `gp`. A thread is a slot of the process table of
+its own, so its registers, state, coprocessor bank, messages, alarm and
+name are its own, every call that blocks blocks it alone, and two
+threads run on two harts at once. Its number is its slot's, so calls,
+sends and kills reach it by that number; `gettid` gives it, while
+`getpid` gives its process's. What a process has as a whole, its threads
+share through the record's `PCB_SPACE` (`kernel/rust/trykern/src/thread.rs`):
+its memory (its pages, block windows and heap, which `brk` grows for all
+of them), its descriptors, its children (a thread's `spawn` makes a
+child of the process, and any thread may `wait` for it) and its end. A
+server's `receive` gives a caller's process in `a5`, so the file server
+keeps one current directory per process, whichever thread asks.
+
+`exit`, a fault or a kill in any thread ends the whole process, as on
+Unix: every thread is killed, and goes the next time the kernel would
+run it, as a killed process does; the process waits as `ST_DYING` until
+the last has gone, so no hart still runs in its address space when its
+pages go back, and only then does its parent's `wait` see it end (with
+the status the end began with). Killing a thread's number kills its
+process. `thread_exit(code)` ends one thread alone, though not a
+process's first, which owns the pages; the thread stays as a zombie
+until another thread of its process collects its code with
+`join(tid, JOIN_WAIT)` (or `JOIN_POLL`, which says `E_BUSY` while it
+runs), or the process ends.
+
+Threads wait for each other with `futex(address, op, value)`, under the
+locks Rust's atomics make (detrytus docs/rust.md, Atomics): the word
+at `address` is a `u32` as Rust lays one out, four trytes low byte
+first. `FUTEX_WAIT` sleeps there while it holds `value` (`E_AGAIN` at
+once if it does not), and `FUTEX_WAKE` wakes at most `value` of the
+process's threads sleeping there. The kernel lock makes the test and the
+sleep one step, so a wake after the holder's store is never missed.
+Threads asleep on futexes or in `join` with nothing left to wake them
+are a deadlock. trystd's `thread` and `sync` (`spawn`, `JoinHandle`,
+`Mutex`, `Condvar`, `Arc`) are built on these, and `bin/rthreads` counts
+primes in threads on two harts.
 
 ## The console
 

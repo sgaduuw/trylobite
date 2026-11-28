@@ -136,6 +136,7 @@ pub extern "C" fn rk_sys_receive(p: *mut u8) -> i32 {
     p.set(PCB_A2, c.get(PCB_A3));
     p.set(PCB_A3, c.get(PCB_A4));
     p.set(PCB_A4, c.get(PCB_A5));
+    p.set(PCB_A5, c.space().pid()); // its process: a thread's differs
     done(p, c.pid())
 }
 
