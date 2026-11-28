@@ -36,7 +36,7 @@ jobs:
       - name: Use files from the shell
         run: |
           printf 'hello, disk\n' > notes
-          make BLOCKS=64
+          make BLOCKS=84
           tools/fs.py put disk.img notes
           tools/fs.py mkdir disk.img docs
           tools/fs.py put disk.img notes docs/again
@@ -46,11 +46,16 @@ jobs:
           grep -qx '/docs' out.txt
           grep -qx '1 5 38' out.txt
           grep -qE '^ +[0-9]+ +7 run +4 +[0-9]+ ps$' out.txt
-          grep -qE '^disk0 +64 ' out.txt
+          grep -qE '^disk0 +84 ' out.txt
           grep -qx 'trylobite 0.1.0 detrytus' out.txt
           tools/fs.py ls disk.img docs
           tools/fs.py cat disk.img docs/motd | grep -q 'made in the shell'
           tools/fs.py cat disk.img docs/hi | grep -q 'hello from a balanced-ternary machine'
+      - name: Boot the shell from the disk
+        run: |
+          printf 'hello\nuname -a\nexit\n' | detrytus run --ram-pages 81 --harts 3 --input - --disk disk.img | tee boot.txt
+          grep -q '^trylobite: harts: 3$' boot.txt
+          grep -qx 'trylobite 0.1.0 detrytus' boot.txt
       - name: Ping over a loopback link
         run: |
           printf 'ifconfig\nping 10.0.0.2 2\necho over udp | nc -u 10.0.0.2 7\necho over tcp | nc 10.0.0.2 7\nexit\n' | detrytus run shell.s --ram-pages 81 --input - --disk disk.img --net loop | tee ping.txt

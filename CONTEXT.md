@@ -2076,3 +2076,30 @@ and any program to start at boot, is now a file on the disk.
 - Still in assembly: init is a program of the image, which the Rust
   toolchain does not build yet. Moving it to Rust over trystd fits the
   Rust-only direction once image programs can be Rust.
+
+### 2026-11-28 · The kernel boots from the disk
+
+detrytus gained a boot ROM: given a disk and no program, it reads a
+boot record in block 0 (words 3 to 8), loads the blocks it names into
+consecutive RAM pages and jumps to its entry (detrytus platform.md,
+Booting from a disk). trylobite's side:
+
+- **The firmware moved from page 0 into RAM**, to the last `FW_ROOM`
+  (243) trytes of the kernel's last code page, labelled at their
+  physical addresses (`FW_BOOT`). The ROM owns the boot page and cannot
+  write it, so whatever it loads must live in RAM. Page 0 of the image
+  keeps two instructions that jump to the firmware, so the same image
+  still runs loaded as a file. A page of its own was tried first: one
+  page fewer for programs made shell sessions on 81 pages run out of
+  memory (xargs), and the code pages have room to spare.
+- **The record lives in the filesystem's header**, in words the header
+  left unused, and the kernel's blocks are a run of ordinary blocks the
+  map marks used, owned by the record as a file's blocks are by its
+  inode. The file server needs no change: it never frees a block it did
+  not allocate, and `rm` cannot reach them. Rejected: the kernel as a
+  file in `/boot`, which the ROM would have to find through inodes, or
+  could lose to `rm`.
+- **`make` puts `shell.s`'s pages 1 and up on `disk.img`** and `make
+  run` boots it. Loading `shell.s` as a file stays for tests and the
+  benchmark, so their step counts do not include the ROM's.
+

@@ -31,10 +31,24 @@ word's low tryte comes first.
 | −9,840 (word 0) | `FS_HEAD_MAGIC` | `FS_MAGIC`: a blank disk, all zeros, is not a filesystem |
 | −9,837 (word 1) | `FS_HEAD_VERSION` | `FS_VERSION`, 2 (version 1 was a flat directory and a FAT) |
 | −9,834 (word 2) | `FS_HEAD_BLOCKS` | how many blocks the filesystem has, 3 to `FS_MAX_BLOCKS` (19,656); the disk may have more |
+| −9,831 (word 3) | `FS_HEAD_BOOT` | `BOOT_MAGIC` (20,261,128) on a disk the kernel boots from, else 0 |
+| −9,828 (word 4) | `BOOT_FIRST` | the kernel's first block |
+| −9,825 (word 5) | `BOOT_COUNT` | how many blocks it has |
+| −9,822 (word 6) | `BOOT_PAGE` | the RAM page its first block loads into: 1 |
+| −9,819 (word 7) | `BOOT_ENTRY` | where it starts: `FW_BOOT`, the firmware |
 | −9,814 (`FS_MAP`) | the map | one tryte per block, from block 0: `MAP_USED` (1) or `MAP_FREE` (0) |
 
 The map runs to the block's last tryte. Blocks 0 and 1 are always used,
-as is every block an inode holds, and no other.
+as is every block an inode holds or the boot record names, and no other.
+
+Words 3 to 8 are detrytus' **boot record** (detrytus
+docs/platform.md, Booting from a disk): with no program, `detrytus run
+--disk` loads blocks `BOOT_FIRST` to `BOOT_FIRST + BOOT_COUNT − 1` into
+RAM pages from `BOOT_PAGE` and jumps to `BOOT_ENTRY`. `tools/fs.py new
+--boot shell.s` and `tools/fs.py boot` put a build's pages 1 and up
+(the kernel, the firmware and the built-in programs) in the first run
+of free blocks long enough, and fill the record in; the file server
+leaves both alone. Word 8 stays 0.
 
 ## Inodes
 

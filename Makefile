@@ -1,15 +1,24 @@
 # Build a disk for the shell and boot it.
 #
-#   make           disk.img: a filesystem with every program of bin/ in /bin
-#                  and etc/init, what init starts, in /etc; and
-#                  kernel/trykern.s, the kernel's Rust part
+#   make           disk.img: a bootable filesystem with the kernel (shell.s)
+#                  in its boot blocks, every program of bin/ in /bin and
+#                  etc/init, what init starts, in /etc; and kernel/trykern.s,
+#                  the kernel's Rust part
 #   make kernel    kernel/trykern.s alone (tools/kernel.py)
-#   make run       boot shell.s with disk.img (NET=user by default)
+#   make run       boot disk.img: detrytus' boot ROM loads the kernel from
+#                  it (NET=user by default)
 #   make benchmark time the emulator sorting 10,000 lines on disk.img
 #   make clean     remove disk.img and kernel/trykern.s
 #
-# The kernel itself is not on the disk: detrytus loads shell.s, and the
-# shell runs the programs it finds in /bin. disk.img is rebuilt from
+# The kernel is on the disk: tools/fs.py new --boot puts shell.s's RAM
+# pages in blocks that block 0's boot record names, and detrytus run
+# --disk with no program boots them. The shell runs the programs it finds
+# in /bin. Loading the kernel as a file still works, and runs this
+# disk's programs the same way:
+#
+#   detrytus run shell.s --disk disk.img
+#
+# disk.img is rebuilt from
 # scratch when a program or library changes, losing what sessions wrote
 # to it; copy it first to keep that.
 #
@@ -31,6 +40,8 @@ KERNEL_SOURCES := $(shell find kernel/rust -type f -not -path '*/target/*') lib/
 PROGRAMS := $(sort $(wildcard bin/*.s bin/*.tc bin/*.rs))
 # What a program can include, import or link against.
 SOURCES := $(shell find lib include -type f -not -path '*/target/*')
+# What the kernel on the disk is built from.
+BOOT_SOURCES := shell.s $(wildcard firmware/*.s kernel/*.s user/*.s) $(KERNEL_RUST)
 
 .PHONY: all disk kernel run benchmark clean
 
@@ -43,14 +54,14 @@ kernel: $(KERNEL_RUST)
 $(KERNEL_RUST): $(KERNEL_SOURCES) tools/kernel.py
 	tools/kernel.py -o $@
 
-$(DISK): $(PROGRAMS) $(SOURCES) etc/init tools/fs.py
-	tools/fs.py new $@.tmp $(BLOCKS) $(PROGRAMS)
+$(DISK): $(PROGRAMS) $(SOURCES) $(BOOT_SOURCES) etc/init tools/fs.py
+	tools/fs.py new $@.tmp $(BLOCKS) $(PROGRAMS) --boot shell.s
 	tools/fs.py mkdir $@.tmp etc
 	tools/fs.py put $@.tmp etc/init etc/init
 	mv $@.tmp $@
 
-run: $(DISK) $(KERNEL_RUST)
-	detrytus run shell.s --ram-pages $(RAM_PAGES) --disk $(DISK) $(if $(NET),--net $(NET))
+run: $(DISK)
+	detrytus run --ram-pages $(RAM_PAGES) --disk $(DISK) $(if $(NET),--net $(NET))
 
 benchmark: $(DISK) $(KERNEL_RUST)
 	tools/benchmark.py $(DISK) $(BENCH)

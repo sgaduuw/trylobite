@@ -29,7 +29,7 @@
         # kernel section, its data at the end of the data section.
         .include "../kernel/trykern.s"
 kcode_end:
-        .assert kcode_end <= (P_KCODE + NKCODE - 1) * PAGE + 9842 - KOFF, "the kernel's code runs off its NKCODE pages"
+        .assert kcode_end <= FW_BOOT - 1 - KOFF, "the kernel's code runs into the firmware at the end of its NKCODE pages"
         .section kdata
 kdata_end:
         .assert kdata_end + KSTACK_ROOM <= kstack_top, "kernel data runs into the kernel stack: shrink the process table (NPROC)"
