@@ -340,7 +340,8 @@ gateway needs a host that allows unprivileged ping sockets, or root.
 The programs on the disk are `hello`, `fail` (exits with 3), `spin`
 (loops for ever, for Ctrl-C), `echo`, `printenv`, `upper` (standard input to output
 in capitals) and `wc` (lines, words and code points), `cp`, `mv`,
-`touch`, `head` and `grep` for files, system tools as on Unix: `ps`,
+`touch`, `head`, `grep`, `sort`, `diff`, `find` and `tar` for files,
+`less` to page through one, system tools as on Unix: `ps`,
 `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df` and
 `date` (docs/kernel.md, System tools), and `ping`, `ifconfig`, `host`,
 `nc`, `dhcp` (which `/etc/init` starts, to take the address from the
@@ -448,7 +449,7 @@ emulator, so trylobite has never run on hardware.
 | `kernel/data.s` | the process table, buffers, messages |
 | `kernel/pagetables.s` | the boot address space and the kernel's shared leaf table |
 | `user/` | programs built into the kernel image: `demo-init`, `ping` and `pong` for the demo; `init`, `pingpong` and the servers `fsd`, `diskd`, `consd`, `piped`, `netd` and `ipd` for the shell |
-| `bin/` | programs for the disk, in Rust over trystd, each built on its own: the shell `sh` (its parts in `bin/sh/`), `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `cp`, `mv`, `touch`, the system tools `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`, `date`, `ntpd`, `ntpctl`, `dhcp`, `ping`, `ifconfig`, `host`, `nc`, `telnet` and the remote shell `telnetd` for the network, and `rfact`, `rmandel`, `rsqrt`, `rsort`, `tee`, `xargs`, `fetch`, `httpd`, `vi` and `stty` |
+| `bin/` | programs for the disk, in Rust over trystd, each built on its own: the shell `sh` (its parts in `bin/sh/`), `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `sort`, `diff`, `find`, `tar`, `less`, `cp`, `mv`, `touch`, the system tools `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`, `date`, `ntpd`, `ntpctl`, `dhcp`, `ping`, `ifconfig`, `host`, `nc`, `telnet` and the remote shell `telnetd` for the network, and `rfact`, `rmandel`, `rsqrt`, `rsort`, `tee`, `xargs`, `fetch`, `httpd`, `vi` and `stty` |
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
 | `shell.s` | a 243-page machine starting the shell and its servers |
 | `docs/` | the kernel and the filesystem, described |
