@@ -571,6 +571,12 @@ pub fn terminal_size() -> Option<(usize, usize)> {
     terminal_size_of(1)
 }
 
+/// Whether descriptor `fd` is the console, as Unix's isatty: only the
+/// console answers IO_WINSIZE.
+pub fn is_terminal(fd: i32) -> bool {
+    sys::call(sys::SYS_IOCALL, &[fd, sys::IO_WINSIZE, 0, 0]) >= 0
+}
+
 /// The same for descriptor `fd` (IO_WINSIZE).
 pub fn terminal_size_of(fd: i32) -> Option<(usize, usize)> {
     if sys::call(sys::SYS_IOCALL, &[fd, sys::IO_WINSIZE, 0, 0]) < 0 {

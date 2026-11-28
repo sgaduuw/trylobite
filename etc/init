@@ -11,8 +11,16 @@ pipe
 net
 ip
 
+# The address from the network's DHCP server, kept (bin/dhcp):
+/bin/dhcp -d
+
 # The time of day from pool.ntp.org, kept right (bin/ntpd):
 /bin/ntpd
+
+# A remote shell on port 23 (bin/telnetd). Anyone who reaches the port
+# gets the shell, with no password: with detrytus run --net user, only
+# the host can, through --forward 2323:23 (telnet localhost 2323).
+# /bin/telnetd
 
 # A web server for the whole disk, on port 80:
 # /bin/httpd
