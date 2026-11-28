@@ -350,7 +350,7 @@ detrytus asm bin/hello.s -o hello.dti
 tools/fs.py put disk.img hello.dti               # a program: /bin/hello
 tools/fs.py mkdir disk.img etc
 tools/fs.py put disk.img etc/init etc/init       # what init starts (kernel.md)
-detrytus run shell.s --ram-pages 81 --disk disk.img
+detrytus run shell.s --disk disk.img
 ```
 
 Images are detrytus disk files, two bytes per tryte, as long as the
