@@ -58,6 +58,7 @@ def test_files_directories_and_processes_from_rust(shell):
         "os info true true 0.1.0\n"
         "os log true\n"
         "os hart true\n"
+        "instant true true true true\n"
         "done\n"
         "$ \n"
     )
@@ -65,7 +66,7 @@ def test_files_directories_and_processes_from_rust(shell):
 
 def test_sockets_from_rust(shell):
     out = session(shell, "rstd net\n", link="loop")
-    assert out.split("os hart true\n")[1] == (
+    assert out.split("instant true true true true\n")[1] == (
         "address 10.0.0.2\n"
         'config 10.0.0.2/24 Some("10.0.0.1")\n'
         "ping true\n"

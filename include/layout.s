@@ -42,6 +42,11 @@
         .equ  POWER_CLOCK_US, 9           # ... the microseconds past that second
                                           # (detrytus platform.md, The real-time
                                           # clock)
+        .equ  POWER_MONO, 12              # ... the monotonic clock: seconds since
+                                          # the machine started; reading it latches
+        .equ  POWER_MONO_NS, 15           # ... the nanoseconds past that second
+                                          # (detrytus platform.md, The monotonic
+                                          # clock)
 
 # --- virtual memory ------------------------------------------------------------
 # Every address space has the same regions, all in root entry 0, a mid
@@ -514,9 +519,8 @@
                                           # (Unix time; before 1970, negative),
                                           # a1 = microseconds past that second,
                                           # 0 to 999,999. It cannot fail. The
-                                          # time CSR (SI_TIME, SYS_SLEEP) stays
-                                          # the clock for intervals: ticks since
-                                          # boot, which the time of day is not
+                                          # time of day jumps when it is stepped:
+                                          # intervals take SYS_MONOTONIC
         .equ  SYS_STEPCLOCK, 43           # stepclock(seconds, micros): move the
                                           # time of day (SYS_CLOCK) by a1 seconds
                                           # and a2 microseconds, -999,999 to
@@ -526,6 +530,13 @@
                                           # servers and /etc/init's programs may).
                                           # The machine's clock stays as it is;
                                           # the kernel keeps the offset (bin/ntpd)
+        .equ  SYS_MONOTONIC, 53           # monotonic(): the machine's monotonic
+                                          # clock, for intervals: a0 = whole
+                                          # seconds since the machine started,
+                                          # a1 = nanoseconds past that second, 0
+                                          # to 999,999,999. Real time, steady,
+                                          # never stepped (stepclock does not move
+                                          # it); it cannot fail
         .equ  SYS_HARTINFO, 49            # hartinfo(hart, buffer): the HI_ words
                                           # of hart a1 at a2, one of the middle
                                           # nine (bin/top): 0, E_NOHART (absent,

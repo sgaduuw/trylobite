@@ -46,7 +46,7 @@ pub extern "C" fn rk_syscall(p: *mut u8) -> i32 {
 
 /// Each call's routine, by its number (SYS_ in include/layout.s): one
 /// indirect call, where a chain of tests took 40 for the last.
-static CALLS: [fn(Proc) -> i32; SYS_SIGRETURN as usize + 1] = [
+static CALLS: [fn(Proc) -> i32; SYS_MONOTONIC as usize + 1] = [
     sys_putc,           // 0
     sys_send,           // 1
     sys_recv,           // 2
@@ -100,6 +100,7 @@ static CALLS: [fn(Proc) -> i32; SYS_SIGRETURN as usize + 1] = [
     signal::sys_sigaction, // 50
     signal::sys_sigmask, // 51
     signal::sys_sigreturn, // 52
+    sys_monotonic,      // 53
 ];
 
 const _: () = assert!(
@@ -115,6 +116,7 @@ const _: () = assert!(
         && SYS_HARTINFO == 49
         && SYS_SIGACTION == 50
         && SYS_SIGRETURN == 52
+        && SYS_MONOTONIC == 53
 );
 
 /// A number that names no call.
@@ -355,6 +357,17 @@ fn sys_clock(p: Proc) -> i32 {
 
 /// A second in microseconds.
 const MICROS: Word = 1_000_000;
+
+/// monotonic(): the machine's monotonic clock, seconds since it started
+/// in a0 and nanoseconds in a1 (detrytus platform.md, The monotonic
+/// clock). Nothing steps it, so the kernel adds nothing; reading the
+/// seconds latches the nanoseconds for this hart, as with clock.
+fn sys_monotonic(p: Proc) -> i32 {
+    let power = addr(V_POWER);
+    let seconds = load_at(power, POWER_MONO);
+    p.set(PCB_A1, load_at(power, POWER_MONO_NS));
+    done(p, seconds)
+}
 
 /// stepclock(seconds, micros): move the time of day by a1 seconds and a2
 /// microseconds, both of one sign. The machine's clock cannot be set

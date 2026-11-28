@@ -59,6 +59,6 @@ jobs:
         run: |
           printf 'ifconfig\nping 10.0.0.2 2\necho over udp | nc -u 10.0.0.2 7\necho over tcp | nc 10.0.0.2 7\nexit\n' | detrytus run shell.s --input - --disk disk.img --net loop | tee ping.txt
           grep -qx 'inet 10.0.0.2/24 gateway 10.0.0.1 nameserver 10.0.0.3' ping.txt
-          grep -qE '^reply from 10\.0\.0\.2: seq 2, [0-9]+ ticks$' ping.txt
+          grep -qE '^reply from 10\.0\.0\.2: seq 2, [0-9]+\.[0-9]{3} ms$' ping.txt
           grep -qx 'over udp' ping.txt
           grep -qx 'over tcp' ping.txt
