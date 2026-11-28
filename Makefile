@@ -24,7 +24,9 @@
 #
 # BENCH passes options to the benchmark's detrytus run (BENCH=--no-jit).
 # BLOCKS sets the disk's size in blocks, DISK its file name, and NET the
-# network (user, loop, udp:LOCAL,PEER, or empty for none). Building the
+# network (user, loop, udp:LOCAL,PEER, or empty for none). RAM_PAGES
+# gives make run that many pages of RAM instead of detrytus' default
+# (59,049). Building the
 # Rust programs needs a Rust toolchain with rust-src and the
 # riscv32imac-unknown-none-elf target (docs/rust.md), and so does the
 # kernel: build kernel/trykern.s before assembling shell.s or demo.s.
@@ -32,7 +34,7 @@
 BLOCKS ?= 100
 DISK ?= disk.img
 NET ?= user
-RAM_PAGES ?= 6561
+RAM_PAGES ?=
 
 KERNEL_RUST := kernel/trykern.s
 KERNEL_SOURCES := $(shell find kernel/rust -type f -not -path '*/target/*') lib/rust/trystd/build.rs include/layout.s
@@ -61,7 +63,7 @@ $(DISK): $(PROGRAMS) $(SOURCES) $(BOOT_SOURCES) etc/init tools/fs.py
 	mv $@.tmp $@
 
 run: $(DISK)
-	detrytus run --ram-pages $(RAM_PAGES) --disk $(DISK) $(if $(NET),--net $(NET))
+	detrytus run $(if $(RAM_PAGES),--ram-pages $(RAM_PAGES)) --disk $(DISK) $(if $(NET),--net $(NET))
 
 benchmark: $(DISK) $(KERNEL_RUST)
 	tools/benchmark.py $(DISK) $(BENCH)

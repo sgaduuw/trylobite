@@ -8,7 +8,8 @@
         .section free, V_USER, V_USER
         .gp   USER_GP                  # set by spawnw
 
-        .equ  FR_COL, 10               # columns for each number
+        .equ  FR_COL, 12               # columns for each number: room for
+                                       # MEM_MAX pages in trytes and a space
 
 free:   la    s8, fr_line              # s8: the end of the line so far
         li    a0, SYS_INFO
@@ -113,7 +114,7 @@ fr_digits_end:
 fr_line:   .zero 243
         .align 1
 fr_info:    .words SYSINFO / 3
-fr_head:    .string "             total      used      free\n"
+fr_head:    .string "               total        used        free\n"
 fr_pages:   .string "pages:  "
 fr_trytes:  .string "trytes: "
         .nocompress
