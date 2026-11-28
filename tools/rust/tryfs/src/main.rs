@@ -112,6 +112,9 @@ fn save(fs: &Disk, image: &str) -> Result<(), String> {
 /// The directory a path's last name is in, and that name.
 fn parent(fs: &mut Disk, path: &str) -> tryfs::Result<(i64, Vec<i32>)> {
     let p = cps(path);
+    if p.len() > PATH_MAX as usize {
+        return Err(E_NAMETOOLONG); // as the file server has it
+    }
     let last = fs.walk_path(ROOT_INO, &p)?;
     Ok((last.dir, p[last.start..last.end].to_vec()))
 }

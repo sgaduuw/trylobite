@@ -7,6 +7,8 @@ cargo builds the crate, the crates it uses and core for detrytus's Rust
 target, and `detrytus ll` translates their LLVM IR into assembly, only
 the server's entry (fsd_main) and what it calls. user/fsd.s includes
 the result in its program's section, after its start code and runtime.
+The build fails if the deepest chain of calls could take more stack
+than the server has (STACK).
 
 A program of the image shares the build's one symbol table with the
 kernel and every other program (AGENTS.md), and the kernel's Rust has
@@ -37,6 +39,16 @@ PREFIX = "fs$"
 # What LLVM calls without the program asking: user/fsd.s has them, prefixed.
 RUNTIME = {"abort", "memcpy", "memmove", "memset", "memcmp", "bcmp"}
 CRATES = ("fsd", "tryfs", "core")
+
+# The stack is below V_USER, in the image's first page: fs_main points
+# sp at V_USER and the page's lower half is all it has (V_ARGV's word
+# is at its bottom). The deepest chain of calls must fit, with room for
+# the system calls' own words.
+STACK = 9840 - 243
+
+# Functions that call themselves, and how deep they may go: tryfs's
+# mount walks the tree, which is at most DEPTH (tree.rs) levels.
+RECURSIVE = {"4walk": 8}
 
 LABEL = re.compile(r"^([A-Za-z_$.][\w$.]*):", re.M)
 NAME = re.compile(r"[A-Za-z_$.][\w$.]*")
@@ -77,6 +89,61 @@ def prefixed(text: str) -> str:
     return NAME.sub(lambda m: PREFIX + m[0] if m[0] in names else m[0], text)
 
 
+def stack_depth(text: str, entry: str = ENTRY) -> tuple[int, list[str]]:
+    """The most stack the translation can take from entry down: each
+    function's frame (its first addi sp, sp, -N, and the largest after it,
+    which makes room for a call's arguments), along its deepest chain of
+    calls, a jump to another function counted as a call. A function that
+    calls itself counts RECURSIVE's bound times; any other recursion is a
+    BuildError."""
+    frames: dict[str, int] = {}
+    first: dict[str, int] = {}
+    pushed: dict[str, int] = {}
+    calls: dict[str, set[str]] = {}
+    local = re.compile(r"\$[LS]\d+$")
+    current = None
+    for line in text.splitlines():
+        m = LABEL.match(line)
+        if m and not local.search(m[1]):
+            current = m[1]
+            frames[current], calls[current] = 0, set()
+            continue
+        if current is None:
+            continue
+        m = re.search(r"addi\s+sp, sp, -(\d+)", line)
+        if m:  # the frame, then room for a call's arguments on the stack
+            n = int(m[1])
+            if current not in first:
+                first[current] = n
+            else:
+                pushed[current] = max(pushed.get(current, 0), n)
+            frames[current] = first[current] + pushed.get(current, 0)
+        m = re.search(r"\b(?:call|tail|j)\s+([\w$.]+)", line)
+        if m and not local.search(m[1]):  # a call, or a jump to a function
+            calls[current].add(m[1])
+    memo: dict[str, tuple[int, list[str]]] = {}
+
+    def deepest(f: str, chain: tuple[str, ...]) -> tuple[int, list[str]]:
+        if f in chain:
+            raise BuildError(f"the file server recurses: {' -> '.join(chain + (f,))}")
+        if f not in memo:
+            others = calls.get(f, set()) - {f}
+            below = max(
+                (deepest(g, chain + (f,)) for g in others),
+                default=(0, []),
+            )
+            times = 1
+            if f in calls.get(f, ()):
+                bound = [n for name, n in RECURSIVE.items() if name in f]
+                if not bound:
+                    raise BuildError(f"the file server recurses without a bound: {f}")
+                times = bound[0]
+            memo[f] = times * frames.get(f, 0) + below[0], [f, *below[1]]
+        return memo[f]
+
+    return deepest(entry, ())
+
+
 def build(out: Path = OUT) -> Path:
     binary = os.environ.get("DETRYTUS") or shutil.which("detrytus")
     if binary is None:
@@ -87,7 +154,14 @@ def build(out: Path = OUT) -> Path:
     with tempfile.TemporaryDirectory() as work:
         raw = Path(work) / "fsd.s"
         run([binary, "ll", "--root", ENTRY, *map(str, ir), "-o", str(raw)])
-        out.write_text(prefixed(raw.read_text()))
+        text = raw.read_text()
+        depth, chain = stack_depth(text)
+        if depth > STACK:
+            raise BuildError(
+                f"the file server may take {depth} trytes of stack, more than "
+                f"{STACK}: {' -> '.join(chain)}"
+            )
+        out.write_text(prefixed(text))
     return out
 
 

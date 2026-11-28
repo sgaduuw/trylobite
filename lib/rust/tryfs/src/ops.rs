@@ -52,16 +52,25 @@ pub struct Last {
 impl<S: Store> Fs<S> {
     /// Inode `ino`'s record: E_IO if there is none.
     pub fn iget(&mut self, ino: i64) -> Result<Inode> {
+        for node in self.icache.iter().flatten() {
+            if node.ino == ino {
+                return Ok(*node);
+            }
+        }
         let mut it = Item::new();
         if !self.get(&Key::inode(ino), &mut it)? || it.len != INODE_WORDS as usize {
             return Err(E_IO);
         }
-        Ok(Inode::from_words(ino, it.value()))
+        let node = Inode::from_words(ino, it.value());
+        self.cache_inode(&node);
+        Ok(node)
     }
 
     /// Store an inode's record.
     pub fn iput(&mut self, node: &Inode) -> Result<()> {
-        self.put(&Key::inode(node.ino), &node.to_words())
+        self.put(&Key::inode(node.ino), &node.to_words())?;
+        self.cache_inode(node);
+        Ok(())
     }
 
     /// A new inode, stored: a directory with `parent` as its parent and
@@ -368,6 +377,11 @@ impl<S: Store> Fs<S> {
     /// The disk block holding file block `fb` of inode `ino`, or NO_BLOCK
     /// for a hole.
     pub fn bmap(&mut self, ino: i64, fb: i64) -> Result<i64> {
+        for &(i, first, len, start) in self.ecache.iter().flatten() {
+            if i == ino && first <= fb && fb < first + len {
+                return Ok(start + fb - first);
+            }
+        }
         let mut it = Item::new();
         if !self.seek(&Key::extent(ino, fb), true, &mut it)? {
             return Ok(NO_BLOCK);
@@ -381,7 +395,9 @@ impl<S: Store> Fs<S> {
         if fb < first {
             return Ok(NO_BLOCK);
         }
-        Ok(it.value[EX_START as usize] + fb - first)
+        let start = it.value[EX_START as usize];
+        self.cache_extent((ino, first, end - first, start));
+        Ok(start + fb - first)
     }
 
     /// The disk block holding file block `fb` of inode `ino`, allocating a
@@ -463,12 +479,19 @@ impl<S: Store> Fs<S> {
     /// relatime has it, so reading a file does not write the disk every
     /// time.
     pub fn accessed(&mut self, ino: i64) -> Result<()> {
-        let mut node = self.iget(ino)?;
-        let later = |a: Time, b: Time| (a.secs, a.nanos) > (b.secs, b.nanos);
-        if later(node.atime, node.mtime) && later(node.atime, node.ctime) {
+        if !self.atime_due(ino)? {
             return Ok(());
         }
+        let mut node = self.iget(ino)?;
         node.atime = self.now;
         self.iput(&node)
+    }
+
+    /// Whether a read should bring the access time up: whether it is no
+    /// later than the modification or change time.
+    pub fn atime_due(&mut self, ino: i64) -> Result<bool> {
+        let node = self.iget(ino)?;
+        let later = |a: Time, b: Time| (a.secs, a.nanos) > (b.secs, b.nanos);
+        Ok(!(later(node.atime, node.mtime) && later(node.atime, node.ctime)))
     }
 }

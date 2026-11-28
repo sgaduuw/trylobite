@@ -18,7 +18,7 @@ use crate::store::Store;
 use crate::Result;
 
 /// Levels a tree may have: far more than FS_MAX_BLOCKS blocks need.
-const DEPTH: usize = 8;
+pub(crate) const DEPTH: usize = 8;
 
 /// The words of the longest value, an inode's.
 pub const VALUE_MAX: usize = INODE_WORDS as usize;
@@ -76,11 +76,18 @@ impl<S: Store> Fs<S> {
     /// The first item whose key is `k` or more (more than `k` when
     /// `strict`), into `out`: false if there is none.
     pub fn seek(&mut self, k: &Key, strict: bool, out: &mut Item) -> Result<bool> {
-        let mut k = *k;
+        // Where to look again when the leaf ends before an item: the
+        // next leaf's first key. Rare, so made only then (keys are big to
+        // copy).
+        let mut again: Option<Key> = None;
         let mut strict = strict;
         loop {
+            let kw = match &again {
+                Some(a) => a.words(),
+                None => k.words(),
+            };
             let mut b = self.root;
-            let mut upper: Option<Key> = None; // where the next leaf starts
+            let mut upper: Option<(i64, usize)> = None; // the next leaf's separator
             let mut levels = 0;
             let s = loop {
                 levels += 1;
@@ -94,15 +101,15 @@ impl<S: Store> Fs<S> {
                 if node::count(&self.store, s) == 0 {
                     return Err(E_IO);
                 }
-                let (pos, next) = node::child_for(&self.store, s, k.words());
+                let (pos, next) = node::child_for(&self.store, s, kw);
                 if let Some(next) = next {
-                    upper = Some(node::key(&self.store, s, next));
+                    upper = Some((b, next));
                 }
                 b = node::value(&self.store, s, pos, 0);
             };
-            let (pos, _) = node::find(&self.store, s, k.words(), strict);
+            let (pos, _) = node::find(&self.store, s, kw, strict);
             if pos < node::end(&self.store, s) {
-                out.key = node::key(&self.store, s, pos);
+                node::key_into(&self.store, s, pos, &mut out.key);
                 out.len = node::vlen(&self.store, s, pos).min(VALUE_MAX);
                 for i in 0..out.len {
                     out.value[i] = node::value(&self.store, s, pos, i);
@@ -110,8 +117,11 @@ impl<S: Store> Fs<S> {
                 return Ok(true);
             }
             match upper {
-                Some(u) => {
-                    k = u;
+                Some((ub, next)) => {
+                    let s = self.node(ub)?;
+                    let mut a = Key::empty();
+                    node::key_into(&self.store, s, next, &mut a);
+                    again = Some(a);
                     strict = false;
                 }
                 None => return Ok(false),
@@ -127,6 +137,7 @@ impl<S: Store> Fs<S> {
     /// Put an item of key `k` and value `v`, in place of one of that key
     /// if there is one.
     pub fn put(&mut self, k: &Key, v: &[i64]) -> Result<()> {
+        self.forget_cached();
         let mut path = Path { depth: 0, block: [0; DEPTH], pos: [0; DEPTH] };
         self.descend(k.words(), &mut path)?;
         let mut level = path.depth - 1;
@@ -221,6 +232,7 @@ impl<S: Store> Fs<S> {
 
     /// Take away the item of key `k`: false if there was none.
     pub fn delete(&mut self, k: &Key) -> Result<bool> {
+        self.forget_cached();
         let mut path = Path { depth: 0, block: [0; DEPTH], pos: [0; DEPTH] };
         self.descend(k.words(), &mut path)?;
         let mut level = path.depth - 1;

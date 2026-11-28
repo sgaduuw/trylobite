@@ -486,7 +486,7 @@ def run(
     init: str,
     prog1: str = DONE,
     prog2: str = DONE,
-    ram_pages: int = RAM_PAGES,
+    ram_pages: int | None = None,
     max_steps: int = 2_000_000,
     harts: int | None = None,
     plug: list[tuple[int, int]] = (),
@@ -503,8 +503,12 @@ def run(
     clock: int | None = None,
 ) -> Run:
     image = build(
-        init, prog1, prog2, ram_pages, files, disk_server, console, pipes, net, ip
+        init, prog1, prog2, RAM_PAGES, files, disk_server, console, pipes, net, ip
     )
+    if ram_pages is None:
+        # RAM_PAGES, and the pages the file server's image takes past one,
+        # each twice: in the image and in its process.
+        ram_pages = RAM_PAGES + 2 * (image.symbols.get("FS_PAGES", 1) - 1)
     return run_image(
         image, ram_pages, max_steps, harts, plug, unplug, input, disk, link, clock
     )

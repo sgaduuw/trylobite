@@ -58,12 +58,17 @@ pub fn value<S: Store>(st: &S, s: Slot, pos: usize, i: usize) -> i64 {
 /// The key of the item at `pos`.
 pub fn key<S: Store>(st: &S, s: Slot, pos: usize) -> Key {
     let mut k = Key::empty();
+    key_into(st, s, pos, &mut k);
+    k
+}
+
+/// The same, into `k`, whose words past its length are left as they were.
+pub fn key_into<S: Store>(st: &S, s: Slot, pos: usize, k: &mut Key) {
     let n = klen(st, s, pos).min(KEY_WORDS);
     for i in 0..n {
         k.w[i] = st.word(s, pos + IT_KEY as usize + i);
     }
     k.len = n;
-    k
 }
 
 /// Compare the key of the item at `pos` with `k`.

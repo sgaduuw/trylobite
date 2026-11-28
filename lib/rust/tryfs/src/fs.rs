@@ -113,7 +113,18 @@ pub struct Fs<S: Store> {
     pub(crate) freed: Bits,
     /// Where the next allocation looks first.
     rotor: i64,
+    /// The inodes iget last read or iput last wrote, and the extents
+    /// bmap last found: (inode, first file block, blocks, first disk
+    /// block), CACHED of each, the oldest replaced. A file read a few
+    /// trytes at a time asks for both again and again, and so do two
+    /// read at once; any change to the tree forgets them.
+    pub(crate) icache: [Option<Inode>; CACHED],
+    pub(crate) ecache: [Option<(i64, i64, i64, i64)>; CACHED],
+    pub(crate) inext: usize,
+    pub(crate) enext: usize,
 }
+
+pub(crate) const CACHED: usize = 4;
 
 /// The superblock's words that the sum covers, read from slot `s`.
 fn head_sum<S: Store>(st: &S, s: usize) -> i64 {
@@ -147,6 +158,10 @@ impl<S: Store> Fs<S> {
             fresh: Bits::new(),
             freed: Bits::new(),
             rotor: 1,
+            icache: [None; CACHED],
+            ecache: [None; CACHED],
+            inext: 0,
+            enext: 0,
         }
     }
 
@@ -191,10 +206,11 @@ impl<S: Store> Fs<S> {
     /// E_IO if what it holds is damaged.
     pub fn mount(&mut self) -> Result<()> {
         self.mounted = false;
+        self.forget_cached();
         self.used.empty();
         self.fresh.empty();
         self.freed.empty();
-        let s = self.store.load(0).map_err(|_| E_NOFS)?;
+        let s = self.store.load(0).map_err(|e| if e == E_NOMEM { e } else { E_NOFS })?;
         let st = &self.store;
         if st.word(s, word_of(FS_HEAD_MAGIC)) != FS_MAGIC
             || st.word(s, word_of(FS_HEAD_VERSION)) != FS_VERSION
@@ -252,8 +268,8 @@ impl<S: Store> Fs<S> {
         self.used.set(b);
         let s = self.node(b)?;
         let here = node::level(&self.store, s);
-        if level >= 0 && here != level {
-            return Err(E_IO);
+        if (level >= 0 && here != level) || !(0..crate::tree::DEPTH as i64).contains(&here) {
+            return Err(E_IO); // and so the walk goes at most DEPTH deep
         }
         let n = node::count(&self.store, s);
         let mut pos = node::ITEMS;
@@ -394,6 +410,7 @@ impl<S: Store> Fs<S> {
     /// Forget what this call did: the disk still holds the tree as the
     /// last commit left it.
     pub fn abort(&mut self) {
+        self.forget_cached();
         self.store.discard();
         self.used.remove_all(&self.fresh);
         self.fresh.empty();
@@ -401,6 +418,28 @@ impl<S: Store> Fs<S> {
         self.root = self.committed.root;
         self.next_ino = self.committed.next_ino;
         self.inodes = self.committed.inodes;
+    }
+
+    /// Forget the inode and extent last read: the tree is changing.
+    pub(crate) fn forget_cached(&mut self) {
+        self.icache = [None; CACHED];
+        self.ecache = [None; CACHED];
+    }
+
+    pub(crate) fn cache_inode(&mut self, node: &Inode) {
+        let k = match self.icache.iter().position(|c| c.is_some_and(|c| c.ino == node.ino)) {
+            Some(k) => k,
+            None => {
+                self.inext = (self.inext + 1) % CACHED;
+                self.inext
+            }
+        };
+        self.icache[k] = Some(*node);
+    }
+
+    pub(crate) fn cache_extent(&mut self, e: (i64, i64, i64, i64)) {
+        self.enext = (self.enext + 1) % CACHED;
+        self.ecache[self.enext] = Some(e);
     }
 
     /// How many blocks are free, counting those this call freed as used.

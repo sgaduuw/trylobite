@@ -1,8 +1,9 @@
-"""The file server's calls that change the filesystem (user/fsd.s): open
-with O_CREAT, O_TRUNC and O_APPEND, write, unlink, mkdir and rmdir. Each
-gathers its blocks and checks what it can before changing any, and the
-server writes every block it changed before it replies; tools/fs.py then
-reads the disk, checking the whole tree as it loads it."""
+"""The file server's calls that change the filesystem (user/rust/fsd):
+open with O_CREAT, O_TRUNC and O_APPEND, write, unlink, mkdir and rmdir.
+Each is a transaction: the server writes every block it changed, then
+the superblock, before it replies, or forgets them all when the call
+fails; tools/fs.py then reads the disk, checking the whole tree as it
+loads it."""
 
 from tests.kernel import exit_with, wait_for
 from tests.test_files import (
@@ -76,8 +77,10 @@ def test_writing_stops_at_a_block_end_and_grows_the_file():
     assert text == "\0" * (PAGE - 2) + "ab" + "abcde"
 
 
-def test_a_write_far_out_takes_an_indirect_block_and_leaves_holes():
-    far = L["NDIRECT"] * PAGE + 3
+def test_a_write_far_out_leaves_a_hole():
+    # The blocks before the one written are not there: an extent holds
+    # only the block written, and they read as zeros.
+    far = 5 * PAGE + 3
     program = report(
         open_("p", W + C),
         lseek(0, far, "SEEK_SET"),
@@ -85,13 +88,15 @@ def test_a_write_far_out_takes_an_indirect_block_and_leaves_holes():
         data=string("p", "sparse") + string("text", "tail"),
     )
     on = disk()
+    free = len(after(on).free_blocks())
     assert said(run(program, disk=on)) == [0, far, 4]
     made = after(on)
-    node = made.inode(made.lookup("sparse"))
+    node = made.stat("sparse")
     assert node.size == far + 4
-    assert node.direct == [0] * L["NDIRECT"] and node.indirect
+    assert node.data[:5] == [L["NO_BLOCK"]] * 5 and node.data[5] != L["NO_BLOCK"]
     assert made.read_trytes("sparse")[far:] == [ord(c) for c in "tail"]
-    assert len(made.free_blocks()) == 8 - 3 - 2  # the indirect and one data block
+    assert made.read_trytes("sparse")[:far] == [0] * far
+    assert len(made.free_blocks()) == free - 1  # the one data block
 
 
 def test_o_trunc_empties_and_o_append_adds():
@@ -106,11 +111,12 @@ def test_o_trunc_empties_and_o_append_adds():
         data=string("big", "big") + string("log", "log") + string("text", "more"),
     )
     on = disk(big="x" * (2 * PAGE), log="start:")
+    free = len(after(on).free_blocks())
     assert said(run(program, disk=on)) == [0, 1, 4, 0, 4, 2, 14]
     made = after(on)
     assert made.read("big") == ""
     assert made.read("log") == "start:moremore"
-    assert len(made.free_blocks()) == 8 - 4  # 0, 1, / and log
+    assert len(made.free_blocks()) == free + 2  # big's
 
 
 def test_what_cannot_be_written_says_why():
@@ -160,6 +166,7 @@ def test_unlink_frees_a_file_and_refuses_what_it_cannot_remove():
         + string("dot", "d/."),
     )
     on = disk(dirs=("d",), a="x" * (PAGE + 1), d__b="y")
+    free = len(after(on).free_blocks())
     assert said(run(program, disk=on)) == [
         0,
         L["E_NOENT"],
@@ -173,8 +180,8 @@ def test_unlink_frees_a_file_and_refuses_what_it_cannot_remove():
     made = after(on)
     assert made.listdir() == [("d", made.inode(made.lookup("d")))]
     assert made.listdir("d") == []
-    assert len(made.free_blocks()) == 8 - 4  # 0, 1, / and d
-    assert all(made.inode(i).type == 0 for i in range(4, 10))
+    assert len(made.free_blocks()) == free + 3  # a's two and b's
+    assert made.info()["inodes"] == 2  # / and d
 
 
 def test_mkdir_and_rmdir():
@@ -201,6 +208,7 @@ def test_mkdir_and_rmdir():
         + string("dot", "a/.."),
     )
     on = disk()
+    free = len(after(on).free_blocks())
     assert said(run(program, disk=on)) == [
         0,
         0,
@@ -213,7 +221,7 @@ def test_mkdir_and_rmdir():
         L["E_BUSY"],
         L["E_NOTDIR"],
         L["E_BUSY"],
-        L["E_INVAL"],
+        L["E_EXIST"],  # a/.. is there, as POSIX's mkdir says
     ]
     made = after(on)
     assert made.inode(made.lookup("a")).links == 4
@@ -233,11 +241,15 @@ def test_mkdir_and_rmdir():
     assert said(run(program, disk=on)) == [0, 0, 0, 0]
     made = after(on)
     assert made.listdir() == []
-    assert made.inode(1).links == 2
-    assert len(made.free_blocks()) == 8 - 3
+    assert made.inode(L["ROOT_INO"]).links == 2
+    assert len(made.free_blocks()) == free  # directories take no blocks
 
 
 def test_a_full_disk_says_so_and_stays_whole():
+    # Four blocks: the superblock, the tree's one leaf, and two free. Each
+    # change writes the leaf afresh (copy on write), so a block for data
+    # and one for the leaf is all a call can have: the second block of
+    # data finds no room. A directory takes no block of its own.
     program = report(
         open_("p", W + C),
         write(0, 1),
@@ -246,9 +258,11 @@ def test_a_full_disk_says_so_and_stays_whole():
         call("FS_MKDIR", "d"),
         data=string("p", "f") + string("text", "x") + string("d", "d"),
     )
-    on = disk(4)  # 0, 1, / and one free block
-    assert said(run(program, disk=on)) == [0, 1, PAGE, L["E_NOSPC"], L["E_NOSPC"]]
-    assert after(on).read("f") == "x"
+    on = disk(4)
+    assert said(run(program, disk=on)) == [0, 1, PAGE, L["E_NOSPC"], 0]
+    made = after(on)
+    assert made.read("f") == "x"
+    assert made.is_dir("d")
 
 
 def test_two_processes_write_at_once():

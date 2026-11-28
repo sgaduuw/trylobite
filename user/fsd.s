@@ -89,38 +89,82 @@ fs_clock:
         sw    a1, 3(t1)
         ret
 
-# memcpy(dst, src, n) and memmove(dst, src, n): dst. A tryte at a time,
-# whatever it holds: blocks are copied with these too.
+# memcpy(dst, src, n) and memmove(dst, src, n): dst. Blocks are copied
+# with these too, and the Rust copies and clears its keys and items with
+# them often, so they go a word (3 trytes) at a time where dst and src
+# line up alike (a word at A is A - 1 to A + 1, A a multiple of 3), else
+# a tryte at a time.
 fs$memmove:
-        blt   a1, a0, 3f               # dst above src: copy from the end
+        blt   a1, a0, 8f               # dst above src: copy from the end
 fs$memcpy:
         mv    t0, a0
-        add   t2, a1, a2
-1:      bge   a1, t2, 2f
+        add   t2, a1, a2               # t2: src's end
+        sub   t1, a0, a1
+        li    a3, 3
+        rem   t1, t1, a3
+        bnez  t1, 4f                   # they do not line up: trytes
+1:      bge   a1, t2, 7f               # trytes until src + 1 is a word
+        addi  t1, a1, 1
+        rem   t1, t1, a3
+        beqz  t1, 2f
         lt    t1, 0(a1)
         st    t1, 0(t0)
         addi  a1, a1, 1
         addi  t0, t0, 1
         j     1b
-2:      ret
-3:      add   t0, a0, a2
+2:      addi  a4, t2, -3               # words while 3 trytes are left
+3:      blt   a4, a1, 5f
+        lw    t1, 1(a1)
+        sw    t1, 1(t0)
+        addi  a1, a1, 3
+        addi  t0, t0, 3
+        j     3b
+4:
+5:      bge   a1, t2, 7f               # the last few, a tryte at a time
+        lt    t1, 0(a1)
+        st    t1, 0(t0)
+        addi  a1, a1, 1
+        addi  t0, t0, 1
+        j     5b
+7:      ret
+8:      add   t0, a0, a2               # backwards, a tryte at a time
         add   a1, a1, a2
-4:      beq   t0, a0, 2b
+9:      beq   t0, a0, 7b
         addi  t0, t0, -1
         addi  a1, a1, -1
         lt    t1, 0(a1)
         st    t1, 0(t0)
-        j     4b
+        j     9b
 
-# memset(dst, byte, n): dst.
+# memset(dst, byte, n): dst. A word of three such trytes at a time.
 fs$memset:
         mv    t0, a0
         add   t2, a0, a2
-1:      bge   t0, t2, 2f
+        li    a3, 3
+1:      bge   t0, t2, 4f               # trytes until t0 + 1 is a word
+        addi  t1, t0, 1
+        rem   t1, t1, a3
+        beqz  t1, 2f
         st    a1, 0(t0)
         addi  t0, t0, 1
         j     1b
-2:      ret
+2:      li    t1, 19683                # the word: byte in each tryte
+        mul   a4, a1, t1
+        add   a4, a4, a1
+        mul   a4, a4, t1
+        add   a4, a4, a1
+        addi  a5, t2, -9
+3:      blt   a5, t0, 5f               # nine trytes a turn
+        sw    a4, 1(t0)
+        sw    a4, 4(t0)
+        sw    a4, 7(t0)
+        addi  t0, t0, 9
+        j     3b
+5:      bge   t0, t2, 4f
+        st    a1, 0(t0)
+        addi  t0, t0, 1
+        j     5b
+4:      ret
 
 # memcmp(a, b, n) and bcmp(a, b, n): below, at or above 0 as the first
 # tryte that differs is lower, the same or higher in a, as an i32.

@@ -48,9 +48,18 @@ enum Cursor {
 struct File {
     ino: i64, // NO_INO when the record is free
     pos: i64,
-    flags: i64,
+    flags: i32,
     cursor: Cursor,
     after: Key,
+}
+
+/// What a call on an open file needs of it, without its directory
+/// cursor's key, which is big to copy.
+#[derive(Clone, Copy)]
+struct Basics {
+    ino: i64,
+    pos: i64,
+    flags: i32,
 }
 
 const CLOSED: File = File { ino: NO_INO, pos: 0, flags: 0, cursor: Cursor::Dot, after: Key::empty() };
@@ -90,12 +99,12 @@ impl Path {
     }
 }
 
-/// The paths a call brings, kept out of the stack, which has less than
-/// half a page: a call takes two at most (rename's).
-static mut PATHS: [Path; 2] = [Path::new(), Path::new()];
-
-fn paths(k: usize) -> &'static mut Path {
-    unsafe { &mut (*(&raw mut PATHS))[k] }
+/// The file block a position is in, and where in it: positions are
+/// below 2^31, so u32 division, which the machine does itself, serves
+/// (an i64's takes a long loop).
+fn in_block(pos: i64) -> (i64, i64) {
+    let p = pos as u32;
+    ((p / PAGE as u32) as i64, (p % PAGE as u32) as i64)
 }
 
 #[panic_handler]
@@ -135,8 +144,11 @@ impl Server {
         }
         self.caller = who;
         self.whose = sys::more(4);
-        let (secs, nanos) = sys::clock();
-        self.fs.now = Time { secs, nanos };
+        // The time, for what the call changes: a read changes nothing
+        // but now and then an access time (Server::accessed).
+        if !matches!(op, IO_READ | IO_LSEEK | IO_READDIR | FS_STAT | FS_GETCWD | FS_STATFS) {
+            self.stamp();
+        }
         let mut result = self.call(op);
         match result {
             Ok(_) => {
@@ -151,6 +163,22 @@ impl Server {
             Err(e) => e,
         };
         sys::call(SYS_REPLY, self.caller, answer, 0, 0, 0);
+    }
+
+    /// Take the time of day as the call's.
+    fn stamp(&mut self) {
+        let (secs, nanos) = sys::clock();
+        self.fs.now = Time { secs, nanos };
+    }
+
+    /// The file was read: bring its access time up if it is due
+    /// (relatime), taking the time only then.
+    fn accessed(&mut self, ino: i64) -> Result<()> {
+        if self.fs.atime_due(ino)? {
+            self.stamp();
+            self.fs.accessed(ino)?;
+        }
+        Ok(())
     }
 
     /// A handle no descriptor names any more: its file is closed. A
@@ -210,7 +238,7 @@ impl Server {
     /// E_NOFS if it does not.
     fn enter(&mut self) -> Result<()> {
         if !self.fs.mounted {
-            self.fs.mount().map_err(|e| if e == E_IO { E_IO } else { E_NOFS })?;
+            self.fs.mount().map_err(|e| if e == E_IO || e == E_NOMEM { e } else { E_NOFS })?;
         }
         Ok(())
     }
@@ -274,7 +302,8 @@ impl Server {
     /// The inode the call's path argument `k` names.
     #[inline(never)]
     fn resolve(&mut self, k: usize) -> Result<i64> {
-        let path = paths(0);
+        let mut path = Path::new();
+        let path = &mut path;
         self.path_in(self.a[k], path)?;
         let cwd = self.cwd();
         self.fs.resolve(cwd, path.cps())
@@ -282,6 +311,11 @@ impl Server {
 
     /// E_BUSY if some process has inode `ino` open or as its current
     /// directory: a descriptor or a directory must not name a gone inode.
+    fn basics(&self, h: usize) -> Basics {
+        let f = &self.files[h];
+        Basics { ino: f.ino, pos: f.pos, flags: f.flags }
+    }
+
     fn busy(&self, ino: i64) -> Result<()> {
         if self.files.iter().any(|f| f.ino == ino) || self.cwd.contains(&ino) {
             return Err(E_BUSY);
@@ -300,7 +334,7 @@ impl Server {
 
     /// E_FAULT unless `at` is a word's address.
     fn aligned(at: i64) -> Result<()> {
-        if at % 3 != 0 {
+        if at < 0 || (at as u32) % 3 != 0 {
             return Err(E_FAULT);
         }
         Ok(())
@@ -316,14 +350,18 @@ impl Server {
     #[inline(never)]
     fn open(&mut self) -> Result<i64> {
         let h = self.files.iter().position(|f| f.ino == NO_INO).ok_or(E_MFILE)?;
-        let flags = self.a[1];
-        if !(0..81).contains(&flags) || (flags / 3) % 3 > 1 || (flags / 9) % 3 > 1 {
+        if !(0..81).contains(&self.a[1]) {
+            return Err(E_INVAL);
+        }
+        let flags = self.a[1] as i32; // i32, whose division is the machine's
+        if (flags / 3) % 3 > 1 || (flags / 9) % 3 > 1 {
             return Err(E_INVAL);
         }
         let access = flags % 3;
-        let creat = (flags / O_CREAT) % 3 == 1;
-        let trunc = (flags / O_TRUNC) % 3 == 1;
-        let path = paths(0);
+        let creat = (flags / O_CREAT as i32) % 3 == 1;
+        let trunc = (flags / O_TRUNC as i32) % 3 == 1;
+        let mut path = Path::new();
+        let path = &mut path;
         let mut made = false;
         let ino = if creat {
             let last = self.last(0, path)?;
@@ -344,10 +382,10 @@ impl Server {
             self.resolve(0)?
         };
         let node = self.fs.iget(ino)?;
-        if node.is_dir() && access != O_RDONLY {
+        if node.is_dir() && access != O_RDONLY as i32 {
             return Err(E_ISDIR);
         }
-        if !node.is_dir() && access != O_RDONLY && trunc && !made && node.size > 0 {
+        if !node.is_dir() && access != O_RDONLY as i32 && trunc && !made && node.size > 0 {
             self.fs.truncate(ino)?;
         }
         // On the disk before the caller has a descriptor for it.
@@ -434,7 +472,7 @@ impl Server {
         }
         // What the call changed (its access time) goes first: the windows
         // are about to hold the program, so none may be dirty.
-        self.fs.accessed(ino)?;
+        self.accessed(ino)?;
         self.fs.commit()?;
         for fb in 0..n as usize {
             self.fs.store.read_into(blocks[fb], fb)?;
@@ -455,7 +493,8 @@ impl Server {
     /// E_BUSY.
     #[inline(never)]
     fn unlink(&mut self) -> Result<i64> {
-        let path = paths(0);
+        let mut path = Path::new();
+        let path = &mut path;
         let last = self.last(0, path)?;
         let name = &path.c[last.start..last.end];
         if name.is_empty() {
@@ -476,7 +515,8 @@ impl Server {
     /// mkdir(path): a new, empty directory.
     #[inline(never)]
     fn mkdir(&mut self) -> Result<i64> {
-        let path = paths(0);
+        let mut path = Path::new();
+        let path = &mut path;
         let last = self.last(0, path)?;
         let name = &path.c[last.start..last.end];
         if name.is_empty() {
@@ -491,7 +531,8 @@ impl Server {
     /// the root.
     #[inline(never)]
     fn rmdir(&mut self) -> Result<i64> {
-        let path = paths(0);
+        let mut path = Path::new();
+        let path = &mut path;
         let last = self.last(0, path)?;
         let name = &path.c[last.start..last.end];
         if name.is_empty() {
@@ -529,7 +570,8 @@ impl Server {
     /// each directory's parent's entry for it giving its name.
     #[inline(never)]
     fn getcwd(&mut self) -> Result<i64> {
-        let path = paths(0);
+        let mut path = Path::new();
+        let path = &mut path;
         let mut start = PATH - 1; // path.c[start..PATH - 1] so far
         let mut dir = self.cwd();
         let mut name = [0; NAME_LEN];
@@ -592,12 +634,14 @@ impl Server {
     /// can neither move (E_BUSY) nor be replaced (E_EXIST).
     #[inline(never)]
     fn rename(&mut self) -> Result<i64> {
-        let from = paths(0);
+        let mut from = Path::new();
+        let from = &mut from;
         let a = self.last(0, from)?;
         if a.start == a.end {
             return Err(E_BUSY);
         }
-        let to = paths(1);
+        let mut to = Path::new();
+        let to = &mut to;
         let b = self.last(1, to)?;
         if b.start == b.end {
             return Err(E_EXIST);
@@ -688,8 +732,8 @@ impl Server {
     /// no further than its block's end: how many, 0 at the end.
     #[inline(never)]
     fn read(&mut self, h: usize) -> Result<i64> {
-        let f = self.files[h];
-        if f.flags % 3 == O_WRONLY {
+        let f = self.basics(h);
+        if f.flags % 3 == O_WRONLY as i32 {
             return Err(E_BADF);
         }
         let n = self.a[2];
@@ -700,19 +744,19 @@ impl Server {
         if node.is_dir() {
             return Err(E_ISDIR);
         }
-        let off = f.pos % PAGE;
+        let (fb, off) = in_block(f.pos);
         let count = n.min(node.size - f.pos).min(PAGE - off);
         if count <= 0 {
             return Ok(0);
         }
-        let b = self.fs.bmap(f.ino, f.pos / PAGE)?;
+        let b = self.fs.bmap(f.ino, fb)?;
         if b == NO_BLOCK {
             self.zeros_out(self.a[1], count)?;
         } else {
             let s = self.fs.store.load(b)?;
             self.copy_out(win::first_tryte(s) + off, self.a[1], count)?;
         }
-        self.fs.accessed(f.ino)?;
+        self.accessed(f.ino)?;
         self.files[h].pos += count;
         Ok(count)
     }
@@ -734,8 +778,8 @@ impl Server {
     /// the end of the block the position is in: how many.
     #[inline(never)]
     fn write(&mut self, h: usize) -> Result<i64> {
-        let f = self.files[h];
-        if f.flags % 3 == O_RDONLY {
+        let f = self.basics(h);
+        if f.flags % 3 == O_RDONLY as i32 {
             return Err(E_BADF);
         }
         let n = self.a[2];
@@ -746,10 +790,10 @@ impl Server {
             return Ok(0);
         }
         let mut node = self.fs.iget(f.ino)?;
-        let pos = if (f.flags / O_APPEND) % 3 == 1 { node.size } else { f.pos };
-        let off = pos % PAGE;
+        let pos = if (f.flags / O_APPEND as i32) % 3 == 1 { node.size } else { f.pos };
+        let (fb, off) = in_block(pos);
         let count = n.min(PAGE - off);
-        let (b, _) = self.fs.bmap_alloc(f.ino, pos / PAGE)?;
+        let (b, _) = self.fs.bmap_alloc(f.ino, fb)?;
         node = self.fs.iget(f.ino)?;
         node.size = node.size.max(pos + count);
         node.mtime = self.fs.now;
@@ -771,7 +815,7 @@ impl Server {
     /// start; a directory may only go back to its start.
     #[inline(never)]
     fn lseek(&mut self, h: usize) -> Result<i64> {
-        let f = self.files[h];
+        let f = self.basics(h);
         let from = match self.a[2] {
             SEEK_SET => 0,
             SEEK_CUR => f.pos,

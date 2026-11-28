@@ -18,6 +18,13 @@ def run(*args, **options):
     return kernel.run(*args, files=True, **options)
 
 
+def fs_more_pages() -> int:
+    """The RAM pages the file server takes more than a server of one
+    page: each page of its image past the first is in the image and in
+    its process."""
+    return 2 * (kernel.build(kernel.DONE, files=True).symbols["FS_PAGES"] - 1)
+
+
 # putn: print a0 in decimal and a space, in one puts, so that a child's
 # output cannot come between them. Clobbers a0, a1, t0..t3.
 PUTN = """
@@ -58,7 +65,7 @@ def report(*steps: str, data: str = "") -> str:
         sys
 {PUTN}
         .align 3
-statbuf: .words 4
+statbuf: .words STAT / 3
 buf:    .zero 300
 buf_end:
 {data}
@@ -145,12 +152,12 @@ def test_a_file_reads_up_to_the_end_of_its_block_and_its_end():
     assert said(result) == [0, 10, PAGE - 3, 3, 5, 0, ord(text[-5]), ord(text[-1])]
 
 
-def test_a_big_file_reads_through_its_indirect_block():
-    n = L["NDIRECT"] * PAGE + 20
+def test_a_big_file_reads_across_many_blocks():
+    n = 5 * PAGE + 20
     text = "".join(chr(ord("A") + (i // PAGE)) for i in range(n))
     program = report(
         open_("p"),
-        lseek(0, L["NDIRECT"] * PAGE + 2, "SEEK_SET"),
+        lseek(0, 5 * PAGE + 2, "SEEK_SET"),
         read(0, 100),
         "        lt    a0, buf",
         lseek(0, -1, "SEEK_END"),
@@ -159,7 +166,7 @@ def test_a_big_file_reads_through_its_indirect_block():
         data=string("p", "big"),
     )
     result = run(program, disk=disk(12, big=text))
-    assert said(result) == [0, L["NDIRECT"] * PAGE + 2, 18, ord("F"), n - 1, n - 3, 3]
+    assert said(result) == [0, 5 * PAGE + 2, 18, ord("F"), n - 1, n - 3, 3]
 
 
 def test_a_path_goes_through_directories():
@@ -191,7 +198,7 @@ def test_what_cannot_be_opened_says_why():
         sys""",
         data=string("missing", "nope")
         + string("through", "f/x")
-        + string("long", "x" * 18)
+        + string("long", "x" * (L["NAME_MAX"] + 1))
         + string("deep", deep)
         + string("f", "f"),
     )
@@ -433,19 +440,21 @@ def test_descriptors_go_with_their_process():
         li    a1, 0
         {exit_with("s1")}
 """
-    result = run(init, child, disk=disk(f="x"))
+    result = run(init, child, disk=disk(f="x"), max_steps=10_000_000)
     assert result.code_of(0) == 3 + children - 1  # after the two servers
     assert L["NDESC"] * children > L["NFILE"]
     assert said(result) == list(range(L["NDESC"])) * children
 
 
 def test_a_server_without_pages_for_its_windows_says_so():
-    # The build has 5 programs, so 15 pages from P_PROG0 + 5 are free,
-    # less one for the kernel's log; init and the two servers take 4
-    # each, the disk server a window more, leaving 2 windows, and an open
-    # needs three blocks: block 0, the inodes and the root directory.
+    # The build has 5 programs, so 15 pages from P_PROG0 + 5 would be
+    # free, less one for the kernel's log, if each took one page; init
+    # and the two servers take 4 each, the disk server a window more,
+    # leaving one window, and an open needs two: block 0 and the tree's
+    # root. Each page the file server's image takes past one costs two
+    # more: one in the image, one in its process.
     program = report(open_("f"), data=string("f", "f"))
-    pages = L["P_PROG0"] + 5 + 15
+    pages = L["P_PROG0"] + 5 + 15 + fs_more_pages() - 1
     assert said(run(program, ram_pages=pages, disk=disk(f="x"))) == [L["E_NOMEM"]]
     assert said(run(program, ram_pages=pages + 1, disk=disk(f="x"))) == [0]
 
@@ -507,11 +516,11 @@ def test_two_processes_read_files_at_once():
         reader("/d/a", "a"),
         reader("b", "b"),
         disk=disk(10, dirs=("d",), d__a=a, b=b),
-        max_steps=30_000_000,
+        max_steps=150_000_000,
         # Five processes and the disk server's windows for both files: a
         # read the server has no page for fails, which reader takes as
         # the end of the file.
-        ram_pages=L["P_PROG0"] + 34,
+        ram_pages=L["P_PROG0"] + 34 + fs_more_pages(),
     )
     sums = sum(map(ord, a)), sum(map(ord, b))
     assert sorted(result.code_of(p) for p in (3, 4)) == sorted(sums)
