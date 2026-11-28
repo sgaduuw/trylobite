@@ -712,6 +712,34 @@ The shell finds the console, pipe and file servers by name, does
 without any that is missing, opens the console as descriptor 0 and
 copies it to 1 and 2, then reads a line at a time.
 
+**Line editing.** The shell echoes what is typed and edits the line
+(up to 60 characters) as a Unix shell's line editor does, telling the
+terminal with backspaces, which move left, and characters printed over
+what is there, so any terminal follows:
+
+| Key | Does |
+|-----|------|
+| left, right (Ctrl-B, Ctrl-F) | move the cursor; typing inserts at it |
+| Home, End (Ctrl-A, Ctrl-E) | to the start or end of the line |
+| Backspace; Delete | erase before the cursor; under it (Ctrl-D is not Delete: a live console's Ctrl-D ends its input) |
+| Ctrl-U, Ctrl-K | erase to the start of the line; to its end |
+| Ctrl-W | erase the word before the cursor |
+| up, down (Ctrl-P, Ctrl-N) | the last 16 lines typed, a repeat kept once; down past the newest gives back the line being typed |
+| Tab | complete the word before the cursor |
+| Ctrl-L | clear the screen and print the line again |
+| Ctrl-C | drop the line |
+
+The keys arrive as ANSI sequences (`ESC [ A`, `ESC O H`, `ESC [ 3 ~`,
+...); any other sequence, and other control characters, do nothing.
+Tab completes the first word of a command (at the start of the line or
+after `|`) from the built-ins, `pingpong` and the files of `/bin`, and
+any other word, or one holding a slash, as a path, from its
+directory. One name is typed out, with a space after it, or a slash
+after a directory. Several are typed as far as they agree; when that
+adds nothing the shell rings the bell, and a second Tab lists them in
+columns, then prints the line again. Names starting with a dot are
+left out unless the word starts with one.
+
 **Built-ins:** `exit`, `ls [DIR]`, `cat [PATH]` (standard input without
 one), `write PATH TEXT`, `rm PATH`, `mkdir PATH`, `rmdir PATH`,
 `cd [DIR]` and `pwd`. The system tools are programs (System tools,
