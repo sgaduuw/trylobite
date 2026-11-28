@@ -138,12 +138,34 @@ fn processes() -> io::Result<()> {
     }
     // This program's own standard output is as it was.
     println!("still here, process {}", trystd::process::id() > 0);
+    machine()
+}
+
+fn machine() -> io::Result<()> {
+    use trystd::os;
+    let me = os::process(trystd::process::id()).map(|p| (p.name().to_string(), p.state));
+    println!("os me {me:?}");
+    let init = os::process(0).map(|p| (p.name().to_string(), p.parent));
+    println!("os init {init:?}");
+    let info = os::info();
+    println!(
+        "os info {} {} {}",
+        info.free_pages() <= info.pages(),
+        info.processes() >= 9,
+        info.release()
+    );
+    println!("os log {}", os::log()?.starts_with(b"trylobite: "));
+    println!("os hart {}", os::hart(0).is_some_and(|h| h.started <= h.time));
     Ok(())
 }
 
 fn sockets() -> io::Result<()> {
     let ours = trystd::net::local_address()?;
     println!("address {ours}");
+    let c = trystd::net::config()?;
+    let gateway = c.gateway.map(|g| g.to_string());
+    println!("config {}/{} {gateway:?}", c.address, c.prefix);
+    println!("ping {}", trystd::net::ping(ours, 1, 100_000).is_ok());
     let mut udp = UdpSocket::bind("0.0.0.0:0")?;
     udp.set_read_timeout_ticks(Some(2_000_000))?;
     udp.send_to(b"ping over udp", (ours, 7))?;

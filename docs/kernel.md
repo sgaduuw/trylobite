@@ -198,7 +198,8 @@ until the table of `NPROC` (27) wraps around.
 `bin/` has tools that look at the system as Unix's do: `ps`, `top`,
 `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df` and `date`. The kernel
 only reports; the tools read it with a few calls and format it
-(`kernel/rust/trykern/src/info.rs` and `procinfo.rs`), and `df` asks the file server
+(`kernel/rust/trykern/src/info.rs` and `procinfo.rs`; trystd's `os` module reads
+the calls' words for the Rust tools), and `df` asks the file server
 (`FS_STATFS`, docs/filesystem.md).
 
 **The log.** Everything the kernel prints (its own lines, and `putc` and
@@ -587,11 +588,11 @@ Names come from a name server, whose address the IP server keeps for
 programs but never asks itself: `IP_NAMESERVER` with an address sets
 it (0 for none) and with `NS_KEEP` only reads it; either way the answer
 is the one it was, 10.0.0.3 at boot, where detrytus's `--net user`
-plays one. `lib/dns.tc` is the resolver, a stub as on Unix: `resolve`
+plays one. trystd's `net::lookup_host` is the resolver, a stub as on Unix: it
 binds a free UDP port, sends one query for the name's A records with
 recursion desired, and waits 200,000 ticks for the answer, three times
 before `E_TIMEDOUT`; it gives up to as many addresses as asked for, or
-`E_NOENT` for a name that does not exist or has none. `host_address`
+`E_NOENT` (NotFound) for a name that does not exist or has none. `net::host_address`
 takes a.b.c.d as it stands and resolves anything else, which is how
 the tools take names.
 
@@ -794,7 +795,7 @@ line's first program first), and at the prompt drops the line typed so
 far.
 
 ```bash
-tools/fs.py new disk.img 100 notes.txt bin/*.s bin/*.tc
+tools/fs.py new disk.img 100 notes.txt bin/*.rs
 tools/fs.py mkdir disk.img docs
 tools/fs.py put disk.img README.md docs
 printf 'ls\nls bin\ncat docs/README.md\nwrite docs/motd hello\nhello > docs/hi\n' > session.txt

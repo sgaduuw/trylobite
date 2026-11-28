@@ -2304,3 +2304,47 @@ paths (docs/kernel.md, Line editing).
   quotes.
 - **Limits:** the line is still 60 characters; the list assumes 80
   columns; no reverse search (Ctrl-R) and no history kept across boots.
+
+### 2026-11-28 · Every tool of bin/ in Rust
+
+Eelco asked for the tools that were not Rust yet to be ported. The
+assembly and Trice programs of `bin/` (`echo`, `upper`, `wc`, `head`,
+`grep`, `cp`, `mv`, `touch`, `ps`, `free`, `uptime`, `uname`, `dmesg`,
+`sleep`, `df`, `ping`, `ifconfig`, `host`, `nc`, and the test programs
+`hello`, `fail`, `spin`) are now Rust over trystd, with the same
+arguments, output and exit codes. `kill` stays assembly: the signals
+work rewrites it, with a new `SYS_KILL`.
+
+- **trystd grew what the tools needed, typed**, rather than tools
+  calling `sys::call` themselves: `os` (the kernel's reports: `info`,
+  `process`/`processes` with a `State` enum, `hart`, `read_log`/`log`),
+  and in `net` the IP server's own calls (`config`, `set_config`,
+  `set_nameserver`, `ping`). top keeps its own hand-tuned calls (its
+  step budget).
+- **Four pages, as before.** A process's image shares its page with its
+  stack, so an image past about 9,800 trytes takes a fifth page, and a
+  heap a sixth. Written the obvious way (`println!`, `Vec` of
+  arguments, `&mut dyn Read`), the tools were 12,000 to 17,000 trytes
+  and 5 or 6 pages against assembly's 4, and the 81-page test machine
+  ran out of memory in three-program pipelines (`xargs < words | wc`,
+  rstd's children). core::fmt alone is 6,000 trytes. trystd gained
+  `io::Line`, a line put together on the stack with numbers written by
+  hand and errors by `Error::description`, and the small tools use it,
+  return exit codes, take readers generically and walk their arguments:
+  `wc`, `head`, `grep` are about 8,000 trytes, `ps` 5,400, `echo` 3,000,
+  all in four pages, and faster for skipping core::fmt's ~1,000 steps a
+  number. Rejected: raising the test machine's RAM, which would have
+  hidden the cost on every machine. `ping`, `host` and `nc` resolve
+  names into a `Vec`, so they keep a heap and are 13,000 to 16,000.
+- **Errors say the error.** Where the old tools said "cannot open" or
+  "cannot make", the new ones say the `io::Error`, as Unix does: `wc:
+  nope: no such file or directory`. Messages that say more than the
+  error (`mv: d: cannot move there`, `ping`'s and `nc`'s network
+  failures) are kept. A DNS server that ARP cannot find is "the name
+  server did not answer", as lib/dns.tc said, not "timed out".
+- **ps names the thread states** (futex, join, dying) the assembly
+  showed as `?`.
+- **`recho` and `rhello` went**: `echo` and `hello` are Rust now.
+  `lib/dns.tc` went too, as trystd's `net::lookup_host` is the
+  resolver; `lib/io.tc`, `lib/ip.tc` and `lib/start.s` stay for Trice
+  test programs (`tests/dnsd.tc`).
