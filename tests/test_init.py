@@ -292,8 +292,11 @@ def test_etc_init_names_no_such_server():
 
 def test_a_program_in_etc_init_starts_with_its_arguments_before_the_shell():
     # Once it has exited it is done, not started again. (Its words are
-    # split at spaces, however many.)
-    result = boot("/bin/touch   /from-init  /made-by-init\n", input="sleep 9\nls\n")
+    # split at spaces, however many.) The shell sleeps until touch is
+    # surely done, which on one hart can take a few slices.
+    result = boot(
+        "/bin/touch   /from-init  /made-by-init\n", input="sleep 2000000\nls\n"
+    )
     assert result.exit_code == 0, result.console
     console = result.console
     assert said(console) == [
