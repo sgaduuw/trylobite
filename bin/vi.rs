@@ -20,8 +20,10 @@
 //! start) and arrows; Escape goes back to normal mode.
 //!
 //! The terminal is driven with ANSI sequences: the alternate screen
-//! while the editor runs, and each row written in place. The console has
-//! no size to ask, so the screen is ROWS by COLS. The console already
+//! while the editor runs, and each row written in place. The screen is
+//! the console's size (trystd::io::terminal_size), asked again before
+//! each screen so that a resized window is filled, or 24 by 80 when the
+//! console does not know it. The console already
 //! gives each key as it is typed, without echo; the editor also takes
 //! the console's foreground away (CN_FOREGROUND, NO_FOREGROUND), so a
 //! Ctrl-C reaches it as a key, which cancels, instead of killing it with
@@ -38,10 +40,11 @@ use trystd::sys;
 
 trystd::main!(run);
 
+/// The screen when the console does not know its size.
 const ROWS: usize = 24;
 const COLS: usize = 80;
-/// Text rows: the last row is the status line.
-const TEXT: usize = ROWS - 1;
+/// The widest screen drawn; a wider terminal shows this much.
+const MAX_COLS: usize = 729;
 const TAB: usize = 8;
 
 const ESC: u8 = 27;
@@ -196,6 +199,9 @@ struct Editor {
     /// What the last Escape changed: the mode and column before it.
     escaped: Option<(Mode, usize)>,
     screen: Vec<u8>,
+    /// The screen's size, from the console before each draw.
+    rows: usize,
+    cols: usize,
 }
 
 fn run() -> i32 {
@@ -312,6 +318,8 @@ impl Editor {
             quit: false,
             escaped: None,
             screen: Vec::with_capacity(ROWS * (COLS + 12)),
+            rows: ROWS,
+            cols: COLS,
         }
     }
 
@@ -670,7 +678,8 @@ impl Editor {
         }
         let given = core::mem::replace(&mut self.count, 0);
         let n = given.max(1);
-        let page = TEXT - 2;
+        let text = self.text();
+        let page = text.saturating_sub(2).max(1);
         match key {
             Key::Char(b'h') | Key::Left | Key::Backspace => self.set_x(self.cx.saturating_sub(n)),
             Key::Char(b'l') | Key::Char(b' ') | Key::Right => self.set_x(self.cx + n),
@@ -705,10 +714,10 @@ impl Editor {
             }
             Key::Char(CTRL_B) | Key::PageUp => {
                 self.top = self.top.saturating_sub(page * n);
-                self.to_line(self.cy.min(self.top + TEXT - 1));
+                self.to_line(self.cy.min(self.top + text - 1));
             }
-            Key::Char(CTRL_D) => self.to_line(self.cy + TEXT / 2),
-            Key::Char(CTRL_U) => self.to_line(self.cy.saturating_sub(TEXT / 2)),
+            Key::Char(CTRL_D) => self.to_line(self.cy + text / 2),
+            Key::Char(CTRL_U) => self.to_line(self.cy.saturating_sub(text / 2)),
             Key::Char(b'x') | Key::Delete => {
                 if !self.line().is_empty() {
                     self.save();
@@ -966,21 +975,36 @@ impl Editor {
         self.out(b"H");
     }
 
-    /// Scroll so the cursor shows, then write every row.
+    /// Text rows: the last row is the status line.
+    fn text(&self) -> usize {
+        self.rows - 1
+    }
+
+    /// Scroll so the cursor shows, then write every row, at the size the
+    /// console has now.
     fn draw(&mut self) {
+        let (cols, rows) = trystd::io::terminal_size().unwrap_or((COLS, ROWS));
+        let (cols, rows) = (cols.clamp(2, MAX_COLS), rows.max(2));
+        let resized = (cols, rows) != (self.cols, self.rows);
+        (self.cols, self.rows) = (cols, rows);
+        let text = self.text();
         if self.cy < self.top {
             self.top = self.cy;
-        } else if self.cy >= self.top + TEXT {
-            self.top = self.cy + 1 - TEXT;
+        } else if self.cy >= self.top + text {
+            self.top = self.cy + 1 - text;
         }
         let col = self.column(self.cy, self.cx);
         if col < self.left {
             self.left = col;
-        } else if col >= self.left + COLS {
-            self.left = col + 1 - COLS;
+        } else if col >= self.left + cols {
+            self.left = col + 1 - cols;
         }
-        self.out(b"\x1b[?25l\x1b[H");
-        for r in 0..TEXT {
+        self.out(b"\x1b[?25l");
+        if resized {
+            self.out(b"\x1b[2J");
+        }
+        self.out(b"\x1b[H");
+        for r in 0..text {
             if r > 0 {
                 self.out(b"\r\n");
             }
@@ -998,7 +1022,7 @@ impl Editor {
             status.push(b':');
             status.extend_from_slice(&self.cmd);
         }
-        let shown = status.len().min(COLS - 1);
+        let shown = status.len().min(cols - 1);
         self.out(&status[..shown]);
         self.out(b"\x1b[K");
         if self.mode == Mode::Command {
@@ -1020,24 +1044,25 @@ impl Editor {
         let left = self.left;
         let line = core::mem::take(&mut self.lines[y]);
         let mut col = 0;
-        let mut shown = [0u8; COLS];
+        let cols = self.cols;
+        let mut shown = [0u8; MAX_COLS];
         let mut n = 0;
         for &b in line.iter() {
             let width = if b == b'\t' { TAB - col % TAB } else { 1 };
             for _ in 0..width {
-                if col >= left && n < COLS {
+                if col >= left && n < cols {
                     shown[n] = if b == b'\t' || b < b' ' || b >= DEL { b' ' } else { b };
                     n += 1;
                 }
                 col += 1;
             }
-            if n == COLS {
+            if n == cols {
                 break;
             }
         }
         self.lines[y] = line;
         self.out(&shown[..n]);
-        if n < COLS {
+        if n < cols {
             self.out(b"\x1b[K");
         }
     }

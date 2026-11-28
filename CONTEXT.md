@@ -2304,3 +2304,22 @@ paths (docs/kernel.md, Line editing).
   quotes.
 - **Limits:** the line is still 60 characters; the list assumes 80
   columns; no reverse search (Ctrl-R) and no history kept across boots.
+
+### 2026-11-28 · The console's size, as a descriptor call
+
+Eelco asked for the console to report its size. detrytus gained two
+console registers, rows and columns (0 when unknown), kept the host
+terminal's in a live session and set by `--console-size` in tests.
+
+- **`IO_WINSIZE`, a descriptor call,** not a `CN_` call: a program has
+  the console only as its descriptors, and Unix asks the same of a
+  descriptor (`ioctl(fd, TIOCGWINSZ)`). Every other server answers an
+  operation it does not know with `E_INVAL`, which makes it an
+  `isatty` too: `stty size < file` says the size is not known.
+- **Asked before each screen, no resize notice.** vi asks once a draw,
+  one call, and clears the screen when the size changed; nothing needs
+  a SIGWINCH yet.
+- **trystd's `io::terminal_size()`** gives `(columns, rows)`, as the
+  terminal_size crate does, so Rust code reads as it would elsewhere.
+- **`bin/stty` knows only `size`.** The console server cooks nothing,
+  so there are no modes to set.

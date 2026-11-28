@@ -479,6 +479,19 @@ standard output. Any process may name `NO_FOREGROUND`; `vi` does, so
 that a Ctrl-C reaches it as a key instead of ending it with a file
 unsaved, and the shell names the next program it runs as usual.
 
+**The console's size.** `iocall(fd, IO_WINSIZE)` on a console
+descriptor answers 0, with the terminal's rows and columns in the
+reply's next two words (a1 and a2 after the call), as the machine's
+console registers say them: detrytus keeps them the size of the
+terminal a live console runs in, following a resized window, and
+`detrytus run --console-size ROWSxCOLUMNS` sets them; otherwise both are
+0, not known. Asked of a file, a pipe or a connection, the call is
+`E_INVAL`, so it also says whether a descriptor is the console, as
+Unix's `isatty`. trystd's `io::terminal_size()` asks it of standard
+output; `vi` asks before each screen and fills the console (24 by 80
+when the size is not known), the shell's Tab list fills its width,
+and `stty size` says it as `ROWS COLUMNS`.
+
 ## The disk
 
 A block is one page, and a process's own page holds its code, so blocks
