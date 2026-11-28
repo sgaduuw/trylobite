@@ -282,9 +282,9 @@ $ ifconfig 10.0.0.3/24
 $ ifconfig
 inet 10.0.0.3/24 gateway 10.0.0.1
 $ ping 10.0.0.2
-reply from 10.0.0.2: seq 1, 36213 ticks
-reply from 10.0.0.2: seq 2, 35248 ticks
-reply from 10.0.0.2: seq 3, 35046 ticks
+reply from 10.0.0.2: seq 1, 2.794 ms
+reply from 10.0.0.2: seq 2, 1.798 ms
+reply from 10.0.0.2: seq 3, 1.387 ms
 $ ping 10.0.0.4 1
 no reply from 10.0.0.4: seq 1
 sh: exit 1
@@ -322,7 +322,7 @@ detrytus run shell.s --disk disk.img --net user
 
 ```text
 $ ping 10.0.0.1 1
-reply from 10.0.0.1: seq 1, 13576 ticks
+reply from 10.0.0.1: seq 1, 1.412 ms
 $ echo hello host | nc 10.0.0.1 9009
 HELLO HOST
 $ cat get | nc 10.0.0.1 8080 | head -n 1

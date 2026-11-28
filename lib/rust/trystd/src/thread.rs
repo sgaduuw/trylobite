@@ -245,10 +245,37 @@ unsafe extern "C" {
     fn raw_sleep_ticks(ticks: u32);
 }
 
+/// Wait at least `d` of real time, by the monotonic clock (`Instant`),
+/// this thread alone, as std's `sleep`. The kernel sleeps in ticks of
+/// the time CSR, about a million a second while the machine idles with
+/// a live console and as fast as it runs otherwise, so this sleeps a
+/// tick a microsecond, and again for what is left if that was early.
+/// Without a live console idle ticks take no time at all, so the
+/// thread spins until the time has passed; with detrytus --clock the
+/// monotonic clock is the ticks, and one sleep does.
+pub fn sleep(d: crate::time::Duration) {
+    let until = crate::time::Instant::now() + d;
+    loop {
+        let now = crate::time::Instant::now();
+        if now >= until {
+            return;
+        }
+        // A tick a microsecond, at most 2^31 - 1 of them (some 35
+        // minutes) at a time, in u32s.
+        let left = until - now;
+        let ticks = if left.as_secs() >= 2147 {
+            i32::MAX as u32
+        } else {
+            left.as_secs() as u32 * 1_000_000 + left.subsec_nanos() / 1000
+        };
+        sleep_ticks(ticks.max(1));
+    }
+}
+
 /// Wait at least `ticks` ticks of the time CSR (SYS_SLEEP), this thread
-/// alone. std's `sleep` takes a Duration; the machine counts time in
-/// ticks, about a million a second while it idles with a live console
-/// (detrytus platform.md, Time), and as fast as it runs otherwise.
+/// alone: steps of the machine, about a million a second while it idles
+/// with a live console (detrytus platform.md, Time), and as fast as it
+/// runs otherwise. `sleep` waits real time.
 pub fn sleep_ticks(ticks: u32) {
     // At most 2^31 - 1, which start.s takes as it is.
     unsafe { raw_sleep_ticks(ticks.min(i32::MAX as u32)) }

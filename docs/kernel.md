@@ -176,6 +176,7 @@ is as it was, since the trap entry saves them all. Trice relies on this
 | 50 | `sigaction(sig, action, entry)` | what signal `sig` does to the caller's process from now: `SIG_DFL` (0) its default, `SIG_IGN` (1) nothing, `SIG_CATCH` (2) run `entry`, which becomes the process's signal entry (Signals): the action it had; −10 (`E_INVAL`) no such signal or action, or any but `SIG_DFL` for `SIGKILL` |
 | 51 | `sigmask(how, set)` | changes the calling thread's set of blocked signals, a bit 2^`sig` for each: `SIG_BLOCK` (0) adds `set`, `SIG_UNBLOCK` (1) takes it away, `SIG_SETMASK` (2) makes it `set`: the set it had; −10 another `how`, or `set` outside 0 to 2^`NSIG` − 1. `SIGKILL` is never blocked, and a signal it lets in is taken before the call returns |
 | 52 | `sigreturn(frame)` | goes back from a signal's handler to where the thread was, with the registers, coprocessor bank and mask the frame at `frame` keeps; does not return, but −12 if the frame is not all in the caller's memory |
+| 53 | `monotonic()` | the machine's monotonic clock, for intervals: `a0` whole seconds since the machine started, `a1` the nanoseconds past that second, 0 to 999,999,999; real time, steady, and never stepped; it cannot fail (The time of day) |
 | 54 | `environ(address)` | makes the block at `address` the caller's process's environment, which every process it starts from then on gets a copy of (The environment): 0; −12 (`E_FAULT`) if the block is not all in its memory, −29 (`E_2BIG`) if no empty string ends it within `ENV_MAX` trytes |
 
 Numbers 9, 11, 12 and 14 are free: console input, blocks and
@@ -218,7 +219,8 @@ interrupts taken), `SI_PAGES` and `SI_FREE` (memory, in pages),
 `SI_NPROC` and `SI_PROCS` (the process table and the slots in use,
 zombies included), `SI_HARTS` (harts present) and the kernel's version
 as a string from `SI_RELEASE`: `uname -a` says `trylobite 0.1.0
-detrytus`, `uptime` `up 1171367 ticks, 9 processes, 1 hart`, and `free`
+detrytus`, `uptime` `up 00:00:01, 1171367 ticks, 9 processes, 1 hart`
+(the time by the monotonic clock, then the ticks), and `free`
 memory in pages and in trytes. It also gives `SI_BOOTED`, the real-time
 clock at boot in Unix seconds (so uptime in seconds is `clock()` less
 it), and the load averages `SI_LOAD1`, `SI_LOAD5` and `SI_LOAD15`:
@@ -228,8 +230,10 @@ in `LOAD_ONE` (19,683) parts of one process. `pick` samples them every
 microsecond a tick. A busy hart picks every quantum, so periods that
 passed with no pick were ones every hart idled through: they count as
 no load, and only the last as what is runnable at the late pick. The `time` CSR counts one tick per step
-(detrytus platform.md, Time), so times since boot (`uptime`, `ps`,
-`top`, `sleep`) are in ticks.
+(detrytus platform.md, Time), so the times `ps` and `top` give a
+process are in ticks, as is `sleep TICKS`; `sleep 2s`, `uptime`, top's
+uptime and `ping` measure real time with the monotonic clock (The
+time of day).
 
 **Harts.** `hartinfo(hart, buffer)` fills, for one of the middle nine
 harts, `HI_TIME` (the clock as it read the rest), `HI_STARTED` (when
@@ -251,9 +255,23 @@ maps anyway, with no state to keep and nothing to wait for. trystd's
 a date; `bin/date` prints it (`date`, `date +%F_%T`, `date -d
 @SECONDS`). The clock is the host's, unless detrytus runs with
 `--clock SECONDS` (as the tests do), which starts it at a fixed time
-and moves it a microsecond a tick. Ticks stay the clock for intervals:
-how fast ticks pass in real time depends on how the machine runs, and
-the time of day is not steady either.
+and moves it a microsecond a tick.
+
+`monotonic` is the clock for intervals: the machine's monotonic clock
+(detrytus platform.md, The monotonic clock), seconds and nanoseconds
+since the machine started, read as `clock` is. Nothing sets it, so
+`stepclock` does not move it, and the host's time being set does not
+either; with `--clock` it moves a microsecond a tick too. Ticks are
+steady but not seconds: how fast they pass in real time depends on how
+the machine runs. trystd's `time::Instant` calls it (`now`, `elapsed`,
+`duration_since`, adding and taking away a `Duration`), as do
+`time::uptime()` and `thread::sleep(Duration)`, which sleeps a tick a
+microsecond and again for what is left until the monotonic clock says
+the time has passed (without a live console idle ticks take no time,
+so it spins). `ping` times replies with it, `uptime` and `top` count
+the uptime with it, `sleep 1.5s` (or `ms`, `us`) waits with it, and
+`ntpd` measures round trips and remembers when it last heard from each
+source by it, so a step does not upset either.
 
 `stepclock` moves it. The machine's clock cannot be set, so the kernel
 keeps an offset from it, which `clock` adds, and a step changes the
@@ -336,7 +354,8 @@ Tasks:  10 total,   2 running,   0 ready,   8 waiting,   0 zombie
 Mem   :  59049 pages total,  58971 free,     78 used  (19,683 trytes a page)
 ```
 
-The time of day and the uptime are the real-time clock's (`SI_BOOTED`),
+The time of day is the real-time clock's, the uptime the monotonic
+clock's,
 the load averages the kernel's, and a `%Cpu` line gives each hart's
 shares of the ticks since the last screen in user mode, in the kernel
 and idle (`hartinfo`). It is in Rust, and writes each screen by hand
