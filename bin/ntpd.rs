@@ -26,7 +26,7 @@ use trystd::net::{self, Ipv4Addr, UdpSocket};
 use trystd::prelude::*;
 use trystd::process::Message;
 use trystd::sys::{self, Received};
-use trystd::time::{self as clock, SystemTime};
+use trystd::time::{self as clock, Duration, Instant, SystemTime};
 
 trystd::main!(run);
 
@@ -186,7 +186,7 @@ struct Sample {
 struct Source {
     ip: Ipv4Addr,
     reach: u32,     // the last 8 rounds, the newest lowest: 1 for an answer
-    when: i64,      // the time of day of its last answer, Unix seconds; 0 for none
+    when: Option<Instant>, // its last answer, by the monotonic clock
     last: Result<(), Message>, // how its last round went
     good: Option<Sample>, // its last answer
     selected: bool, // its offset set the clock last
@@ -203,7 +203,7 @@ struct Ntp<'a> {
     server: &'a str,
     sources: Vec<Source>,
     synced: bool,
-    stepped: Option<(i64, i64)>, // when the clock was last stepped (Unix seconds), and by how much (µs)
+    stepped: Option<(Instant, i64)>, // when the clock was last stepped, and by how much (µs)
     poll: i64,
     failure: String, // why the last round failed
 }
@@ -236,7 +236,7 @@ impl<'a> Ntp<'a> {
             .map(|ip| Source {
                 ip,
                 reach: 0,
-                when: 0,
+                when: None,
                 last: Err(Message::new("not asked yet")),
                 good: None,
                 selected: false,
@@ -263,7 +263,7 @@ impl<'a> Ntp<'a> {
             match got {
                 Ok(sample) => {
                     s.reach |= 1;
-                    s.when = now().div_euclid(MICROS);
+                    s.when = Some(Instant::now());
                     s.good = Some(sample);
                     s.last = Ok(());
                 }
@@ -291,13 +291,8 @@ impl<'a> Ntp<'a> {
         let offset = self.sources[i].sample().offset;
         clock::step_clock(offset).map_err(|e| Message::new(format!("setting the clock: {e}")))?;
         self.sources[i].selected = true;
-        // When each answered was by the clock before the step.
-        let secs = offset.div_euclid(MICROS);
-        for s in self.sources.iter_mut().filter(|s| s.when != 0) {
-            s.when += secs;
-        }
         self.synced = true;
-        self.stepped = Some((now().div_euclid(MICROS), offset));
+        self.stepped = Some((Instant::now(), offset));
         Ok(())
     }
 
@@ -315,7 +310,14 @@ impl<'a> Ntp<'a> {
     /// server's reference, "-" when it has said none.
     fn status(&self) -> String {
         let mut out = String::new();
-        let (at, by) = self.stepped.unwrap_or((0, 0));
+        // Moments are kept on the monotonic clock, which the steps do
+        // not move, and told as the time of day now less how long ago.
+        let today = now().div_euclid(MICROS);
+        let unix = |t: Option<Instant>| t.map_or(0, |t| today - t.elapsed().as_secs() as i64);
+        let (at, by) = match self.stepped {
+            Some((t, by)) => (unix(Some(t)), by),
+            None => (0, 0),
+        };
         let _ = writeln!(out, "server {} {} {} {at} {by}", self.server, self.poll, self.synced as u8);
         for s in &self.sources {
             let (stratum, offset, delay, refid) = match &s.good {
@@ -325,7 +327,7 @@ impl<'a> Ntp<'a> {
             let _ = writeln!(
                 out,
                 "source {} {stratum} {} {} {offset} {delay} {} {refid}",
-                s.ip, s.reach, s.when, s.selected as u8
+                s.ip, s.reach, unix(s.when), s.selected as u8
             );
         }
         out
@@ -355,12 +357,15 @@ fn exchange(ip: Ipv4Addr) -> Result<Sample, Message> {
         // The transmit time goes out as it is and must come back as the
         // originate time, so an old or forged answer is not taken.
         let t1 = now();
+        let sent = Instant::now();
         let query = request(t1);
         socket.send_to(&query, (ip, PORT))?;
         loop {
             match socket.recv_from(&mut got) {
                 Ok((n, from)) if from == net::SocketAddrV4::new(ip, PORT) => {
-                    let t4 = now();
+                    // The round trip by the monotonic clock: steady
+                    // whatever happens to the time of day meanwhile.
+                    let t4 = t1 + micros_of(sent.elapsed());
                     match answer(&got[..n], &query[40..48], t1, t4) {
                         Ok(Some(sample)) => return Ok(sample),
                         Ok(None) => {} // not ours
@@ -410,6 +415,11 @@ fn answer(p: &[u8], sent: &[u8], t1: i64, t4: i64) -> Result<Option<Sample>, &'s
         stratum,
         refid: [p[12], p[13], p[14], p[15]],
     }))
+}
+
+/// A duration in µs.
+fn micros_of(d: Duration) -> i64 {
+    d.as_secs() as i64 * MICROS + d.subsec_micros() as i64
 }
 
 /// The time of day in µs since the Unix epoch.

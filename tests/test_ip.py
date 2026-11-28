@@ -121,8 +121,8 @@ def test_ping_in_the_shell_says_each_reply():
     out = re.sub(r"trylobite: [^\n]*\n", "", result.after_boot)
     assert re.fullmatch(
         r"\$ ping 10\.0\.0\.2 2\n"
-        r"reply from 10\.0\.0\.2: seq 1, \d+ ticks\n"
-        r"reply from 10\.0\.0\.2: seq 2, \d+ ticks\n"
+        r"reply from 10\.0\.0\.2: seq 1, \d+\.\d{3} ms\n"
+        r"reply from 10\.0\.0\.2: seq 2, \d+\.\d{3} ms\n"
         r"\$ ping 10\.0\.0\.9 1\n"
         r"no reply from 10\.0\.0\.9: seq 1\n"
         r"sh: exit 1\n"
@@ -164,7 +164,7 @@ def test_ifconfig_says_and_sets_the_address():
         r"inet 192\.168\.1\.7/16 gateway 10\.0\.0\.1 nameserver 10\.0\.0\.3\n"
         r"\$ ifconfig 192\.168\.1\.7/16 0\.0\.0\.0\n"
         r"\$ ifconfig\ninet 192\.168\.1\.7/16 gateway none nameserver 10\.0\.0\.3\n"
-        r"\$ ping 192\.168\.1\.7 1\nreply from 192\.168\.1\.7: seq 1, \d+ ticks\n"
+        r"\$ ping 192\.168\.1\.7 1\nreply from 192\.168\.1\.7: seq 1, \d+\.\d{3} ms\n"
         r"\$ ifconfig 10\.0\.0\.3/33\n" + IFCONFIG_USAGE + r"sh: exit 2\n"
         r"\$ ifconfig 0\.0\.0\.0/8\nifconfig: the IP server refused\nsh: exit 1\n"
         r"\$ ifconfig nameserver 0\.0\.0\.0\n"
@@ -658,7 +658,7 @@ def test_names_resolve_through_the_name_server():
         r"\$ dnsd \| host ours\.test\n"
         r"ours\.test has address 10\.0\.0\.2\n"
         r"\$ dnsd \| ping ours\.test 1\n"
-        r"reply from ours\.test: seq 1, \d+ ticks\n"
+        r"reply from ours\.test: seq 1, \d+\.\d{3} ms\n"
         r"\$ dnsd over tcp \| nc ours\.test 7\n"
         r"over tcp\n"
         # With no name server running, the questions go unanswered.

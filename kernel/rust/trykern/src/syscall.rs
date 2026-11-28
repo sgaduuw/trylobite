@@ -100,7 +100,7 @@ static CALLS: [fn(Proc) -> i32; SYS_ENVIRON as usize + 1] = [
     signal::sys_sigaction, // 50
     signal::sys_sigmask, // 51
     signal::sys_sigreturn, // 52
-    nocall,             // 53, the monotonic clock's (trylobite#110)
+    sys_monotonic,      // 53
     sys_environ,        // 54
 ];
 
@@ -117,6 +117,7 @@ const _: () = assert!(
         && SYS_HARTINFO == 49
         && SYS_SIGACTION == 50
         && SYS_SIGRETURN == 52
+        && SYS_MONOTONIC == 53
         && SYS_ENVIRON == 54
 );
 
@@ -363,6 +364,17 @@ fn sys_clock(p: Proc) -> i32 {
 
 /// A second in microseconds.
 const MICROS: Word = 1_000_000;
+
+/// monotonic(): the machine's monotonic clock, seconds since it started
+/// in a0 and nanoseconds in a1 (detrytus platform.md, The monotonic
+/// clock). Nothing steps it, so the kernel adds nothing; reading the
+/// seconds latches the nanoseconds for this hart, as with clock.
+fn sys_monotonic(p: Proc) -> i32 {
+    let power = addr(V_POWER);
+    let seconds = load_at(power, POWER_MONO);
+    p.set(PCB_A1, load_at(power, POWER_MONO_NS));
+    done(p, seconds)
+}
 
 /// stepclock(seconds, micros): move the time of day by a1 seconds and a2
 /// microseconds, both of one sign. The machine's clock cannot be set
