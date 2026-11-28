@@ -39,11 +39,11 @@ def test_empty_quotes_are_an_empty_argument(shell):
     assert said(shell, typed) == "$ echo a \"\" b | wc\n1 2 5\n$ echo '' x\n x\n$ \n"
 
 
-def test_an_unclosed_quote_is_refused(shell):
-    typed = "echo \"oops\necho 'no\n"
+def test_an_unclosed_quote_goes_on_to_the_next_line(shell):
+    typed = 'echo "one\ntwo"\necho \'no\n'
     assert said(shell, typed) == (
-        '$ echo "oops\nsh: a quote is not closed\n'
-        "$ echo 'no\nsh: a quote is not closed\n$ \n"
+        '$ echo "one\n> two"\none\ntwo\n'
+        "$ echo 'no\n> \nsh: the input ends inside a command\n"
     )
 
 

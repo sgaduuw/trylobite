@@ -75,16 +75,15 @@ def test_each_program_says_how_it_ended(shell):
 
 
 def test_what_a_pipeline_cannot_do_is_said(shell):
-    # "pwd |", not "hello |": the shell starts hello before it finds the
-    # end missing, and on several harts the kernel's line for hello's exit
-    # can land in the middle of the complaint.
-    out = said(shell, "| hello\npwd |\nls | cat\na | b | c | d | e\nhello | nope\n")
+    # A | that ends a line asks for the rest on the next one; at the end
+    # of the input, the command is left unfinished.
+    out = said(shell, "| hello\npwd | pwd\na | b | c | d | e\nhello | nope\npwd |\n")
     assert out == (
-        "$ | hello\nsh: a command is missing around |\n"
-        "$ pwd |\nsh: a command is missing around |\n"
-        "$ ls | cat\nsh: one built-in to a pipeline\n"
+        "$ | hello\nsh: unexpected |\n"
+        "$ pwd | pwd\nsh: one built-in to a pipeline\n"
         "$ a | b | c | d | e\nsh: no such program: a\n"
-        "$ hello | nope\nsh: no such program: nope\n$ \n"
+        "$ hello | nope\nsh: no such program: nope\n"
+        "$ pwd |\n> \nsh: the input ends inside a command\n"
     )
 
 

@@ -136,7 +136,10 @@ impl Builder {
         if stack.try_reserve_exact(self.stack).is_err() {
             return Err(io::Error::from_raw(sys::E_NOMEM));
         }
-        stack.resize(self.stack, 0);
+        // Only the thread's own words need a value to start with: the
+        // rest of a large stack would cost a store per tryte for nothing.
+        stack.resize(OWN, 0);
+        unsafe { stack.set_len(self.stack) };
         let base = stack.as_mut_ptr() as usize;
         // Words are at multiples of 3, each from the tryte below.
         let own = (base + 1).div_ceil(3) * 3;
@@ -187,6 +190,36 @@ where
             crate::eprintln!("thread::spawn: {e}");
             crate::abort()
         }
+    }
+}
+
+/// Run `f` on a stack of `trytes` from the heap, in this thread, and
+/// give back what it gives: for work that recurses deeper than a
+/// thread's own stack allows (the first thread has half a page) without
+/// the process slot a new thread takes. If there is no memory for the
+/// stack, `f` runs on this one.
+pub fn with_stack<F: FnOnce() -> R, R>(trytes: usize, f: F) -> R {
+    unsafe extern "C" {
+        fn on_stack(top: usize, f: extern "C" fn(usize), data: usize);
+    }
+    extern "C" fn trampoline<F: FnOnce() -> R, R>(data: usize) {
+        let (f, out) = unsafe { &mut *(data as *mut (Option<F>, Option<R>)) };
+        if let Some(f) = f.take() {
+            *out = Some(f());
+        }
+    }
+    let mut stack: Vec<u8> = Vec::new();
+    if stack.try_reserve_exact(trytes).is_err() {
+        return f();
+    }
+    let base = stack.as_mut_ptr() as usize;
+    let top = (base + trytes - 1) / 3 * 3;
+    let mut call: (Option<F>, Option<R>) = (Some(f), None);
+    unsafe { on_stack(top, trampoline::<F, R>, &mut call as *mut _ as usize) };
+    drop(stack);
+    match call.1 {
+        Some(r) => r,
+        None => unreachable!(),
     }
 }
 
