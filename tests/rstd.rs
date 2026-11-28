@@ -156,6 +156,17 @@ fn machine() -> io::Result<()> {
     );
     println!("os log {}", os::log()?.starts_with(b"trylobite: "));
     println!("os hart {}", os::hart(0).is_some_and(|h| h.started <= h.time));
+    let a = trystd::time::Instant::now();
+    trystd::thread::sleep(trystd::time::Duration::from_micros(1500));
+    let b = trystd::time::Instant::now();
+    let d = trystd::time::Duration::new(1, 999_999_999);
+    println!(
+        "instant {} {} {} {}",
+        b - a >= trystd::time::Duration::from_micros(1500),
+        a.duration_since(b) == trystd::time::Duration::ZERO && a.checked_duration_since(b).is_none(),
+        (a + d) - d == a && (a + d) - a == d,
+        trystd::time::uptime() >= b - a
+    );
     Ok(())
 }
 

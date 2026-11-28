@@ -1,13 +1,16 @@
-//! The time of day, as std's `time`: `SystemTime::now()` reads the
-//! machine's real-time clock (SYS_CLOCK), and `duration_since` measures
-//! from `UNIX_EPOCH` or any other moment. `step_clock` moves the time
-//! of day, for bin/ntpd.
+//! Time, as std's `time`: `Instant` reads the machine's monotonic clock
+//! (SYS_MONOTONIC), for measuring how long something takes;
+//! `SystemTime::now()` reads the time of day (SYS_CLOCK), and
+//! `duration_since` measures from `UNIX_EPOCH` or any other moment.
+//! `step_clock` moves the time of day, for bin/ntpd.
 //!
-//! Where trylobite differs: there is no `Instant`, since the clock the
-//! kernel times intervals with counts ticks, and how fast ticks pass in
-//! real time depends on how the machine is run; and there is a calendar,
-//! `Utc`, which std leaves to crates, so that tools such as bin/date need
-//! not each carry one. There are no time zones: everything is UTC.
+//! The time of day jumps when it is stepped; an `Instant` does not: it
+//! counts real time since the machine started, steadily, to the
+//! nanosecond. (The time CSR, `sys::ticks()`, is steady too, but counts
+//! steps of the machine, not seconds.) Where trylobite differs: there
+//! is a calendar, `Utc`, which std leaves to crates, so that tools such
+//! as bin/date need not each carry one, and `uptime()`. There are no
+//! time zones: everything is UTC.
 
 pub use core::time::Duration;
 
@@ -16,6 +19,115 @@ use core::fmt;
 unsafe extern "C" {
     #[link_name = "clock"]
     fn raw_clock() -> u32;
+}
+
+/// A moment on the machine's monotonic clock, which only moves forward,
+/// at the rate real time passes, whatever is done to the time of day.
+/// Instants are only good for comparing with one another: `elapsed`,
+/// `duration_since`, and adding or taking away a `Duration`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Instant {
+    secs: u64, // since the machine started
+    nanos: u32, // 0 ..= 999,999,999, past secs
+}
+
+impl Instant {
+    /// Now, to the nanosecond.
+    pub fn now() -> Instant {
+        let secs = crate::sys::call(crate::sys::SYS_MONOTONIC, &[]);
+        let nanos = crate::sys::more(0);
+        Instant { secs: secs as u32 as u64, nanos: nanos as u32 }
+    }
+
+    /// How long after `earlier` this is; zero if `earlier` is later, as
+    /// std does.
+    pub fn duration_since(&self, earlier: Instant) -> Duration {
+        self.checked_duration_since(earlier).unwrap_or(Duration::ZERO)
+    }
+
+    /// How long after `earlier` this is, None if `earlier` is later.
+    pub fn checked_duration_since(&self, earlier: Instant) -> Option<Duration> {
+        if *self < earlier {
+            return None;
+        }
+        Some(if self.nanos >= earlier.nanos {
+            Duration::new(self.secs - earlier.secs, self.nanos - earlier.nanos)
+        } else {
+            Duration::new(self.secs - earlier.secs - 1, self.nanos + NANOS - earlier.nanos)
+        })
+    }
+
+    /// The same as `duration_since`.
+    pub fn saturating_duration_since(&self, earlier: Instant) -> Duration {
+        self.duration_since(earlier)
+    }
+
+    /// How long ago this was.
+    pub fn elapsed(&self) -> Duration {
+        Instant::now().duration_since(*self)
+    }
+
+    pub fn checked_add(&self, d: Duration) -> Option<Instant> {
+        let mut secs = self.secs.checked_add(d.as_secs())?;
+        let mut nanos = self.nanos + d.subsec_nanos();
+        if nanos >= NANOS {
+            nanos -= NANOS;
+            secs = secs.checked_add(1)?;
+        }
+        Some(Instant { secs, nanos })
+    }
+
+    /// None for a moment before the machine started.
+    pub fn checked_sub(&self, d: Duration) -> Option<Instant> {
+        let mut secs = self.secs.checked_sub(d.as_secs())?;
+        let nanos = if self.nanos >= d.subsec_nanos() {
+            self.nanos - d.subsec_nanos()
+        } else {
+            secs = secs.checked_sub(1)?;
+            self.nanos + NANOS - d.subsec_nanos()
+        };
+        Some(Instant { secs, nanos })
+    }
+}
+
+impl core::ops::Add<Duration> for Instant {
+    type Output = Instant;
+    fn add(self, d: Duration) -> Instant {
+        self.checked_add(d).expect("overflow when adding duration to instant")
+    }
+}
+
+impl core::ops::AddAssign<Duration> for Instant {
+    fn add_assign(&mut self, d: Duration) {
+        *self = *self + d;
+    }
+}
+
+impl core::ops::Sub<Duration> for Instant {
+    type Output = Instant;
+    fn sub(self, d: Duration) -> Instant {
+        self.checked_sub(d).expect("overflow when subtracting duration from instant")
+    }
+}
+
+impl core::ops::SubAssign<Duration> for Instant {
+    fn sub_assign(&mut self, d: Duration) {
+        *self = *self - d;
+    }
+}
+
+impl core::ops::Sub<Instant> for Instant {
+    type Output = Duration;
+    fn sub(self, earlier: Instant) -> Duration {
+        self.duration_since(earlier)
+    }
+}
+
+/// How long the machine has run: the monotonic clock's reading, which
+/// starts with it. (Not in std.)
+pub fn uptime() -> Duration {
+    let t = Instant::now();
+    Duration::new(t.secs, t.nanos)
 }
 
 const MICROS: i64 = 1_000_000;
