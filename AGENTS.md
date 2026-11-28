@@ -347,6 +347,13 @@ whole suite takes about three minutes; while fixing, run the files you
 touched. When you change the kernel, add a test that fails without your
 change, and see it fail: break the code it guards, run it, restore.
 
+When a test finds a disk damaged (`Filesystem.load` checks every disk it
+reads), `tests/conftest.py` keeps it in `test-failures/<test>/` with the
+image, the input, the disk as the run found it, the emulator's standard
+error, and in `replay.txt` the command to run the machine again, its
+clock fixed at the second the run started. CI uploads that directory as
+the `test-failures` artifact when the tests fail.
+
 ## Git
 
 `main` holds merged, CI-green work. Branch from it, open a pull request,

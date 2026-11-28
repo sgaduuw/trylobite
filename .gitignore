@@ -8,3 +8,4 @@ disk.img.tmp
 kernel/trykern.s
 user/fsd-rust.s
 target/
+test-failures/

@@ -100,6 +100,8 @@ DTI_MAGIC = b"DTI\x01"
 class FsError(Exception):
     """The image is not a filesystem, or cannot do what was asked."""
 
+    disk: Path | None = None  # the disk file Filesystem.load found damaged
+
 
 # --- trytes and words ------------------------------------------------------------
 
@@ -388,7 +390,11 @@ class Filesystem:
     def load(cls, path: Path) -> Filesystem:
         """A disk's filesystem, checked first."""
         made = cls(Path(path).read_bytes())
-        made.check()
+        try:
+            made.check()
+        except FsError as e:
+            e.disk = Path(path)  # which disk, for tests/conftest.py to keep
+            raise
         return made
 
     def save(self, path: Path) -> None:

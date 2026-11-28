@@ -14,6 +14,7 @@ import shutil
 import struct
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,15 +36,44 @@ _WORK = Path(tempfile.mkdtemp(prefix="trylobite-"))
 _names = itertools.count()
 
 
+@dataclass
+class Replay:
+    """What a run that used a disk needs to be told about or replayed if
+    the disk is found damaged afterwards (tests/conftest.py saves it): the
+    command, the host's time when it started (the machine's clock, unless
+    the run fixed one with --clock), and what the emulator said on
+    standard error."""
+
+    args: list[str]
+    started: float
+    stderr: str
+    before: bytes | None = None  # the disk as the run found it, for the last run only
+
+
+# Each disk's last run, by the disk file's path.
+RUNS: dict[str, Replay] = {}
+
+
 def detrytus(*args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
     binary = os.environ.get("DETRYTUS") or shutil.which("detrytus")
     if binary is None:
         raise RuntimeError(
             "no detrytus command: run tools/install-detrytus, or set DETRYTUS"
         )
-    return subprocess.run(
+    disks = [args[i + 1] for i, a in enumerate(args[:-1]) if a == "--disk"]
+    before = {d: Path(d).read_bytes() for d in disks if Path(d).exists()}
+    started = time.time()
+    done = subprocess.run(
         [binary, *args], input=stdin, capture_output=True, text=True, cwd=ROOT
     )
+    for replay in RUNS.values():
+        replay.before = None  # a few megabytes each: only the last run's kept
+    for disk in disks:
+        RUNS[disk] = Replay(list(args), started, done.stderr, before.get(disk))
+        # The emulator says a host write to the disk file failed, once,
+        # and goes on: the disk then misses blocks the machine wrote.
+        assert f"detrytus: {disk}: " not in done.stderr, done.stderr
+    return done
 
 
 @dataclass
@@ -327,8 +357,8 @@ def hotplug_options(plug: list[tuple[int, int]], unplug: list[tuple[int, int]]):
     times: each entry is (time, hart)."""
     options = []
     for flag, changes in (("--plug", plug), ("--unplug", unplug)):
-        for time, hart in changes:
-            options += [flag, f"{time}:{hart}"]
+        for at, hart in changes:
+            options += [flag, f"{at}:{hart}"]
     return options
 
 

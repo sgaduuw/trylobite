@@ -26,6 +26,15 @@ jobs:
         run: uv run ruff format --check tests tools
       - name: Test
         run: uv run pytest
+      - name: Keep damaged disks
+        # tests/conftest.py keeps each disk a test found damaged, with how
+        # to replay the run that wrote it.
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-failures
+          path: test-failures/
+          if-no-files-found: ignore
       - name: Boot the demo
         run: detrytus run demo.s --ram-pages 40
       - name: Boot the demo on three harts
