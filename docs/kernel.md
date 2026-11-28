@@ -28,7 +28,7 @@ a disk of 100 blocks:
 
 ```text
 trylobite: version 0.1.0, a microkernel for detrytus, the balanced-ternary machine
-trylobite: memory: 81 pages (1594323 trytes), 66 free
+trylobite: memory: 59049 pages (1162261467 trytes), 59030 free
 trylobite: harts: 1
 trylobite: irq0: interrupt controller, 3 sources, at page -13
 trylobite: cons0: console, at page -1
@@ -697,7 +697,7 @@ tools/fs.py new disk.img 100 notes.txt bin/*.s bin/*.tc
 tools/fs.py mkdir disk.img docs
 tools/fs.py put disk.img README.md docs
 printf 'ls\nls bin\ncat docs/README.md\nwrite docs/motd hello\nhello > docs/hi\n' > session.txt
-detrytus run shell.s --ram-pages 81 --input session.txt --disk disk.img
+detrytus run shell.s --input session.txt --disk disk.img
 ```
 
 ## Rust in the kernel

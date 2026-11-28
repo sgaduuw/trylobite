@@ -121,7 +121,7 @@ make
 printf 'Ternary computers count in trits.\n' > notes.txt
 tools/fs.py put disk.img notes.txt
 printf 'ls\ncat notes.txt\nfail\necho "one   arg" two\nhello | upper | wc\ncat notes.txt | upper > shout\ncat shout\nmkdir docs\ncd docs\npwd\nexit\n' > session.txt
-detrytus run --ram-pages 81 --input session.txt --disk disk.img
+detrytus run --input session.txt --disk disk.img
 ```
 
 Given a disk and no program, detrytus' boot ROM reads the boot record
@@ -129,12 +129,12 @@ in block 0, loads the kernel's pages from the blocks it names and starts
 the firmware (docs/filesystem.md, Block 0; detrytus platform.md, Booting
 from a disk). `tools/fs.py boot disk.img shell.s` puts a rebuilt kernel
 on a disk without touching its files. Naming the build instead,
-`detrytus run shell.s --ram-pages 81 --disk disk.img`, loads the same
+`detrytus run shell.s --disk disk.img`, loads the same
 kernel as a file and runs the same disk.
 
 ```text
 trylobite: version 0.1.0, a microkernel for detrytus, the balanced-ternary machine
-trylobite: memory: 81 pages (1594323 trytes), 64 free
+trylobite: memory: 59049 pages (1162261467 trytes), 59030 free
 trylobite: harts: 1
 trylobite: irq0: interrupt controller, 3 sources, at page -13
 trylobite: cons0: console, at page -1
@@ -194,7 +194,7 @@ Leave out `--input` and run it at a terminal, and the shell stays up
 for you to type at:
 
 ```bash
-detrytus run --ram-pages 81 --disk disk.img
+detrytus run --disk disk.img
 ```
 
 (`make run` does the same with `--net user`, the network below,
@@ -207,7 +207,7 @@ changes, and the steps a second; `BENCH=--no-jit` passes options on.)
 
 ```text
 trylobite: version 0.1.0, a microkernel for detrytus, the balanced-ternary machine
-trylobite: memory: 81 pages (1594323 trytes), 64 free
+trylobite: memory: 59049 pages (1162261467 trytes), 59030 free
 trylobite: harts: 1
 trylobite: irq0: interrupt controller, 3 sources, at page -13
 trylobite: cons0: console, at page -1
@@ -257,11 +257,11 @@ cp disk.img a.img && cp disk.img b.img
 ```
 
 ```bash
-detrytus run shell.s --ram-pages 81 --disk a.img --net udp:127.0.0.1:9101,127.0.0.1:9102
+detrytus run shell.s --disk a.img --net udp:127.0.0.1:9101,127.0.0.1:9102
 ```
 
 ```bash
-detrytus run shell.s --ram-pages 81 --disk b.img --net udp:127.0.0.1:9102,127.0.0.1:9101 --mac 02:00:00:00:00:02
+detrytus run shell.s --disk b.img --net udp:127.0.0.1:9102,127.0.0.1:9101 --mac 02:00:00:00:00:02
 ```
 
 ```text
@@ -304,7 +304,7 @@ host, so a server on the host's 127.0.0.1 answers there, and a name
 server at 10.0.0.3 answers names from the host's resolver:
 
 ```bash
-detrytus run shell.s --ram-pages 81 --disk disk.img --net user
+detrytus run shell.s --disk disk.img --net user
 ```
 
 ```text
@@ -349,8 +349,9 @@ register), so `--ram-pages` can be anything from enough for the
 programs (about 40 pages for `demo.s`, 81 for a few programs at a time
 in `shell.s`) up to 101,695, the most its direct map reaches; boot
 touches none of the free pages, so a large machine starts at once and
-costs the emulator only the pages programs use. `make run` gives the
-shell 6,561 pages (`RAM_PAGES=N` changes it). Without `--harts` the machine has one hart;
+costs the emulator only the pages programs use. Without `--ram-pages`
+detrytus gives the machine 59,049 pages, room for eighteen programs
+with full heaps at once; `make run RAM_PAGES=N` picks another size. Without `--harts` the machine has one hart;
 `--plug TIME:HART` and `--unplug TIME:HART` add one or ask one to go
 while it runs, and the kernel reports each.
 
