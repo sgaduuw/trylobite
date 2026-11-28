@@ -192,13 +192,20 @@ ticks:  csrr  a0, time
 # sleep_until(low, high): SYS_SLEEP until the time high * 2^32 + low,
 # low a u32 and high an i32: a time of ticks past what an i32 holds.
 sleep_until:
-        li    t0, I32_SIGN
+        li    t1, SYS_SLEEP
+        j     1f
+# alarm_until(low, high): SYS_ALARM at that time in the same way, for a
+# NOTE_ALARM notice from receive (a2 = 0, a notice rather than a signal).
+alarm_until:
+        li    t1, SYS_ALARM
+        li    a2, 0
+1:      li    t0, I32_SIGN
         bxor  a1, a1, t0
         sub   a1, a1, t0
         li    t0, 4294967296
         mul   a1, a1, t0
         add   a1, a1, a0
-        li    a0, SYS_SLEEP
+        mv    a0, t1
         sys
         ret
 

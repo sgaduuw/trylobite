@@ -258,14 +258,40 @@ it. Only init's children may step it, the servers and the programs
 `/etc/init` names, which the person who wrote that file chose: what
 the shell runs may not (`E_PERM`), as on Unix only root may. `bin/ntpd`
 keeps the clock right over the network (SNTP, RFC 4330): started from
-`/etc/init` (the repository's starts it), it asks
-`pool.ntp.org`, or the server it is given, steps the clock by the
-offset it finds, says so on the console the first time and for a step
-of 128 ms or more, and asks again every 1,024,000,000 ticks (about 17
-minutes on a live machine; 64,000,000 after a failure, which it reports
-once three have come in a row). `ntpd -q SERVER`
-steps the clock once and exits, and `ntpd -n SERVER`, which anyone may
-run, only prints the offset, the round trip and the server's stratum.
+`/etc/init` (the repository's starts it), it looks up `pool.ntp.org`,
+or the server it is given, and each round asks up to four of its
+addresses, its sources, steps the clock by the offset the one with the
+shortest round trip found, says so on the console the first time and
+for a step of 128 ms or more, and waits 1,024,000,000 ticks (about 17
+minutes on a live machine; 64,000,000 after a round nobody answered,
+which it reports once three have come in a row, and which looks the
+name up again). `ntpd -q SERVER` steps the clock once and exits, and
+`ntpd -n SERVER`, which anyone may run, only prints each source's
+offset, round trip and stratum.
+
+Between rounds ntpd serves as `ntp` (`NTP_PROTOCOL` 1), and
+`bin/ntpctl` asks it, as OpenNTPD's `ntpctl` or `ntpq -p` do: `ntpctl
+-s status` says how many sources answer, whether and from which the
+clock was set, and when it was last stepped and by how much; `ntpctl
+-s sources` lists each source's address, its own reference, stratum,
+when it last answered, the poll interval, which of the last 8 rounds it
+answered (reach, in octal), the round trip and the offset, the one the
+clock was set from marked `*` and one that missed the last round `?`;
+`ntpctl` shows both. Its one call, `NTP_STATUS(buffer, size)`, copies
+ntpd's state as text, so the two need share no layout:
+
+```text
+server pool.ntp.org 1024000000 1 1795833000 3600087488
+source 10.0.0.2 2 1 1795833000 3600087488 280430 1 192.0.2.1
+```
+
+`server NAME POLL SYNCED STEPPED-AT STEP` (the poll interval in ticks,
+1 when the clock has been set, when it was last stepped in Unix seconds
+or 0, and by how many µs), then a line for each source, `source ADDRESS
+STRATUM REACH WHEN OFFSET DELAY SELECTED REFID` (reach as a number,
+the newest round lowest; when it last answered, Unix seconds or 0; µs;
+1 for the source the clock was set from; its reference, four letters at
+stratum 1 and an address above, `-` for none yet).
 It steps rather than slews: the clock jumps, and may go back. Files
 keep no times yet.
 

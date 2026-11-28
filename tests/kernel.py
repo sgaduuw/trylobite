@@ -389,7 +389,7 @@ _BIN: dict[str, list[int]] = {}
 
 
 def bin_disk(
-    blocks: int = 56,
+    blocks: int = 60,
     programs: tuple[Path, ...] = (),
     etc_init: str | None = None,
     **texts: str,

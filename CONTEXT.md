@@ -2367,3 +2367,28 @@ terminal's in a live session and set by `--console-size` in tests.
   terminal_size crate does, so Rust code reads as it would elsewhere.
 - **`bin/stty` knows only `size`.** The console server cooks nothing,
   so there are no modes to set.
+
+### 2026-11-28 · ntpd's status: a server of its own, and ntpctl
+
+Eelco found ntpd too quiet to tell what it was doing and asked for a
+client listing its sources and their latency. ntpd now asks up to four
+addresses of its server each round and takes the time from the one
+with the shortest round trip, and between rounds serves as `ntp`;
+`bin/ntpctl` asks it.
+
+- **IPC, not a control socket or a status file.** Servers are found by
+  name here, so ntpd registers one and waits in `receive` with an alarm
+  for its next round, where it slept before. Rejected: a UDP control
+  port, as ntpd and chronyd use (it needs the IP server to deliver to
+  its own address, and a port to guard), and a file ntpd rewrites
+  (stale after a crash or a reboot, and a disk write every round).
+- **The answer is text, lines of words**, as chronyc's `-c` output:
+  ntpctl and ntpd are separate programs with no shared crate between
+  them, and a new field is a new word at the end of a line.
+- **Several addresses, shortest round trip wins**, the simplest of
+  NTP's selection rules: a pool name gives several servers, and one
+  that stops answering no longer stalls the clock. Full NTP's filters
+  and clustering stay out.
+- trystd's `sys` gained what a Rust server needs, `register`,
+  `receive`, `reply`, `copy_out` and `alarm_until`: ntpd is the first
+  server written in Rust.

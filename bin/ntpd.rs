@@ -1,23 +1,31 @@
-//! ntpd [-n | -q] [SERVER]: keep the time of day right by asking an
-//! NTP server (SNTP, RFC 4330), pool.ntp.org unless SERVER names
-//! another, by name or address. /etc/init starts it: it sets the clock
-//! at once, then asks again every POLL ticks (about 17 minutes on a live
-//! machine), stepping the clock by what it finds. It tells the console
-//! when it first sets the clock and when it has to step it by more than
-//! STEP_LOUD. A failure it reports once it has failed QUIET times in a
-//! row (a few minutes), and not again until an answer comes: a machine
-//! run without a network should not have it in the middle of a session.
+//! ntpd [-n | -q] [SERVER]: keep the time of day right by asking NTP
+//! servers (SNTP, RFC 4330): the addresses of pool.ntp.org, or of the
+//! SERVER named, up to SOURCES of them, or the one address given.
+//! /etc/init starts it: each round it asks every source, steps the clock
+//! by the offset the one with the shortest round trip found, then waits
+//! POLL ticks (about 17 minutes on a live machine), RETRY after a round
+//! with no answer, which also looks the name up again. It tells the
+//! console when it first sets the clock and when it has to step it by
+//! more than STEP_LOUD. A failure it reports once it has failed QUIET
+//! rounds in a row, and not again until an answer comes: a machine run
+//! without a network should not have it in the middle of a session.
 //!
-//! -q sets the clock once and exits, as ntpd -q does. -n asks once and
-//! prints how far off the clock is, setting nothing; any program may do
-//! that, while setting the clock is for programs init starts (the
+//! While it waits it serves as "ntp" (NTP_PROTOCOL): NTP_STATUS gives
+//! its state as text, which bin/ntpctl shows (docs/kernel.md, The time
+//! of day, for the format).
+//!
+//! -q asks once, sets the clock and exits, as ntpd -q does. -n asks
+//! once and prints what each source said, setting nothing; any program
+//! may do that, while setting the clock is for programs init starts (the
 //! kernel says "not allowed" to the rest). In Rust, over trystd's net,
-//! time and thread.
+//! time and sys.
 #![no_std]
 
+use core::fmt::Write as _;
 use trystd::net::{self, Ipv4Addr, UdpSocket};
 use trystd::prelude::*;
 use trystd::process::Message;
+use trystd::sys::{self, Received};
 use trystd::time::{self as clock, SystemTime};
 
 trystd::main!(run);
@@ -25,12 +33,13 @@ trystd::main!(run);
 const USAGE: &str = "usage: ntpd [-n | -q] [SERVER]";
 const SERVER: &str = "pool.ntp.org";
 const PORT: u16 = 123;
+const SOURCES: usize = 4; // addresses of a name to ask at most
 
-const POLL: u32 = 1_024_000_000; // ticks between questions: 1,024 s at a million a second,
-const RETRY: u32 = 64_000_000; // and after a failure, 64 s
+const POLL: i64 = 1_024_000_000; // ticks between rounds: 1,024 s at a million a second,
+const RETRY: i64 = 64_000_000; // and after a round with no answer, 64 s
 const WAIT: u32 = 1_000_000; // ticks to wait for each answer,
 const TRIES: usize = 3; // and how many times to ask
-const QUIET: u32 = 3; // failures in a row before one is reported
+const QUIET: u32 = 3; // failed rounds in a row before one is reported
 const STEP_LOUD: i64 = 128_000; // µs: a step this large is worth a line on the console
 
 /// Seconds from 1900-01-01, where NTP counts from, to 1970-01-01.
@@ -62,89 +71,283 @@ fn run() -> Result<i32, Message> {
             }
         }
     }
-    let once = match mode {
-        Mode::Daemon => return daemon(server),
-        Mode::Show => ask(server).map(|s| {
-            println!(
+    if mode == Mode::Daemon {
+        return daemon(server);
+    }
+    let mut ntp = Ntp::new(server);
+    if let Err(e) = ntp.resolve() {
+        eprintln!("ntpd: {server}: {e}");
+        return Ok(1);
+    }
+    let best = ntp.round();
+    for s in &ntp.sources {
+        match &s.last {
+            Ok(()) if mode == Mode::Show => {
+                let x = s.sample();
+                println!(
                 "{}: offset {} s, delay {} s, stratum {}",
-                source(server, s.from),
-                seconds(s.offset),
-                seconds(s.delay),
-                s.stratum
-            )
-        }),
-        Mode::Once => ask(server).and_then(|s| step(server, &s)),
-    };
-    match once {
-        Ok(()) => Ok(0),
-        Err(e) => {
-            eprintln!("ntpd: {e}");
-            Ok(1)
+                ntp.name(s.ip),
+                seconds(x.offset),
+                seconds(x.delay),
+                x.stratum
+                )
+            }
+            Ok(()) => {}
+            Err(e) => eprintln!("ntpd: {}: {e}", ntp.name(s.ip)),
         }
+    }
+    match best {
+        None => Ok(1),
+        Some(_) if mode == Mode::Show => Ok(0),
+        Some(i) => match ntp.step(i) {
+            Ok(()) => Ok(0),
+            Err(e) => {
+                eprintln!("ntpd: {e}");
+                Ok(1)
+            }
+        },
     }
 }
 
-/// Step the clock by what `s` found, and say so.
-fn step(server: &str, s: &Sample) -> Result<(), Message> {
-    clock::step_clock(s.offset).map_err(|e| Message::new(format!("setting the clock: {e}")))?;
-    println!("ntpd: clock stepped by {} s ({})", seconds(s.offset), source(server, s.from));
-    Ok(())
-}
-
-/// The server as named, with its address when the name was not one.
-fn source(server: &str, ip: Ipv4Addr) -> String {
-    let ip = ip.to_string();
-    if ip == server { ip } else { format!("{server} {ip}") }
-}
-
-/// Ask, step, sleep, for ever: an exit only when the clock may not be
-/// set, which asking again will not change.
+/// Ask, step, serve status until the next round, for ever: an exit only
+/// when the clock may not be set, which asking again will not change.
 fn daemon(server: &str) -> Result<i32, Message> {
-    let mut synced = false;
+    let mut ntp = Ntp::new(server);
+    // Without the name (another ntpd has it) it still keeps time.
+    let serving = sys::register(b"ntp\0", sys::NTP_PROTOCOL).is_ok();
     let mut failures = 0;
     loop {
-        let wait = match ask(server) {
-            Ok(s) if !synced || s.offset.abs() >= STEP_LOUD => {
-                step(server, &s)?;
-                synced = true;
-                failures = 0;
-                POLL
-            }
-            Ok(s) => {
-                clock::step_clock(s.offset)
-                    .map_err(|e| Message::new(format!("setting the clock: {e}")))?;
-                failures = 0;
-                POLL
-            }
+        let answered = match ntp.resolve() {
+            Ok(()) => ntp.round(),
             Err(e) => {
+                ntp.failure = format!("{e}");
+                None
+            }
+        };
+        let wait = match answered {
+            Some(i) => {
+                let loud = !ntp.synced || ntp.sources[i].sample().offset.abs() >= STEP_LOUD;
+                if loud {
+                    ntp.step(i)?;
+                } else {
+                    ntp.step_quietly(i)?;
+                }
+                failures = 0;
+                POLL
+            }
+            None => {
                 failures += 1;
                 if failures == QUIET {
-                    eprintln!("ntpd: {e}");
+                    eprintln!("ntpd: {}: {}", server, ntp.failure);
                 }
                 RETRY
             }
         };
-        trystd::thread::sleep_ticks(wait);
+        ntp.poll = wait;
+        let until = sys::ticks() + wait;
+        if !serving {
+            sys::sleep_until(until);
+            continue;
+        }
+        sys::alarm_until(until);
+        loop {
+            match sys::receive() {
+                Received::Notice { note, .. } if note == sys::NOTE_ALARM => break,
+                Received::Notice { .. } => {}
+                Received::Call { from, words } => {
+                    let r = match words {
+                        [op, at, size] if op == sys::NTP_STATUS => {
+                            let text = ntp.status();
+                            let n = text.len().min(size.max(0) as usize);
+                            match sys::copy_out(from, &text.as_bytes()[..n], at) {
+                                Ok(()) => n as i32,
+                                Err(e) => e.raw_os_error().unwrap_or(sys::E_FAULT),
+                            }
+                        }
+                        _ => sys::E_INVAL,
+                    };
+                    let _ = sys::reply(from, r);
+                }
+            }
+        }
     }
 }
 
 /// What one exchange with a server found.
+#[derive(Clone, Copy)]
 struct Sample {
-    from: Ipv4Addr,
     offset: i64, // µs to add to the clock
     delay: i64,  // µs there and back, less the server's time
     stratum: u8,
+    refid: [u8; 4],
 }
 
-/// Look `server` up and ask it the time, TRIES times at most; what went
-/// wrong as "SERVER: why".
-fn ask(server: &str) -> Result<Sample, Message> {
-    exchange(server).map_err(|e| Message::new(format!("{server}: {e}")))
+/// One address of the server, and how it has answered.
+struct Source {
+    ip: Ipv4Addr,
+    reach: u32,     // the last 8 rounds, the newest lowest: 1 for an answer
+    when: i64,      // the time of day of its last answer, Unix seconds; 0 for none
+    last: Result<(), Message>, // how its last round went
+    good: Option<Sample>, // its last answer
+    selected: bool, // its offset set the clock last
 }
 
-fn exchange(server: &str) -> Result<Sample, Message> {
-    // The lookup takes this process's one UDP port, so it goes first.
-    let ip = net::host_address(server)?;
+impl Source {
+    fn sample(&self) -> &Sample {
+        self.good.as_ref().expect("a source that answered")
+    }
+}
+
+/// The daemon's state, which NTP_STATUS reports.
+struct Ntp<'a> {
+    server: &'a str,
+    sources: Vec<Source>,
+    synced: bool,
+    stepped: Option<(i64, i64)>, // when the clock was last stepped (Unix seconds), and by how much (µs)
+    poll: i64,
+    failure: String, // why the last round failed
+}
+
+impl<'a> Ntp<'a> {
+    fn new(server: &'a str) -> Ntp<'a> {
+        Ntp {
+            server,
+            sources: Vec::new(),
+            synced: false,
+            stepped: None,
+            poll: 0,
+            failure: String::new(),
+        }
+    }
+
+    /// Look the server up while no source has answered for 8 rounds:
+    /// pools hand out other addresses, and the network may have come up.
+    fn resolve(&mut self) -> io::Result<()> {
+        if !self.sources.is_empty() && self.sources.iter().any(|s| s.reach != 0) {
+            return Ok(());
+        }
+        let ips = match self.server.parse::<Ipv4Addr>() {
+            Ok(ip) => vec![ip],
+            Err(_) => net::lookup_host(self.server)?,
+        };
+        self.sources = ips
+            .into_iter()
+            .take(SOURCES)
+            .map(|ip| Source {
+                ip,
+                reach: 0,
+                when: 0,
+                last: Err(Message::new("not asked yet")),
+                good: None,
+                selected: false,
+            })
+            .collect();
+        Ok(())
+    }
+
+    /// Ask every source once: the one to take the time from (the shortest
+    /// round trip), None if none answered.
+    fn round(&mut self) -> Option<usize> {
+        let mut best: Option<usize> = None;
+        for i in 0..self.sources.len() {
+            let ip = self.sources[i].ip;
+            let got = exchange(ip);
+            let better = match (&got, best) {
+                (Ok(x), Some(b)) => x.delay < self.sources[b].sample().delay,
+                (Ok(_), None) => true,
+                _ => false,
+            };
+            let s = &mut self.sources[i];
+            s.reach = (s.reach << 1) & 0xff;
+            s.selected = false;
+            match got {
+                Ok(sample) => {
+                    s.reach |= 1;
+                    s.when = now().div_euclid(MICROS);
+                    s.good = Some(sample);
+                    s.last = Ok(());
+                }
+                Err(e) => {
+                    self.failure = format!("{e}");
+                    s.last = Err(e);
+                }
+            }
+            if better {
+                best = Some(i);
+            }
+        }
+        best
+    }
+
+    /// Step the clock by what source `i` found, and say so.
+    fn step(&mut self, i: usize) -> Result<(), Message> {
+        self.step_quietly(i)?;
+        let s = &self.sources[i];
+        println!("ntpd: clock stepped by {} s ({})", seconds(s.sample().offset), self.name(s.ip));
+        Ok(())
+    }
+
+    fn step_quietly(&mut self, i: usize) -> Result<(), Message> {
+        let offset = self.sources[i].sample().offset;
+        clock::step_clock(offset).map_err(|e| Message::new(format!("setting the clock: {e}")))?;
+        self.sources[i].selected = true;
+        // When each answered was by the clock before the step.
+        let secs = offset.div_euclid(MICROS);
+        for s in self.sources.iter_mut().filter(|s| s.when != 0) {
+            s.when += secs;
+        }
+        self.synced = true;
+        self.stepped = Some((now().div_euclid(MICROS), offset));
+        Ok(())
+    }
+
+    /// An address as the server's: with its name, when that was not it.
+    fn name(&self, ip: Ipv4Addr) -> String {
+        let ip = ip.to_string();
+        if ip == self.server { ip } else { format!("{} {ip}", self.server) }
+    }
+
+    /// NTP_STATUS: a line of words for the daemon, then one per source.
+    ///   server NAME POLL-TICKS SYNCED(0/1) STEPPED-AT STEP-µs
+    ///   source ADDRESS STRATUM REACH WHEN OFFSET-µs DELAY-µs SELECTED REFID
+    /// STEPPED-AT and WHEN are Unix seconds, 0 for never; REACH is the
+    /// last 8 rounds as a number, 1 bits for answers; REFID is the
+    /// server's reference, "-" when it has said none.
+    fn status(&self) -> String {
+        let mut out = String::new();
+        let (at, by) = self.stepped.unwrap_or((0, 0));
+        let _ = writeln!(out, "server {} {} {} {at} {by}", self.server, self.poll, self.synced as u8);
+        for s in &self.sources {
+            let (stratum, offset, delay, refid) = match &s.good {
+                Some(x) => (x.stratum, x.offset, x.delay, refid(x)),
+                None => (0, 0, 0, String::from("-")),
+            };
+            let _ = writeln!(
+                out,
+                "source {} {stratum} {} {} {offset} {delay} {} {refid}",
+                s.ip, s.reach, s.when, s.selected as u8
+            );
+        }
+        out
+    }
+}
+
+/// A server's reference: four letters for stratum 1 (a clock, such as
+/// GPS), the address of its own server above.
+fn refid(x: &Sample) -> String {
+    let r = x.refid;
+    if x.stratum == 1 {
+        let text: String = r.iter().take_while(|&&c| c != 0).map(|&c| {
+            if c.is_ascii_graphic() { c as char } else { '?' }
+        }).collect();
+        if text.is_empty() { String::from("-") } else { text }
+    } else {
+        Ipv4Addr::new(r[0], r[1], r[2], r[3]).to_string()
+    }
+}
+
+/// Ask `ip` the time, TRIES times at most.
+fn exchange(ip: Ipv4Addr) -> Result<Sample, Message> {
     let mut socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
     socket.set_read_timeout_ticks(Some(WAIT))?;
     let mut got = [0u8; 68]; // 48, or 68 with a key and digest
@@ -159,7 +362,7 @@ fn exchange(server: &str) -> Result<Sample, Message> {
                 Ok((n, from)) if from == net::SocketAddrV4::new(ip, PORT) => {
                     let t4 = now();
                     match answer(&got[..n], &query[40..48], t1, t4) {
-                        Ok(Some(sample)) => return Ok(Sample { from: ip, ..sample }),
+                        Ok(Some(sample)) => return Ok(sample),
                         Ok(None) => {} // not ours
                         Err(e) => return Err(Message::new(e)),
                     }
@@ -202,10 +405,10 @@ fn answer(p: &[u8], sent: &[u8], t1: i64, t4: i64) -> Result<Option<Sample>, &'s
     let offset = ((t2 - t1) + (t3 - t4)) / 2;
     let delay = (t4 - t1) - (t3 - t2);
     Ok(Some(Sample {
-        from: Ipv4Addr::UNSPECIFIED,
         offset,
         delay,
         stratum,
+        refid: [p[12], p[13], p[14], p[15]],
     }))
 }
 
