@@ -525,6 +525,9 @@ The design borrows its ideas, not its code, from others' work:
   read from its sources or shares its on-disk format.
 - **btrfs** and Ohad Rodeh's "B-trees, Shadowing, and Clones" (ACM
   Transactions on Storage, 2008), the copy-on-write ("shadowing")
-  B-tree that btrfs is built on: copying each changed node up to the
-  root and keeping no free map, found again by walking the tree.
+  B-tree that btrfs is built on: copying each changed node, and those
+  above it, to free blocks, so the old tree stays whole until the
+  superblock moves. Keeping no free map, and finding free blocks by
+  walking the tree at mount, is our own simplification for small
+  disks; both of them keep one.
 - **Linux's relatime**, for when reading moves the access time.
