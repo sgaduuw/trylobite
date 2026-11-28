@@ -5,7 +5,7 @@
         .section prog2, (P_PROG0 + 2) * PAGE, V_USER
         .gp   USER_GP                  # set by spawn
 
-        .equ  SPIN, 1500
+        .equ  SPIN, QUANTUM            # rounds of 3 steps: past a slice
 
 pong:   li    a0, SYS_NAME             # for ps: a program of the image
         la    a1, pong_myname          # has no argv[0] to name it

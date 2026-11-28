@@ -53,13 +53,16 @@ def test_a_hart_outside_the_middle_nine_is_not_started():
 
 
 def test_a_removed_hart_can_come_back():
+    # Hart 1 is gone by about time 210000 (it leaves at its next pick,
+    # up to a slice after the event); the work lasts past its return.
+    longer = spin_then_hart(200_000)
     result = run(
         SPAWN_BOTH,
-        LONG,
-        LONG,
+        longer,
+        longer,
         harts=3,
         unplug=[(150_000, 1)],
-        plug=[(200_000, 1)],
+        plug=[(250_000, 1)],
     )
     assert result.exit_code == 0
     lines = result.console.splitlines()

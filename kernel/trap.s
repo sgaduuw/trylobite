@@ -157,8 +157,13 @@ resume:
 2:
         csrr  t0, time                 # a whole slice from now: time the
         sw    t0, PCB_RAN(s0)          # (and it runs from now: ktrap counts)
-        addi  t0, t0, QUANTUM          # kernel spent on others is not its
-        csrw  stimecmp, t0
+        addi  t0, t0, QUANTUM          # kernel spent on others is not its;
+        lw    t1, sleepers             # but no later than the earliest
+        beqz  t1, 3f                   # sleeper's time, which only a pick
+        lw    t1, next_wake            # wakes: a long slice must not make
+        bge   t1, t0, 3f               # sleepers and alarms late
+        mv    t0, t1
+3:      csrw  stimecmp, t0
         lw    t0, PCB_PTBR(s0)
         csrw  ptbr, t0
         lw    t0, PCB_RETRY(s0)        # its call runs again: a server woken
