@@ -83,7 +83,7 @@ def test_what_a_pipeline_cannot_do_is_said(shell):
         "$ | hello\nsh: a command is missing around |\n"
         "$ pwd |\nsh: a command is missing around |\n"
         "$ ls | cat\nsh: one built-in to a pipeline\n"
-        "$ a | b | c | d | e\nsh: too many commands in the pipeline\n"
+        "$ a | b | c | d | e\nsh: no such program: a\n"
         "$ hello | nope\nsh: no such program: nope\n$ \n"
     )
 

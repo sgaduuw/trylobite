@@ -2,16 +2,22 @@
 //! servers are up. It reads a line, runs the program its first word
 //! names, waits for it, and says how it ended if not with code 0.
 //!
-//! Some words are built in (sh/builtin.rs): exit, and ls, cat, write,
-//! rm, mkdir, rmdir, cd and pwd, which use the filesystem through the
-//! file server. pingpong is a program of the kernel image, started by
-//! number. Any other word names a program file: a path if it has a
-//! slash, else a file in /bin, and gets the line's words as its
-//! arguments, the command first. The shell stops at the end of input.
+//! Some words are built in (sh/builtin.rs): exit; ls, cat, write, rm,
+//! mkdir, rmdir, cd and pwd, which use the filesystem through the file
+//! server; and export, unset, env and set. pingpong is a program of the
+//! kernel image, started by number. Any other word names a program file:
+//! a path if it has a slash, else the first file of that name in the
+//! directories $PATH lists, and gets the line's words as its arguments,
+//! the command first. The shell stops at the end of input.
+//!
+//! Variables (sh/vars.rs) are the shell's, or exported: those are the
+//! environment of the programs it starts, which it starts with its own
+//! environment's, and PATH and HOME. $NAME in a word stands for a value
+//! (sh/expand.rs), as do $? (the last command's status) and $$.
 //!
 //! The line is edited as typed (sh/edit.rs): the cursor keys, the Ctrl
 //! keys of a Unix shell, a history on up and down, and Tab completion.
-//! Quotes make characters themselves, as in a Unix shell (sh/lex.rs):
+//! Quotes make characters themselves, as in a Unix shell (sh/expand.rs):
 //! 'a b' and "a b" are one word holding a space, \ makes the next
 //! character itself, and a quoted |, < or > neither pipes nor
 //! redirects. A word starting with < or > redirects standard input or
@@ -28,9 +34,9 @@
 //! so that a built-in writing to a pipe whose reader has gone carries on,
 //! while the programs it starts have SIGPIPE's default.
 //!
-//! It is written to grow into a scripting shell: lexing, running and
-//! editing are apart, and nothing uses the heap, so it takes the five
-//! pages of a program over half a page, and no sixth.
+//! Lexing, expanding, running and editing are apart, so that a
+//! scripting language can sit between the lexer and the runner. Words,
+//! arguments and variables are on the heap.
 #![no_std]
 
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -41,21 +47,24 @@ use trystd::{console, fs, signal, sys};
 mod builtin;
 #[path = "sh/edit.rs"]
 mod edit;
+#[path = "sh/expand.rs"]
+mod expand;
 #[path = "sh/lex.rs"]
 mod lex;
 #[path = "sh/out.rs"]
 mod out;
 #[path = "sh/run.rs"]
 mod run;
+#[path = "sh/vars.rs"]
+mod vars;
 
 use edit::{Editor, Got};
-use lex::Lexed;
 use out::Out;
 
 trystd::main!(sh);
 
-/// Characters kept from a line.
-pub const LINE_MAX: usize = 60;
+/// Characters kept from a typed line.
+pub const LINE_MAX: usize = 240;
 pub const PROMPT: &[u8] = b"$ ";
 
 /// Whether standard input is the console, as the shell started.
@@ -81,7 +90,7 @@ fn sh() -> i32 {
     ON_CONSOLE.store(io::is_terminal(sys::STDIN), Ordering::Relaxed);
     // Only this function touches it, and only from here on.
     let editor = unsafe { &mut *core::ptr::addr_of_mut!(EDITOR) };
-    let mut runner = run::Runner::new();
+    let mut sh = Shell { vars: vars::Vars::import(), status: 0, runner: run::Runner::new() };
     loop {
         Out::new(sys::STDOUT).b(PROMPT).flush();
         match editor.read() {
@@ -89,16 +98,44 @@ fn sh() -> i32 {
             Got::Cancel => continue,
             Got::Line => {}
         }
-        match Lexed::lex(editor.line()) {
-            Ok(lx) => runner.line(&lx),
-            Err(lex::Unclosed) => Out::err().b(b"sh: a quote is not closed").nl(),
+        sh.line(editor.line());
+    }
+}
+
+/// The shell's state: its variables, the last command's status, and
+/// what the runner keeps.
+pub struct Shell {
+    pub vars: vars::Vars,
+    /// $?: the last command's status.
+    pub status: i32,
+    pub runner: run::Runner,
+}
+
+impl Shell {
+    /// Run a line.
+    fn line(&mut self, line: &[u8]) {
+        let toks = match lex::lex(line) {
+            Ok(toks) => toks,
+            Err(lex::Unclosed) => {
+                Out::err().b(b"sh: a quote is not closed").nl();
+                self.status = run::FAILED;
+                return;
+            }
+        };
+        match run::parse(&toks) {
+            Ok(cmds) if cmds.is_empty() => {}
+            Ok(cmds) => self.status = self.pipeline(&cmds),
+            Err(said) => {
+                Out::err().b(said).nl();
+                self.status = run::FAILED;
+            }
         }
     }
 }
 
 /// Say why a call about `path` failed, as Unix tools do, in the words
-/// the shell has always used.
-pub fn fail(path: &[u8], e: &io::Error) {
+/// the shell has always used: the status that leaves, 1.
+pub fn fail(path: &[u8], e: &io::Error) -> i32 {
     let mut out = Out::err();
     out.b(b"sh: ").b(path).b(b": ");
     let code = e.raw_os_error().unwrap_or(0);
@@ -113,10 +150,12 @@ pub fn fail(path: &[u8], e: &io::Error) {
         sys::E_NOTEMPTY => b"directory not empty",
         sys::E_BUSY => b"busy",
         sys::E_INVAL => b"invalid argument",
+        sys::E_2BIG => b"the environment is full",
         _ => {
             out.b(b"error ").n(code).nl();
-            return;
+            return 1;
         }
     };
     out.b(said).nl();
+    1
 }

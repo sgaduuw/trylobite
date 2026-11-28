@@ -407,7 +407,7 @@ def shell_filesystem(blocks: int):
 
 
 def bin_disk(
-    blocks: int = 66,
+    blocks: int = 70,
     programs: tuple[Path, ...] = (),
     etc_init: str | None = None,
     **texts: str,

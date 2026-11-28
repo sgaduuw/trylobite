@@ -111,7 +111,7 @@ def test_several_names_complete_as_far_as_they_share_then_list(shell):
 
 def test_a_second_tab_lists_commands_in_columns(shell):
     out = said(shell, "u\t\t\b\b\n")
-    assert out.startswith(f"$ u{BEL}\nuname   upper   uptime\n$ u\b \b\n")
+    assert out.startswith(f"$ u{BEL}\nunset   uname   upper   uptime\n$ u\b \b\n")
 
 
 def test_nothing_to_complete_rings_the_bell(shell):
