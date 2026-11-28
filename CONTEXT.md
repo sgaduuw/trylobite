@@ -2493,7 +2493,7 @@ environment first.
 
 - **The kernel copies the environment at spawn, from where the parent
   says.** A process names its block with a new call, `environ(address)`
-  (53), and every spawn copies that block from the parent's memory to
+  (54), and every spawn copies that block from the parent's memory to
   `V_ENV` in the child, just after the arguments, and makes the copy the
   child's. The other way, an environment argument to `spawnw` and to the
   file server's `FS_SPAWN`, would have changed the file server's

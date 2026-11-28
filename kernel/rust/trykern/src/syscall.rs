@@ -100,7 +100,8 @@ static CALLS: [fn(Proc) -> i32; SYS_ENVIRON as usize + 1] = [
     signal::sys_sigaction, // 50
     signal::sys_sigmask, // 51
     signal::sys_sigreturn, // 52
-    sys_environ,        // 53
+    nocall,             // 53, the monotonic clock's (trylobite#110)
+    sys_environ,        // 54
 ];
 
 const _: () = assert!(
@@ -116,7 +117,7 @@ const _: () = assert!(
         && SYS_HARTINFO == 49
         && SYS_SIGACTION == 50
         && SYS_SIGRETURN == 52
-        && SYS_ENVIRON == 53
+        && SYS_ENVIRON == 54
 );
 
 /// A number that names no call.
