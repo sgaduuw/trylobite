@@ -2579,6 +2579,48 @@ nanoseconds since the machine started, from the host's `Instant`), and
   them adjusted. NTP_STATUS still carries Unix seconds, worked out when
   asked.
 
+### 2026-11-28 · Environment variables
+
+Eelco asked for environment variables and shell scripting, the
+environment first.
+
+- **The kernel copies the environment at spawn, from where the parent
+  says.** A process names its block with a new call, `environ(address)`
+  (54), and every spawn copies that block from the parent's memory to
+  `V_ENV` in the child, just after the arguments, and makes the copy the
+  child's. The other way, an environment argument to `spawnw` and to the
+  file server's `FS_SPAWN`, would have changed the file server's
+  protocol while it is being rewritten, and every caller; this way the
+  file server passes a client's environment on without knowing it
+  exists (it already names its client as the parent), image programs
+  get one too, and a program that never touches its environment passes
+  on what it got, as on Unix.
+- **729 trytes (`ENV_MAX`) at most**, a block of `NAME=value` strings
+  and an empty one after them, so it needs no list of pointers. It
+  shares the half page below the image with the arguments and the
+  stack, which keeps some 8,100 trytes; more would cost every process
+  stack, and this holds a few dozen variables. A block that runs past
+  it is `E_2BIG` (−29), from `environ` and from a spawn.
+- **trystd keeps the block on the heap.** `set_var` and `remove_var`
+  build a new block and name it; they return `io::Result`, unlike
+  std's, since the block can be full. `Command` gained `env` and
+  `env_remove`, and looks names up in `$PATH` (`/bin` when it is not
+  set, as for programs init starts, which have no environment).
+- **The shell keeps its own variables and exports some**, as a Unix
+  shell: `NAME=value`, `export`, `unset`, `env`, `set`, `$NAME`,
+  `${NAME}`, `${NAME:-x}`, `${NAME-x}`, `${#NAME}`, `$?`, `$$`, `~`,
+  `PATH` search and `HOME` for `cd`. An exported variable goes to the
+  environment as it changes, so a spawn needs nothing extra. Words keep
+  their quotes until a command runs, since a variable can change between
+  lexing and running once there are scripts.
+- **The shell uses the heap now**: words, arguments and variables are
+  vectors, and the lines are 240 characters (`LINE_MAX`). Its image grew
+  from some 20,000 to 44,000 trytes, two pages more; the test machine
+  has room for that. Built-ins return a status, and `$?` follows Unix:
+  127 not found, 126 not a program, 128 + the signal.
+- **A new tool, `printenv`**, which says what a program was started
+  with: the shell's `env` is a built-in and cannot show that.
+
 ### 2026-11-28 · less, find, diff, sort and tar
 
 Eelco asked for a pager and more everyday tools. Each is a Rust program
@@ -2618,6 +2660,6 @@ paths: six pages while it runs.
   B-tree rewrite brings them), so tar writes 0644 or 0755, owner 0 and
   time 0, and find has no -mtime or -perm; both should learn them from
   the new `stat`.
-- `bin_disk` is 80 blocks now (66 on main, with dhcp and telnet) and CI's disk
+- `bin_disk` is 84 blocks now (70 on main, with dhcp, telnet and printenv) and CI's disk
   100: the five programs take seven blocks more.
 

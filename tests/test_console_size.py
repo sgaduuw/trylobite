@@ -60,4 +60,4 @@ def test_vi_cuts_lines_at_the_console_width(shell):
 def test_the_tab_list_fits_the_console_width(shell):
     # Columns of 5 + 2 + 1 = 8: two fit in 20.
     out = said(shell, "u\t\t\n", (24, 20))
-    assert out.startswith("$ u\x07\nuname   upper\nuptime\n$ u\n")
+    assert out.startswith("$ u\x07\nunset   uname\nupper   uptime\n$ u\n")
