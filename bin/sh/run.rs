@@ -650,11 +650,18 @@ impl Shell {
     /// standard error, since it is about the program, not its output.
     /// Its status.
     fn reap(&mut self, child: &mut Child) -> i32 {
-        let _ = console::set_foreground(Some(child.id()));
+        // A shell whose input is not the console (a remote shell's,
+        // bin/telnetd) leaves the console to whoever has it.
+        let console = crate::on_console();
+        if console {
+            let _ = console::set_foreground(Some(child.id()));
+        }
         let status = child.wait();
         // The console is the shell's again before another program can
         // have this one's number.
-        let _ = console::set_foreground(None);
+        if console {
+            let _ = console::set_foreground(None);
+        }
         let Ok(status) = status else { return FAILED };
         let (code, said) = describe_status(&status);
         if let Some(said) = said {

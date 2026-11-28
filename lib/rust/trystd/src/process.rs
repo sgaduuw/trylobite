@@ -293,15 +293,8 @@ fn keep_aside(fd: i32) -> io::Result<Option<OwnedFd>> {
     if !is_open(fd) {
         return Ok(None);
     }
-    for spare in (sys::STDERR + 1)..sys::NDESC {
-        if !is_open(spare) {
-            dup2(fd, spare)?;
-            let kept = OwnedFd::from_raw(spare);
-            kept.set_inherit(false)?;
-            return Ok(Some(kept));
-        }
-    }
-    Err(io::Error::from_raw(sys::E_MFILE))
+    let fd = core::mem::ManuallyDrop::new(OwnedFd::from_raw(fd));
+    fd.try_clone().map(Some)
 }
 
 /// Start the program file at `path` with this program's descriptors and

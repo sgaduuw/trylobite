@@ -30,16 +30,18 @@
 //! input (as init starts it) opens the console as its standard input,
 //! output and error, which the programs it starts inherit; one started
 //! with them (sh from the shell) keeps its own. It gives each program it
-//! waits for the console's foreground, for Ctrl-C; at the prompt Ctrl-C
-//! drops the line. Its own complaints go to standard error, so they
+//! waits for the console's foreground, for Ctrl-C, if its standard input
+//! is the console (a remote shell's is a connection, bin/telnetd); at
+//! the prompt Ctrl-C drops the line. Its own complaints go to standard error, so they
 //! reach the console whatever a command redirects. It catches SIGPIPE,
 //! so that a built-in writing to a pipe whose reader has gone carries on,
 //! while the programs it starts have SIGPIPE's default.
 //!
-//! It runs in a thread with a large stack from the heap, since a
+//! It moves to a large stack from the heap as it starts, since a
 //! script nests deeper than a program's half page of stack holds.
 #![no_std]
 
+use core::sync::atomic::{AtomicBool, Ordering};
 use trystd::prelude::*;
 use trystd::{console, fs, process, signal, sys, thread};
 
@@ -81,6 +83,13 @@ pub const PROMPT2: &[u8] = b"> ";
 /// The status of a script with a syntax error, and of a usage error.
 pub const SYNTAX: i32 = 2;
 
+/// Whether standard input is the console, as the shell started.
+static ON_CONSOLE: AtomicBool = AtomicBool::new(false);
+
+pub fn on_console() -> bool {
+    ON_CONSOLE.load(Ordering::Relaxed)
+}
+
 /// The editor's history is a kilotryte: in the image, not on the stack.
 static mut EDITOR: Editor = Editor::new();
 
@@ -103,6 +112,7 @@ fn shell() -> i32 {
             let _ = fs::dup2(con, sys::STDERR);
         }
     }
+    ON_CONSOLE.store(io::is_terminal(sys::STDIN), Ordering::Relaxed);
     let args: Vec<&[u8]> = env::args_bytes().collect();
     let mut sh = Shell::new(args.first().copied().unwrap_or(b"sh"));
     match args.get(1).copied() {
