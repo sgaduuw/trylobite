@@ -177,6 +177,9 @@ fn word_end(src: &[u8], mut i: usize) -> Result<(usize, u32), Unclosed> {
     let mut quote = 0;
     while i < src.len() {
         let c = src[i];
+        if quote == 0 && ends_word(c) {
+            break;
+        }
         if c == b'\n' {
             lines += 1;
         }
@@ -186,9 +189,6 @@ fn word_end(src: &[u8], mut i: usize) -> Result<(usize, u32), Unclosed> {
             }
             i += 1;
             continue;
-        }
-        if quote == 0 && ends_word(c) {
-            break;
         }
         match c {
             b'\\' => {

@@ -905,7 +905,77 @@ left out unless the word starts with one.
 without one), `write PATH TEXT`, `rm PATH`, `mkdir PATH`, `rmdir PATH`,
 `cd [DIR]` (`$HOME` without one) and `pwd`; and for variables `export
 [NAME[=VALUE]]...`, `unset NAME...`, `env` (the environment) and `set`
-(every variable). The system tools are programs (System tools, above).
+(every variable); and for scripts `true`, `false`, `:`, `test EXPR`
+and `[ EXPR ]` (`-e -f -d -s FILE`, `-z -n S`, `S = T`, `S != T`, `N
+-eq M` and `-ne -lt -le -gt -ge`, `!`, `-a`, `-o`), `read [-r]
+NAME...` (a line of standard input, split at blanks, read a character
+at a time so the rest stays for the next reader), `shift [N]`, `break
+[N]`, `continue [N]`, `return [N]`, `wait [%N|PID]...`, `jobs`, `. FILE
+[ARG...]` (and `source`) and `eval WORD...`. The system tools are
+programs (System tools, above).
+
+**Scripting.** The language is POSIX sh's, kept reasonable:
+
+- Lists: `a; b` one after the other, `a && b` b if a succeeded, `a ||
+  b` b if not, `! a` a's status negated, and `a &` a in the background
+  (below). A newline ends a command as `;` does.
+- `if LIST; then LIST; [elif LIST; then LIST;]... [else LIST;] fi`,
+  `while LIST; do LIST; done`, `until LIST; do LIST; done`, `for NAME
+  [in WORD...]; do LIST; done` (the positional parameters without
+  `in`), `case WORD in PATTERN[|PATTERN]) LIST;; ... esac`, and groups
+  `{ LIST; }` and `( LIST )`, which both run in the shell itself (with
+  no fork there is no subshell). A compound command takes
+  redirections after it: `while read l; do ...; done < file`, `for x in
+  a b; do echo $x; done | wc`.
+- Functions: `NAME() { LIST; }`. Its arguments are `$1`... while it
+  runs, and `return [N]` ends it. Functions, like `.` and `$(...)`, nest
+  at most 40 deep.
+- More expansions: `$0`, `$1` to `$9` and `${10}` on, `$#`, `$@` (`"$@"`
+  gives each parameter as one argument), `$*`, `$!` (the last
+  background program), `${NAME:=WORD}` (and set it), `${NAME:+WORD}`;
+  `$(LIST)`, what LIST prints less its last newlines (its output goes
+  to a file the shell reads back, `/tmp/.shPID.N` or `/.shPID.N`, so
+  any command works there, built-ins too); and `$((SUM))`, whole
+  numbers with C's operators (no `?:`) and variables by name.
+- Patterns: a word holding an unquoted `*`, `?` or `[...]` (`[a-z]`,
+  `[!x]`) is replaced by the paths it matches, in order, or kept as it
+  is if none does; names starting with a dot only match a pattern
+  starting with one. `case` matches its patterns the same way.
+- Redirections take a descriptor, 0 to 2: `2> errors`, `2>> log`, and
+  `>&2` or `2>&1` to copy one onto another.
+- `#` starting a word starts a comment, to the line's end, and a `\`
+  ending a line joins it to the next.
+- A line typed that does not finish its command (an `if` without `fi`,
+  a quote not closed, a `|` or `&&` at the end) goes on at a `> `
+  prompt; at the end of the input the shell says `sh: the input ends
+  inside a command`. A syntax error is said (`sh: unexpected fi`) and the line
+  not run; its status is 2.
+
+**Scripts.** `sh FILE [ARG...]` runs a file's commands, with `$0` the
+file and the arguments as `$1`...; `sh -c COMMANDS [NAME [ARG...]]` a
+string's. A program file that starts with `#!` (`#!/bin/sh`) runs the
+program its first line names, with at most one argument from that line,
+then the file's path and the command's arguments, as on Unix. A script
+runs a command line at a time, so one with a syntax error runs up to
+it: `sh: FILE: line 3: unexpected then`, status 2. In a script, and in
+a status that is tested (an `if`'s or loop's condition, a side of `&&`
+or `||`), the shell does not say how programs exited, only faults and
+signals.
+
+**Background jobs.** `a | b &` starts the pipeline's programs and goes
+on without waiting; at the prompt the shell says `[1] PID` (the job's
+number and its last program's), and before a later prompt `[1] done
+a | b`, or `[1] exit N ...`, once each of its programs has ended (the
+process table says so without waiting). `jobs` lists those running,
+and `wait` waits for them all, or `wait %1` or `wait PID` for one: the
+last one's status. Only programs run in the background; a built-in,
+function or compound command in the line is refused.
+
+The shell moves to a stack of 177,147 trytes from the heap as it
+starts (`trystd::thread::with_stack`, nine pages, not zeroed), since a
+script nests deeper than the half page below a program's image holds;
+it stays one thread, in one process slot. Its image is some 99,000
+trytes.
 
 **Variables.** `NAME=VALUE` alone sets a shell variable; before a
 command (`X=1 Y=2 prog`) it sets them in that command's environment
@@ -925,8 +995,8 @@ split at blanks into several arguments, and an empty one gives none.
 code, 128 and the signal for one a signal ended, 255 for a fault, 127
 for a program not found and 126 for a file that is not a program, a
 built-in's own (0 done, 1 not, having said why), and 1 for a line the
-shell could not run (a quote not closed, a file it could not open to
-redirect). A pipeline's status is its last command's. `exit` with no
+shell could not run (a file it could not open to redirect). A
+pipeline's status is its last command's. `exit` with no
 code exits with `$?`.
 
 **Programs.** `pingpong` is in the kernel image. Any other word names a
@@ -973,12 +1043,16 @@ redirected.
 Inside `'...'` a `$` is itself; inside `"..."` it expands, and `\`
 makes a `$`, `"` or `\` after it itself.
 
-**Pipelines.** A `|` between commands makes one: `hello | upper | wc`. The shell starts every program of the line, each
+**Pipelines.** A `|` between commands makes one: `hello | upper | wc`.
+The shell starts every program of the line, each
 with its pipe ends as standard input and output, before it waits for
 any, and marks its own ends `FD_NOINHERIT` so that a reader sees the end
 when its writer goes. A built-in takes one place in a pipeline
 (`ls | wc`, `hello | cat`) and runs in the shell once the programs have
-started; two would wait for each other.
+started; two would wait for each other. The same goes for a function
+or compound command. A process has nine descriptors, so a pipeline
+with a command that runs in the shell, inside redirections, can run
+out: `sh: no descriptor left to redirect with`.
 
 **Ctrl-C** sends `SIGINT` to the program the shell is waiting for (in a
 pipeline the line's first program first), which ends it unless it

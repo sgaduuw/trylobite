@@ -146,10 +146,14 @@ pub fn bury(p: Proc) {
         return;
     }
     let par = Proc::of(parent);
-    if par.is(ST_WAIT) && par.get(PCB_A1) == pid {
-        par.set(PCB_A0, p.get(PCB_A0));
-        par.set(PCB_A1, p.get(PCB_A1));
-        par.ready(); // a hart waiting for work can run it
+    // Whichever of the parent's threads waits for it: any may.
+    let waiter = Proc::table().find(|q| {
+        q.is(ST_WAIT) && q.get(PCB_SPACE) == parent && q.get(PCB_A1) == pid
+    });
+    if let Some(w) = waiter {
+        w.set(PCB_A0, p.get(PCB_A0));
+        w.set(PCB_A1, p.get(PCB_A1));
+        w.ready(); // a hart waiting for work can run it
         p.set(PCB_STATE, ST_EXITED);
     } else {
         p.set(PCB_STATE, ST_ZOMBIE); // it waits for another child, or none

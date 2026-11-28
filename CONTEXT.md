@@ -2528,3 +2528,55 @@ environment first.
 - **A new tool, `printenv`**, which says what a program was started
   with: the shell's `env` is a built-in and cannot show that.
 
+### 2026-11-28 · Shell scripting
+
+The second half of Eelco's env vars and scripting: the shell reads
+POSIX sh, kept reasonable.
+
+- **A parser and a tree.** `bin/sh/parse.rs` turns tokens into lists,
+  and-or lists, pipelines and commands (simple, if, while, until, for,
+  case, groups, functions), which `bin/sh/run.rs` walks. A script runs a
+  command line at a time, as POSIX shells do, so a syntax error late in
+  a file stops it there rather than before it starts.
+- **No fork, so things run in the shell.** Built-ins, functions and
+  compound commands run in the shell process; one may stand in a
+  pipeline, after its programs start, as built-ins already did. `( )` is
+  a group like `{ }`, not a subshell. Background jobs are pipelines of
+  programs only. `$(...)` sends its output to a file the shell reads
+  back (`/tmp/.shPID.N`, or `/` without `/tmp`): a pipe would fill and
+  stall a built-in writing to it, with nobody reading yet.
+- **Background jobs without a non-blocking wait.** The shell learns a
+  job has ended from the process table (its programs are zombies)
+  before each prompt, then waits for them, which cannot block. A
+  `WNOHANG` for `wait` would be the kernel's way; this needed none.
+- **A big stack, switched to in place.** A program's stack is the half
+  page below its image, some 8,000 trytes; a recursive function through
+  `$(...)` overran it within five levels. The shell first ran in a
+  thread with a heap stack, but a thread takes a process slot, shows in
+  `ps` and is not where Ctrl-C and the tests look. Now the first thread
+  moves its own `sp` to 177,147 trytes of heap (`on_stack` in
+  `lib/rust/start.s`, trystd's `thread::with_stack`) and comes back
+  after. Functions, `.`, `eval` and `$(...)` nest at most 40 deep.
+  trystd no longer zeroes a thread's stack either, only its own words.
+- **A kernel bug the thread found.** `bury` handed a child's end only to
+  its parent's first thread, so a parent waiting in another thread
+  slept for ever once the child ended after its wait began. Any thread
+  of the parent waiting for that child gets it now.
+- **POSIX where the old shell refused.** An open quote, or a line
+  ending in `|`, `&&` or `\`, asks for more with `> `; at the end of
+  the input it says `sh: the input ends inside a command`. `$1` is a
+  parameter, so `$1x` with none is `x`. The shell's bigger image loads
+  more slowly, so test disks grew to 72 blocks and shell images get 4
+  million steps by default.
+- **Descriptors are few.** A process has nine. Redirections keep what a
+  descriptor held in the highest spare one, on a stack, and put it
+  back after; nesting runs out at some depth, which the shell says.
+- **Quieter statuses.** The shell still says `sh: exit 3` for a command
+  typed at the prompt, but not for one whose status is tested (an
+  `if`'s or loop's condition, a side of `&&` or `||`, after `!`), nor in
+  a script: there a non-zero status is how `grep` or `test` answers.
+- **What it leaves out:** here-documents, `` `...` ``, `set -e` and
+  other options, `local`, `trap`, `exec`, aliases, and job control
+  beyond `&`, `jobs` and `wait`. `$((...))` has no `?:`. The image is
+  some 99,000 trytes, five pages more than the environment's shell.
+

@@ -53,7 +53,10 @@ def test_without_a_fixed_clock_it_is_the_hosts():
 
 
 def test_date_prints_the_time_of_day(shell):
-    assert session(shell, "date\n") == "$ date\nSat Nov 28 01:30:00 UTC 2026\n$ \n"
+    # The clock runs on from NOW as the machine boots: a second may pass.
+    assert re.fullmatch(
+        r"\$ date\nSat Nov 28 01:30:0[01] UTC 2026\n\$ \n", session(shell, "date\n")
+    )
 
 
 def test_date_formats_and_other_moments(shell):

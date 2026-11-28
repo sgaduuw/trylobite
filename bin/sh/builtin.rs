@@ -9,6 +9,7 @@ use trystd::prelude::*;
 use trystd::sys;
 
 use crate::expand::Arg;
+use crate::run::{Flow, WaitFor};
 use crate::out::{Out, fd_file};
 use crate::vars::is_name;
 use crate::{Shell, fail};
@@ -30,6 +31,21 @@ pub const BUILTINS: &[(&[u8], Builtin)] = &[
     (b"unset", unset),
     (b"env", env),
     (b"set", set),
+    (b"true", true_),
+    (b"false", false_),
+    (b":", true_),
+    (b"test", test),
+    (b"[", test),
+    (b"read", read),
+    (b"shift", shift),
+    (b"break", break_),
+    (b"continue", continue_),
+    (b"return", return_),
+    (b"wait", wait),
+    (b"jobs", jobs),
+    (b".", source),
+    (b"source", source),
+    (b"eval", eval),
 ];
 
 /// Trytes cat reads at a time.
@@ -61,14 +77,20 @@ fn exit(sh: &mut Shell, args: &[Arg]) -> i32 {
 
 /// A decimal number, perhaps negative.
 pub fn parse_number(s: &[u8]) -> Option<i32> {
+    parse_number64(s).and_then(|n| i32::try_from(n).ok())
+}
+
+/// The same in 64 bits, perhaps after a +.
+pub fn parse_number64(s: &[u8]) -> Option<i64> {
+    let s = s.strip_prefix(b"+").unwrap_or(s);
     let (neg, digits) = match s.strip_prefix(b"-") {
         Some(d) => (true, d),
         None => (false, s),
     };
-    if digits.is_empty() || digits.len() > 9 || !digits.iter().all(u8::is_ascii_digit) {
+    if digits.is_empty() || digits.len() > 18 || !digits.iter().all(u8::is_ascii_digit) {
         return None;
     }
-    let n = digits.iter().fold(0i32, |n, &c| n * 10 + (c - b'0') as i32);
+    let n = digits.iter().fold(0i64, |n, &c| n * 10 + (c - b'0') as i64);
     Some(if neg { -n } else { n })
 }
 
@@ -293,4 +315,329 @@ fn quoted(out: &mut Out, value: &[u8]) {
         }
     }
     out.c(b'\'');
+}
+
+fn true_(_: &mut Shell, _: &[Arg]) -> i32 {
+    0
+}
+
+fn false_(_: &mut Shell, _: &[Arg]) -> i32 {
+    1
+}
+
+/// test EXPR, or [ EXPR ]: 0 if EXPR holds, 1 if not, 2 if it is not
+/// an expression. -e -f -d -s FILE: it exists, is a file, a directory,
+/// a file not empty; -z -n S: S is empty, not; S = T, S != T; N -eq M
+/// and -ne -lt -le -gt -ge, numbers; ! EXPR; EXPR -a EXPR, EXPR -o EXPR;
+/// a lone S: it is not empty.
+fn test(_: &mut Shell, args: &[Arg]) -> i32 {
+    let mut words: Vec<&[u8]> = args[1..].iter().map(|a| &a.text[..]).collect();
+    if args[0].text == b"[" {
+        if words.last() != Some(&&b"]"[..]) {
+            Out::err().b(b"sh: [: no ] at the end").nl();
+            return 2;
+        }
+        words.pop();
+    }
+    let mut t = Test { words: &words, at: 0, bad: false };
+    let r = t.or();
+    if t.bad || t.at != words.len() {
+        Out::err().b(b"sh: test: not an expression").nl();
+        return 2;
+    }
+    (!r) as i32
+}
+
+struct Test<'a> {
+    words: &'a [&'a [u8]],
+    at: usize,
+    bad: bool,
+}
+
+impl<'a> Test<'a> {
+    fn peek(&self, k: usize) -> Option<&'a [u8]> {
+        self.words.get(self.at + k).copied()
+    }
+
+    fn or(&mut self) -> bool {
+        let mut r = self.and();
+        while self.peek(0) == Some(b"-o") {
+            self.at += 1;
+            r |= self.and();
+        }
+        r
+    }
+
+    fn and(&mut self) -> bool {
+        let mut r = self.not();
+        while self.peek(0) == Some(b"-a") {
+            self.at += 1;
+            r &= self.not();
+        }
+        r
+    }
+
+    fn not(&mut self) -> bool {
+        if self.peek(0) == Some(b"!") && self.peek(1).is_some() {
+            self.at += 1;
+            return !self.not();
+        }
+        self.primary()
+    }
+
+    fn primary(&mut self) -> bool {
+        let Some(a) = self.peek(0) else {
+            return false; // nothing: false
+        };
+        // A binary operator between two words.
+        if let (Some(op), Some(b)) = (self.peek(1), self.peek(2)) {
+            let r = match op {
+                b"=" | b"==" => Some(a == b),
+                b"!=" => Some(a != b),
+                b"-eq" | b"-ne" | b"-lt" | b"-le" | b"-gt" | b"-ge" => {
+                    match (parse_number64(a.trim_ascii()), parse_number64(b.trim_ascii())) {
+                        (Some(x), Some(y)) => Some(match op {
+                            b"-eq" => x == y,
+                            b"-ne" => x != y,
+                            b"-lt" => x < y,
+                            b"-le" => x <= y,
+                            b"-gt" => x > y,
+                            _ => x >= y,
+                        }),
+                        _ => {
+                            Out::err().b(b"sh: test: not a number").nl();
+                            self.bad = true;
+                            Some(false)
+                        }
+                    }
+                }
+                _ => None,
+            };
+            if let Some(r) = r {
+                self.at += 3;
+                return r;
+            }
+        }
+        if a.len() == 2 && a[0] == b'-' {
+            if let Some(b) = self.peek(1) {
+                let r = match a[1] {
+                    b'z' => Some(b.is_empty()),
+                    b'n' => Some(!b.is_empty()),
+                    b'e' => Some(fs::metadata(b).is_ok()),
+                    b'f' => Some(fs::metadata(b).is_ok_and(|m| m.is_file())),
+                    b'd' => Some(fs::metadata(b).is_ok_and(|m| m.is_dir())),
+                    b's' => Some(fs::metadata(b).is_ok_and(|m| m.len() > 0)),
+                    _ => None,
+                };
+                if let Some(r) = r {
+                    self.at += 2;
+                    return r;
+                }
+            }
+        }
+        self.at += 1;
+        !a.is_empty()
+    }
+}
+
+/// read [-r] NAME...: a line of standard input, split at blanks into the
+/// names, the last taking the rest; without -r, \ makes the next
+/// character itself and joins a line to the next. 1 at the end of input
+/// with nothing read. It reads a character at a time, so that what
+/// follows the line is left for whoever reads next.
+fn read(sh: &mut Shell, args: &[Arg]) -> i32 {
+    let mut names: Vec<&[u8]> = args[1..].iter().map(|a| &a.text[..]).collect();
+    let raw = names.first() == Some(&&b"-r"[..]);
+    if raw {
+        names.remove(0);
+    }
+    if names.is_empty() {
+        names.push(b"REPLY");
+    }
+    // Each character, and whether \ made it itself.
+    let mut line: Vec<(u8, bool)> = Vec::new();
+    let mut got_any = false;
+    let mut ended = false;
+    let mut escaped = false;
+    loop {
+        let mut c = [0u8; 1];
+        match fd_file(0).read(&mut c) {
+            Ok(1) => {}
+            _ => {
+                ended = true;
+                break;
+            }
+        }
+        got_any = true;
+        let c = c[0];
+        if escaped {
+            escaped = false;
+            if c != b'\n' {
+                line.push((c, true));
+            }
+            continue;
+        }
+        match c {
+            b'\n' => break,
+            b'\\' if !raw => escaped = true,
+            _ => line.push((c, false)),
+        }
+    }
+    let blank = |&(c, q): &(u8, bool)| !q && matches!(c, b' ' | b'\t');
+    let mut rest = &line[..];
+    for (k, name) in names.iter().enumerate() {
+        while rest.first().is_some_and(blank) {
+            rest = &rest[1..];
+        }
+        let value: Vec<u8> = if k + 1 == names.len() {
+            let mut v = rest;
+            while v.last().is_some_and(blank) {
+                v = &v[..v.len() - 1];
+            }
+            rest = &[];
+            v.iter().map(|&(c, _)| c).collect()
+        } else {
+            let n = rest.iter().position(blank).unwrap_or(rest.len());
+            let v = rest[..n].iter().map(|&(c, _)| c).collect();
+            rest = &rest[n..];
+            v
+        };
+        if !is_name(name) {
+            Out::err().b(b"sh: read: not a name: ").b(name).nl();
+            return 2;
+        }
+        if !sh.vars.set(name, &value) {
+            return 1;
+        }
+    }
+    (ended && !(got_any && !line.is_empty())) as i32
+}
+
+/// shift [N]: drop the first N positional parameters (1).
+fn shift(sh: &mut Shell, args: &[Arg]) -> i32 {
+    let n = match count_arg(args, b"shift") {
+        Some(n) => n as usize,
+        None => return 2,
+    };
+    if n > sh.params.len() {
+        Out::err().b(b"sh: shift: not that many parameters").nl();
+        return 1;
+    }
+    sh.params.drain(..n);
+    0
+}
+
+/// The positive count after a built-in's name, 1 without one.
+fn count_arg(args: &[Arg], what: &[u8]) -> Option<u32> {
+    match arg(args, 1) {
+        None => Some(1),
+        Some(n) => match parse_number(n) {
+            Some(n) if n >= 0 => Some(n as u32),
+            _ => {
+                Out::err().b(b"sh: ").b(what).b(b": not a count: ").b(n).nl();
+                None
+            }
+        },
+    }
+}
+
+/// break [N]: leave the innermost N loops.
+fn break_(sh: &mut Shell, args: &[Arg]) -> i32 {
+    match count_arg(args, b"break") {
+        Some(n) if n > 0 => {
+            sh.flow = Some(Flow::Break(n));
+            0
+        }
+        _ => 1,
+    }
+}
+
+/// continue [N]: go on with the next round of the Nth loop out.
+fn continue_(sh: &mut Shell, args: &[Arg]) -> i32 {
+    match count_arg(args, b"continue") {
+        Some(n) if n > 0 => {
+            sh.flow = Some(Flow::Continue(n));
+            0
+        }
+        _ => 1,
+    }
+}
+
+/// return [N]: end the function (or sourced file) with N, or $?.
+fn return_(sh: &mut Shell, args: &[Arg]) -> i32 {
+    let status = match arg(args, 1) {
+        None => sh.status,
+        Some(n) => match parse_number(n) {
+            Some(n) => n,
+            None => {
+                Out::err().b(b"sh: return: not a number: ").b(n).nl();
+                return 2;
+            }
+        },
+    };
+    sh.flow = Some(Flow::Return);
+    status
+}
+
+/// wait [%N | PID]...: wait for those background jobs, or every one;
+/// the last one's status.
+fn wait(sh: &mut Shell, args: &[Arg]) -> i32 {
+    if args.len() == 1 {
+        return sh.wait_jobs(None);
+    }
+    let mut status = 0;
+    for a in &args[1..] {
+        let which = match a.text.strip_prefix(b"%") {
+            Some(n) => parse_number(n).map(|n| WaitFor::Job(n as u32)),
+            None => parse_number(&a.text).map(|n| WaitFor::Pid(n as u32)),
+        };
+        let Some(which) = which else {
+            Out::err().b(b"sh: wait: not a job: ").b(&a.text).nl();
+            return 2;
+        };
+        status = sh.wait_jobs(Some(which));
+    }
+    status
+}
+
+/// jobs: the background jobs that have not been waited for.
+fn jobs(sh: &mut Shell, _: &[Arg]) -> i32 {
+    sh.check_jobs();
+    let mut out = Out::new(1);
+    for job in &sh.jobs {
+        out.c(b'[').n(job.id as i32).b(b"] running  ").b(&job.text).nl();
+    }
+    0
+}
+
+/// . FILE [ARG...], source FILE: run the file's commands in this shell.
+fn source(sh: &mut Shell, args: &[Arg]) -> i32 {
+    let Some(file) = name_arg(args) else { return 2 };
+    let text = match fs::read(file) {
+        Ok(t) => t,
+        Err(e) => return fail(file, &e),
+    };
+    let file = file.to_vec();
+    let given = args.len() > 2;
+    let saved = given.then(|| core::mem::replace(&mut sh.params, args[2..].iter().map(|a| a.text.clone()).collect()));
+    let status = sh.source(&text, &file);
+    if sh.flow == Some(Flow::Return) {
+        sh.flow = None;
+    }
+    if let Some(p) = saved {
+        sh.params = p;
+    }
+    status
+}
+
+/// eval WORD...: run the words, joined by spaces, as a command line.
+fn eval(sh: &mut Shell, args: &[Arg]) -> i32 {
+    let mut text = Vec::new();
+    for (k, a) in args[1..].iter().enumerate() {
+        if k > 0 {
+            text.push(b' ');
+        }
+        text.extend_from_slice(&a.text);
+    }
+    sh.source(&text, b"eval")
 }

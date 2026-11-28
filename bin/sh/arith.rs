@@ -132,7 +132,7 @@ impl Shell {
                 v
             }
             Some(c) if c.is_ascii_alphabetic() || c == b'_' => {
-                let name = s.name().to_vec();
+                let name = s.name();
                 let value = self.vars.get(&name).unwrap_or(b"").to_vec();
                 let text = value.trim_ascii();
                 if text.is_empty() {
@@ -154,7 +154,7 @@ impl Shell {
     }
 }
 
-impl Sum<'_> {
+impl<'a> Sum<'a> {
     fn peek(&self) -> Option<u8> {
         self.text.get(self.at).copied()
     }
@@ -165,7 +165,7 @@ impl Sum<'_> {
         }
     }
 
-    fn name(&mut self) -> &[u8] {
+    fn name(&mut self) -> &'a [u8] {
         let start = self.at;
         if self.peek().is_some_and(|c| c.is_ascii_alphabetic() || c == b'_') {
             while self.peek().is_some_and(|c| c.is_ascii_alphanumeric() || c == b'_') {
