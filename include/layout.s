@@ -27,13 +27,22 @@
         .equ  P_BOOTROOT, P_KCODE + NKCODE   # the boot address space's root table
         .equ  P_BOOTMID,  P_BOOTROOT + 1  # ... and its mid table
         .equ  P_KLEAF,    P_BOOTROOT + 2  # the kernel's leaf table, shared by all
-        .equ  P_PROG0,    P_BOOTROOT + 3  # program images, as loaded: program n's
-                                          # at page P_PROG0 + n, NPROG of them, as
-                                          # the build declares. The kernel copies
-                                          # one into a fresh page for each process
-                                          # it spawns. (P_FREE, the first free page,
-                                          # is include/kernel.s's: it needs NPROG)
+        .equ  P_PROG0,    P_BOOTROOT + 3  # program images, as loaded: NPROG of
+                                          # them, as the build declares, one after
+                                          # another from here, a page each unless
+                                          # one says it takes more (IMAGE_PAGES).
+                                          # The kernel copies one into fresh pages
+                                          # for each process it spawns; the pages
+                                          # after the last image are free
         .equ  NPROG_MAX, 27               # programs a build may add
+        .equ  IMAGE_PAGES, -9840          # a program image's first word, from its
+                                          # page's centre: 0 for an image of one
+                                          # page, else how many pages it takes, at
+                                          # most 1 + NXPAGE, the next image starting
+                                          # after its last. A program of several
+                                          # sets it with .org V_USER + IMAGE_PAGES:
+                                          # the stack's end of its first page, which
+                                          # the kernel reads before the stack grows
         .equ  POWER_PA, -2 * PAGE         # power-off register, for firmware
         .equ  POWER_RAM, 3                # with the power-off register: reads
                                           # how many RAM pages the machine has
@@ -728,8 +737,9 @@
 # lseek(offset, whence): the new position, E_INVAL. readdir(buffer): the
 # next entry's inode, its name to the buffer (NAME_MAX + 1 trytes); 0 at
 # the end; E_NOTDIR.
-        .equ  FS_PROTOCOL, 3              # the calls below, as they are now: a
+        .equ  FS_PROTOCOL, 4              # the calls below, as they are now: a
                                           # change a client would misread moves it on
+                                          # (4: the B-tree, its times and owners)
         .equ  FS_OPEN,    0               # open(path, flags): the caller's lowest
                                           # free descriptor, E_NOENT, E_NOTDIR,
                                           # E_NAMETOOLONG, E_MFILE (no descriptor
@@ -738,7 +748,7 @@
                                           # with O_CREAT also E_NOSPC
         # 1 to 4 were close, read, lseek and readdir: descriptor calls now
         .equ  FS_STAT,    5               # stat(path, buffer): 0, the ST_ words at
-                                          # the buffer; as open fails
+                                          # the (word-aligned) buffer; as open fails
         .equ  FS_SPAWN,   6               # spawnf(path, args, n): starts the
                                           # program file as the caller's child,
                                           # with the n trytes of arguments at args
@@ -761,8 +771,10 @@
                                           # buffer: 0, E_FAULT (bin/df)
         .equ  SF_BLOCKS,  0               # blocks in the filesystem,
         .equ  SF_BFREE,   3               # ... of them free
-        .equ  SF_INODES,  6               # inodes a file can have (1 to 728),
-        .equ  SF_IFREE,   9               # ... of them free
+        .equ  SF_INODES,  6               # inodes: those in use and SF_IFREE,
+        .equ  SF_IFREE,   9               # as many more as the free blocks' leaves
+                                          # would hold (INODES_PER_BLOCK each)
+        .equ  INODES_PER_BLOCK, 344       # inode items a node's room holds
         .equ  STATFS,    12               # trytes statfs fills, from SF_BLOCKS - 1
         .equ  FS_RENAME, 14               # rename(from, to): 0; what from names
                                           # takes the name to, replacing a file of
@@ -772,6 +784,22 @@
                                           # directory and to exists, or to is the
                                           # root), E_INVAL (. or .., or a directory
                                           # into itself), E_NOSPC, as open fails
+        .equ  FS_UTIMES, 15               # utimes(path, times): set its access and
+                                          # modification times from the four words
+                                          # at the (word-aligned) times: seconds and
+                                          # nanoseconds each, the nanoseconds
+                                          # UTIME_NOW for now or UTIME_OMIT to leave
+                                          # it; its change time becomes now: 0,
+                                          # E_INVAL, E_FAULT, as open fails
+        .equ  UTIME_NOW, -1
+        .equ  UTIME_OMIT, -2
+        .equ  FS_CHMOD,  16               # chmod(path, mode): its permissions,
+                                          # 0 to MODE_MAX: 0, E_INVAL, as open fails
+        .equ  FS_CHOWN,  17               # chown(path, uid, gid): its owner and
+                                          # group, KEEP_ID to leave one: 0, E_INVAL
+                                          # (negative), as open fails
+        .equ  KEEP_ID,   -1
+        .equ  FS_NOPS,   18               # how many FS_ operations there are
         .equ  PATH_MAX, 243               # trytes a path may have, its 0 not counted
 
 # Blocks come from the disk server, which registers as "disk" with
@@ -986,11 +1014,19 @@
         .equ  SEEK_SET, 0                 # lseek: from the start,
         .equ  SEEK_CUR, 1                 # from where it is,
         .equ  SEEK_END, 2                 # from the end
-        .equ  ST_INO,   0                 # stat: the inode number, its I_TYPE,
-        .equ  ST_TYPE,  3                 # links and size, a word each from
-        .equ  ST_LINKS, 6                 # the (word-aligned) address given
-        .equ  ST_SIZE,  9
-        .equ  STAT,    12                 # trytes stat fills, from ST_INO - 1
+        .equ  ST_INO,   0                 # stat: the inode number, its type
+        .equ  ST_TYPE,  3                 # (T_FILE or T_DIR), links and size in
+        .equ  ST_LINKS, 6                 # trytes, a word each from the
+        .equ  ST_SIZE,  9                 # (word-aligned) address given;
+        .equ  ST_MODE, 12                 # its permissions (0o777 bits),
+        .equ  ST_UID,  15                 # owner,
+        .equ  ST_GID,  18                 # and group;
+        .equ  ST_ATIME, 21                # when it was last read, written,
+        .equ  ST_MTIME, 27                # changed in any way and made: two
+        .equ  ST_CTIME, 33                # words each, seconds since 1970 and
+        .equ  ST_BTIME, 39                # nanoseconds;
+        .equ  ST_BLOCKS, 45               # and the disk blocks its data takes
+        .equ  STAT,    48                 # trytes stat fills, from ST_INO - 1
 
 # How a child ended, as wait returns it in a0. An exit code can be any
 # word, so it comes back in a1, apart from the status; the sign of a0
@@ -1166,16 +1202,19 @@
                                           # buffer: how many; E_FAULT
 
 # --- the filesystem (docs/filesystem.md) ----------------------------------------
-# Block 0 holds a header and the map of free blocks, block 1 the inodes;
-# every other block holds a file's or a directory's data. Offsets are in
-# trytes from a block's centre, as a program's
-# block window address them. Memory is centred (detrytus isa.md 5.2): a
-# block's words sit at -9840, -9837, ..., 9840, and its trytes run from
-# -9841 to 9841.
+# Block 0 is the superblock; every other block is free, a node of the
+# B-tree that holds every inode, directory entry and extent, or a
+# file's data. Where a program's block window addresses a block, offsets
+# are in trytes from its centre: memory is centred (detrytus isa.md 5.2),
+# so a block's words sit at -9840, -9837, ..., 9840, and its trytes run
+# from -9841 to 9841. The superblock's and nodes' fields after the boot
+# record are numbered in words instead, from the block's first (word 0
+# at BLOCK_W0, word k at BLOCK_W0 + 3 * k), as lib/rust/tryfs reads them.
 
         .equ  BLOCK_W0, -9840             # a block's first word
         .equ  BLOCK_T0, -9841             # ... and its first tryte, where
                                           # a file's data starts
+        .equ  BLOCK_WORDS, 6561           # words in a block
         .equ  FS_HEAD_MAGIC, BLOCK_W0     # word 0: FS_MAGIC
         .equ  FS_HEAD_VERSION, BLOCK_W0 + 3   # word 1: FS_VERSION
         .equ  FS_HEAD_BLOCKS, BLOCK_W0 + 6    # word 2: blocks in the filesystem
@@ -1190,34 +1229,71 @@
         .equ  BOOT_COUNT, BLOCK_W0 + 15   # word 5: how many blocks it has
         .equ  BOOT_PAGE, BLOCK_W0 + 18    # word 6: the page its first goes to
         .equ  BOOT_ENTRY, BLOCK_W0 + 21   # word 7: where it starts: FW_BOOT
-        .equ  FS_VERSION, 2
-        .equ  FS_MAP, BLOCK_T0 + 27       # after 9 words: one tryte per block,
-        .equ  MAP_FREE, 0                 # free or used, to the end of block 0
-        .equ  MAP_USED, 1
-        .equ  FS_MAX_BLOCKS, 19656        # as many as the map has trytes
+        .equ  FS_VERSION, 3               # 1: a FAT, 2: an inode table, 3: a B-tree
+        .equ  FS_MAX_BLOCKS, 19683        # blocks a filesystem may have
+        .equ  SB_ROOT,     9              # superblock word 9: the tree's root node
+        .equ  SB_SEQ,     10              # the commit that wrote it, counting up
+        .equ  SB_NEXT_INO, 11             # the next inode number to hand out
+        .equ  SB_INODES,  12              # inodes in use
+        .equ  SB_SUM,     13              # the sum (FS_SUM) of words 0 to SB_WORDS - 1
+        .equ  SB_WORDS,   14
 
-        .equ  FS_INODE_BLOCK, 1           # the inode table, a block of its own
-        .equ  FS_INODES, 729              # inodes 0 to 728; 0 is never used
-        .equ  INODE, 27                   # trytes each, from BLOCK_W0 + INODE * i;
-        .equ  I_TYPE, 0                   # its words, from its first: what it is
-        .equ  I_LINKS, 3                  # directory entries naming it
-        .equ  I_SIZE, 6                   # its size, in trytes
-        .equ  I_DIRECT, 9                 # NDIRECT data blocks, one word each,
-        .equ  NDIRECT, 5                  # the first ones of the file
-        .equ  I_INDIRECT, 24              # a block of the next ones' numbers
+# A node of the tree: a header, then items packed one after another in
+# key order, each its key's length and its value's in words, its key,
+# its value. A leaf's items are the filesystem's records; an inner
+# node's say which node holds keys from theirs on: each value is a
+# block, and the first item's covers every key below the second's.
+        .equ  NODE_MAGIC, 20261130        # node word 0
+        .equ  N_LEVEL,  1                 # 0 for a leaf, its children's + 1 above
+        .equ  N_COUNT,  2                 # items in it
+        .equ  N_USED,   3                 # words its items take, from N_ITEMS
+        .equ  N_SEQ,    4                 # the commit that wrote it
+        .equ  N_SUM,    5                 # the sum of its header and items, this word
+                                          # counted as 0
+        .equ  N_ITEMS,  9                 # the first item's first word
+        .equ  IT_KLEN,  0                 # an item's words: its key's length,
+        .equ  IT_VLEN,  1                 # its value's,
+        .equ  IT_KEY,   2                 # and its key, then its value
+        .equ  FS_SUM_RADIX, 2             # a sum: s = s * 2 + w, word by word,
+                                          # from 0, kept within a word
+# Keys compare word by word, a shorter key first when one is the start
+# of the other: every key starts with an inode number and a kind, so
+# each inode's records sit together, its own record first.
+        .equ  K_INODE, -1                 # [ino, K_INODE]: the inode
+        .equ  K_DIRENT, 0                 # [dir, K_DIRENT, name...]: an entry
+        .equ  K_EXTENT, 1                 # [ino, K_EXTENT, end]: file blocks up to end
+        .equ  KEY_MAX,  22                # words in the longest key, a dirent's
+        .equ  NAME_MAX, 60                # code points in a name; one is left for 0
+        .equ  NAME_WORDS, 20              # words a name packs into: 3 code points
+                                          # each, the first the most significant
+        .equ  IN_TYPE,  0                 # an inode's words: T_FILE or T_DIR,
+        .equ  IN_MODE,  1                 # its permissions, as Unix's 0o777 bits,
+        .equ  IN_UID,   2                 # its owner,
+        .equ  IN_GID,   3                 # and group,
+        .equ  IN_LINKS, 4                 # names it has (a directory: 2 + subdirectories),
+        .equ  IN_SIZE,  5                 # its size, in trytes,
+        .equ  IN_ATIME, 6                 # when it was last read,
+        .equ  IN_MTIME, 8                 # written,
+        .equ  IN_CTIME, 10                # changed in any way,
+        .equ  IN_BTIME, 12                # and made: a time is two words,
+                                          # seconds since 1970 and nanoseconds
+        .equ  IN_PARENT, 14               # a directory's parent (the root's is itself)
+        .equ  INODE_WORDS, 15
+        .equ  DE_INO,   0                 # an entry's words: the inode it names,
+        .equ  DE_TYPE,  1                 # and that inode's type
+        .equ  DIRENT_WORDS, 2
+        .equ  EX_START, 0                 # an extent's words: its first block,
+        .equ  EX_LEN,   1                 # and how many, ending at file block end - 1
+        .equ  EXTENT_WORDS, 2
         .equ  NO_BLOCK, 0                 # a data block that is not there: it
                                           # reads as zeros (block 0 never is one)
-        .equ  T_FREE, 0                   # I_TYPE: an unused inode
         .equ  T_FILE, 1                   # a regular file
         .equ  T_DIR, 2                    # a directory
         .equ  ROOT_INO, 1                 # the root directory, /
-
-        .equ  DIRENT, 21                  # trytes per directory entry; a
-        .equ  DIRENTS, 937                # block holds DIRENTS, from BLOCK_W0
-        .equ  D_NAME, -1                  # the name, 18 trytes, zero-padded
-        .equ  D_INO, 18                   # its inode, NO_INO when unused
         .equ  NO_INO, 0
-        .equ  NAME_MAX, 17                # code points in a name; one is left for 0
+        .equ  MODE_FILE, 420              # a new file's permissions: 0o644
+        .equ  MODE_DIR, 493               # ... and a directory's: 0o755
+        .equ  MODE_MAX, 4095              # permission bits there are: 0o7777
 
 # A program file: EXEC_MAGIC, the image's size, then the program's image,
 # as assembled to run from V_USER (its first word there, so its first

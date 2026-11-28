@@ -6,3 +6,5 @@ __pycache__/
 disk.img
 disk.img.tmp
 kernel/trykern.s
+user/fsd-rust.s
+target/

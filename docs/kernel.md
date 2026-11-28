@@ -73,7 +73,11 @@ into which `spawn` copies the program image loaded at boot, or
 half of its page (below its arguments, for a program file). A program
 file's image may go on past its own page, through up to `NXPAGE` (9)
 pages above it, which `spawnw` makes as it needs them: `rsqrt`, whose
-float formatting comes to about 22,000 trytes, takes one. Block
+float formatting comes to about 22,000 trytes, takes one. A program
+of the kernel image may take more than its page the same way: its first
+word, at `V_USER + IMAGE_PAGES` (the far end of the stack's half of its
+page), says how many pages its image takes in all, and `spawn` copies
+them all. Block
 windows take up to nine more pages, as a process asks for them, from
 `V_BLOCK`, past those; a driver also has its device's registers mapped
 past them, at `V_DEVICE`. Past the devices' pages is the **heap**, from
@@ -98,8 +102,8 @@ the hart's bank is still that process's (`fpu_owner`).
 | 1 | kernel data and stack |
 | 2, 3, 4 | kernel code (`NKCODE` pages from `P_KCODE`); the firmware in the last `FW_ROOM` trytes of page 4, from `FW_BOOT` |
 | 5, 6, 7 | the boot address space; the kernel's shared leaf table |
-| 8 .. 7 + `NPROG` | program images 0 to `NPROG` − 1, at most 27 (`NPROG_MAX`; the demo has 3, the shell build 10) |
-| 8 + `NPROG` .. the machine's last | free pages, handed out by the allocator |
+| 8 and on | program images 0 to `NPROG` − 1, at most 27 (`NPROG_MAX`; the demo has 3, the shell build 10), one after another, a page each unless an image's `IMAGE_PAGES` word says more |
+| after the last image .. the machine's last | free pages, handed out by the allocator |
 
 No kernel structure grows with memory. Free pages are those never yet
 handed out, counted by `fresh_page` up to `ram_pages`, plus a list of
@@ -901,14 +905,18 @@ with `--forward` (detrytus `docs/platform.md`). The tests start the servers with
 
 ## Files
 
-The disk can hold a filesystem, shaped like a Unix one: inodes, nested
-directories with `.` and `..`, and files reached by path through file
-descriptors ([`docs/filesystem.md`](filesystem.md)). The kernel knows
-nothing of it: a process, the **file server** (`user/fsd.s`), reads it
-into its block windows and answers `call`s to open files and to make and
+The disk can hold a filesystem, shaped like a Unix one: inodes with
+permissions, owners and times, nested directories with `.` and `..`,
+and files reached by path through file descriptors, all kept in one
+copy-on-write B-tree ([`docs/filesystem.md`](filesystem.md)). The
+kernel knows nothing of it: a process, the **file server**
+(`user/rust/fsd`, in Rust on the `lib/rust/tryfs` crate that the host's
+disk tool shares, with `user/fsd.s` its start), reads it into its block
+windows and answers `call`s to open files and to make and
 remove files and directories, and descriptor calls to read, write and
 list what was opened, keeping each open file and each process's current
-directory; it writes what a call changed before it replies. It registers
+directory; each call that changes something is a transaction, on the
+disk before the reply or not at all. It registers
 as `fs`, protocol `FS_PROTOCOL`, and clients find it by that name. It
 also starts program files: a program from the disk is the file server's
 doing, not the kernel's (`spawnw`). `tools/fs.py` makes and changes
@@ -1187,9 +1195,9 @@ a small way, and say what fails on standard error as `NAME: why`:
   `*`, `?` and `[...]`. `tar -c|-t|-x [-v] [-f ARCHIVE] [PATH]...`
   makes, lists or takes apart an archive in POSIX ustar format, a
   tryte for each byte, so an archive of text files is a tar file any
-  tar reads once its trytes are written out as bytes; files are
-  archived as 0644 and directories 0755, from time 0, until the
-  filesystem keeps modes and times. Both walk a tree with the paths
+  tar reads once its trytes are written out as bytes; each member
+  keeps its mode, owner, group and modification time, and `-x` restores
+  the mode and the time. Both walk a tree with the paths
   still to visit on the heap: a program has nine descriptors and half a
   page of stack, too few for one open directory and a frame per level.
 - `cp FROM TO` copies a file, and `mv FROM TO` renames one, or a

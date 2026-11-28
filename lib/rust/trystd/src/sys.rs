@@ -23,6 +23,8 @@ unsafe extern "C" {
     fn raw_word_at(address: usize) -> i32;
     #[link_name = "word_split"]
     fn raw_word_split(address: usize) -> u32;
+    #[link_name = "word_put"]
+    fn raw_word_put(address: usize, low: u32, high: i32);
     #[link_name = "ticks"]
     fn raw_ticks() -> u32;
     #[link_name = "sleep_until"]
@@ -66,6 +68,11 @@ pub fn word_at(address: usize) -> i32 {
 pub fn word_at_i64(address: usize) -> i64 {
     let low = unsafe { raw_word_split(address) };
     ((more(0) as i64) << 32) | low as i64
+}
+
+/// Store `w` whole at an aligned address.
+pub fn put_word_i64(address: usize, w: i64) {
+    unsafe { raw_word_put(address, w as u32, (w >> 32) as i32) }
 }
 
 /// The time CSR: ticks since boot, the clock for intervals.
@@ -259,6 +266,11 @@ impl<const T: usize> Words<T> {
     /// The same, whole, for a word past what an i32 holds.
     pub fn word_i64(&self, at: i32) -> i64 {
         word_at_i64(self.ptr() + at as usize)
+    }
+
+    /// Store `w` at offset `at`: words a call takes (utimes).
+    pub fn set_word_i64(&mut self, at: i32, w: i64) {
+        put_word_i64(self.ptr() + at as usize, w)
     }
 
     /// The tryte at offset `at`, a code point of a string the call left.

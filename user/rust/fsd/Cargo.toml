@@ -1,0 +1,18 @@
+[package]
+name = "fsd"
+version = "0.1.0"
+edition = "2024"
+description = "The file server: the filesystem (lib/rust/tryfs) behind the calls of FS_PROTOCOL, over the disk server's blocks (tools/server.py builds it into user/fsd.s's section)"
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["staticlib"]
+
+[dependencies]
+tryfs = { path = "../../../lib/rust/tryfs" }
+
+[profile.release]
+panic = "abort"
+# Small over fast: every page of its image is a page of RAM.
+opt-level = "z"
+codegen-units = 1

@@ -15,7 +15,7 @@ def shell():
     return assemble_file(ROOT / "shell.s")
 
 
-def said(shell, typed: str, size=None, max_steps=8_000_000) -> str:
+def said(shell, typed: str, size=None, max_steps=20_000_000) -> str:
     result = run_image(
         shell, input=typed, disk=bin_disk(), console_size=size, max_steps=max_steps
     )

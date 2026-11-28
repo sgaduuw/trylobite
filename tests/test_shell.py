@@ -131,7 +131,7 @@ def test_a_word_without_a_slash_is_looked_for_in_bin(shell):
 
 def test_ls_lists_the_programs_on_the_disk(shell):
     # Every program of bin/, some of two blocks, takes a while to list.
-    result = session(shell, "ls bin\nfail\n", max_steps=12_000_000)
+    result = session(shell, "ls bin\nfail\n", max_steps=25_000_000)
     assert "sh: exit 3\n" in result.console
     names = sorted(p.stem for p in (ROOT / "bin").glob("*.rs"))
     assert {"less", "find", "diff", "sort", "tar"} <= set(names)

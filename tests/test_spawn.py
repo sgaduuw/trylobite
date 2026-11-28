@@ -224,3 +224,49 @@ def test_a_build_may_add_up_to_nprog_max_programs():
     pages = fs.L["P_PROG0"] + last + 1 + 3 * PAGES_PER_PROCESS
     result = run_image(image, ram_pages=pages)
     assert result.code_of(0) == last + fs.L["E_NOPROG"]
+
+
+def test_a_program_image_may_take_several_pages():
+    # Program 1 says its image takes three pages (IMAGE_PAGES): its code
+    # starts in the first, jumps to the third and reads a word from the
+    # second. Program 2 is loaded in the page after them, and the pages
+    # after that are free: one page of RAM fewer and program 1 does not
+    # fit.
+    image = _assemble(
+        ["-"],
+        stdin=f"""
+        .equ  NPROG, 3
+        .include "include/kernel.s"
+        .section prog0, P_PROG0 * PAGE, V_USER
+        {spawn(1, "s0")}
+        {wait_for("s0")}
+        mv    s1, a1
+        {spawn(2, "s0")}
+        {wait_for("s0")}
+        li    t0, 1000
+        mul   a1, a1, t0
+        add   a1, a1, s1
+        {EXIT}
+        .section prog1, (P_PROG0 + 1) * PAGE, V_USER
+        .org  V_USER + IMAGE_PAGES
+        .word 3
+        .org  V_USER
+        j     far
+        .org  V_USER + PAGE
+middle: .word 41
+        .org  V_USER + 2 * PAGE
+far:    la    t0, middle
+        lw    a1, 0(t0)
+        addi  a1, a1, 1
+        {EXIT}
+        .section prog2, (P_PROG0 + 4) * PAGE, V_USER
+        li    a1, 7
+        {EXIT}
+""",
+    )
+    # Free from P_PROG0 + 5 to the last page: init, the log's page, and
+    # program 1 with its two pages more.
+    pages = fs.L["P_PROG0"] + 5 - 1 + 2 * PAGES_PER_PROCESS + 1 + 2
+    assert run_image(image, ram_pages=pages).code_of(0) == 7 * 1000 + 42
+    short = run_image(image, ram_pages=pages - 1)  # program 1 does not fit
+    assert short.code_of(0) == 7 * 1000 + fs.L["E_NOMEM"]

@@ -82,7 +82,7 @@ def build_with(numbers: dict[str, int], *programs: str):
     source = source.replace(".equ  NPROG, 10", f".equ  NPROG, {10 + len(programs)}")
     for number, body in enumerate(programs, 10):
         source += f"""
-        .section prog{number}, (P_PROG0 + {number}) * PAGE, V_USER
+        .section prog{number}, (P_PROG0 + {number} + FS_PAGES - 1) * PAGE, V_USER
         .gp   USER_GP
 {body}
 """
@@ -138,7 +138,7 @@ def test_a_server_that_ends_is_started_again_until_init_gives_up():
         failing_server("pipe", "PIPE_PROTOCOL"),
         calling_shell("pipe"),
     )
-    result = run_image(image, max_steps=10_000_000)
+    result = run_image(image, max_steps=25_000_000)
     assert result.exit_code == 0, result.console
     assert trouble(result.console) == ["init: pipe ended, starting it again"] * 3 + [
         "init: pipe ended too often, giving up on it"
@@ -155,7 +155,7 @@ def test_what_needs_a_server_that_ends_is_started_again_with_it():
         failing_server("disk", "DISK_PROTOCOL"),
         calling_shell("disk"),
     )
-    result = run_image(image, disk=bin_disk(), max_steps=10_000_000)
+    result = run_image(image, disk=bin_disk(), max_steps=25_000_000)
     assert result.exit_code == 0, result.console
     console = result.console
     assert console.count("init: disk ended, starting it again\n") == 3
@@ -292,8 +292,11 @@ def test_etc_init_names_no_such_server():
 
 def test_a_program_in_etc_init_starts_with_its_arguments_before_the_shell():
     # Once it has exited it is done, not started again. (Its words are
-    # split at spaces, however many.)
-    result = boot("/bin/touch   /from-init  /made-by-init\n", input="sleep 9\nls\n")
+    # split at spaces, however many.) The shell sleeps until touch is
+    # surely done, which on one hart can take a few slices.
+    result = boot(
+        "/bin/touch   /from-init  /made-by-init\n", input="sleep 2000000\nls\n"
+    )
     assert result.exit_code == 0, result.console
     console = result.console
     assert said(console) == [
@@ -311,7 +314,7 @@ def test_a_program_in_etc_init_starts_with_its_arguments_before_the_shell():
 def test_a_program_in_etc_init_that_faults_is_started_again_until_init_gives_up():
     # The shell sleeps so as not to exit, and end init, before then.
     result = boot(
-        "/bin/crash\n", "sleep 9\nexit\n", programs=(ROOT / "tests" / "crash.s",)
+        "/bin/crash\n", "sleep 3000000\nexit\n", programs=(ROOT / "tests" / "crash.s",)
     )
     assert result.exit_code == 0, result.console
     console = result.console

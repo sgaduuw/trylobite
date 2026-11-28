@@ -42,14 +42,34 @@ fn first(page: Word) -> *mut u8 {
 }
 
 /// Read how much RAM the machine has, as much of it as the direct map
-/// reaches, and make pages P_FREE on free (page_init, at boot).
+/// reaches, and make the pages after the program images free
+/// (page_init, at boot).
 #[unsafe(no_mangle)]
 pub extern "C" fn rk_page_init() {
     let ram = load_at(addr(V_POWER), POWER_RAM).min(MEM_MAX);
     write::ram_pages(ram);
-    let p_free = P_PROG0 + read::nprog();
+    let (last, above) = image(read::nprog() as i32 - 1);
+    let p_free = last + 1 + above as Word;
     write::fresh_page(p_free);
-    write::free_count((ram - p_free + 1).max(0)); // pages P_FREE to ram_pages
+    write::free_count((ram - p_free + 1).max(0)); // pages p_free to ram_pages
+}
+
+/// Program `n`'s image, as the build loaded it: its first page, and how
+/// many pages it takes above that one. The images lie one after
+/// another from P_PROG0, each a page unless its first word says more
+/// (IMAGE_PAGES), so they are walked from the first.
+fn image(n: i32) -> (Word, i32) {
+    let mut page = P_PROG0;
+    let mut k = 0;
+    loop {
+        let says = load_at(page_at(page), IMAGE_PAGES);
+        let above = if says > 1 { (says - 1).min(NXPAGE) as i32 } else { 0 };
+        if k >= n {
+            return (page, above);
+        }
+        page += 1 + above as Word;
+        k += 1;
+    }
 }
 
 /// A free page, not cleared: one given back if there is one, else the
@@ -98,10 +118,11 @@ fn words(p: *mut u8, n: i32) -> *mut u8 {
 
 /// Start a program in a free slot, as a child of process `parent` (or
 /// NO_PARENT): with `image` not 0, the program image the build loaded
-/// in that page, copied whole; with `image` 0, the program file in the
-/// block windows of `caller` from window PCB_A1 on (spawnw has checked
-/// it), whose image takes `above` pages above the process's own. Its
-/// process number, or E_NOSLOT or E_NOMEM.
+/// from that page, copied whole, `above` pages more after it; with
+/// `image` 0, the program file in the block windows of `caller` from
+/// window PCB_A1 on (spawnw has checked it), whose image takes `above`
+/// pages above the process's own. Its process number, or E_NOSLOT or
+/// E_NOMEM.
 fn spawn(caller: Proc, parent: Word, image: i32, above: i32) -> Word {
     // The parent's environment, which the child gets a copy of.
     let env = if parent == NO_PARENT {
@@ -162,8 +183,15 @@ fn spawn(caller: Proc, parent: Word, image: i32, above: i32) -> Word {
     let mut entry = page_at(leaf);
     store(entry, phys(user) + USER_FLAGS);
     let mut x = s.at(PCB_XPAGES);
-    for _ in 0..above {
-        let page = alloc_page();
+    for k in 0..above {
+        let page = if image != 0 {
+            let page = take_page(); // copied over whole, as the first
+            let from = first(image as Word + 1 + k as Word);
+            unsafe { core::ptr::copy_nonoverlapping(from, first(page), PAGE as usize) };
+            page
+        } else {
+            alloc_page()
+        };
         store(x, page);
         entry = words(entry, 1);
         store(entry, phys(page) + USER_FLAGS);
@@ -296,7 +324,8 @@ pub fn ptbr(root: Word, s: Proc) -> Word {
 pub extern "C" fn rk_spawn_init() -> i32 {
     write::next_slot(kdata::procs_base() as isize as Word); // spawn starts with slot 0
     let none = Proc(core::ptr::null_mut());
-    (spawn(none, NO_PARENT, P_PROG0 as i32, 0) >= 0) as i32
+    let (page, above) = image(0);
+    (spawn(none, NO_PARENT, page as i32, above) >= 0) as i32
 }
 
 /// spawn(program): start program image a1 as the caller's child. Its
@@ -308,7 +337,8 @@ pub extern "C" fn rk_sys_spawn(p: *mut u8) {
     let r = if n < 0 || n >= read::nprog() {
         E_NOPROG
     } else {
-        spawn(p, p.space().pid(), (P_PROG0 + n) as i32, 0) // a thread's are its process's
+        let (page, above) = image(n as i32);
+        spawn(p, p.space().pid(), page as i32, above) // a thread's are its process's
     };
     p.set(PCB_A0, r);
 }

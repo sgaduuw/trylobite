@@ -32,13 +32,13 @@
         .include "user/pingpong.s"
         .section prog4, (P_PROG0 + 4) * PAGE, V_USER
         .include "user/fsd.s"
-        .section prog5, (P_PROG0 + 5) * PAGE, V_USER
+        .section prog5, (P_PROG0 + 5 + FS_PAGES - 1) * PAGE, V_USER
         .include "user/diskd.s"
-        .section prog6, (P_PROG0 + 6) * PAGE, V_USER
+        .section prog6, (P_PROG0 + 6 + FS_PAGES - 1) * PAGE, V_USER
         .include "user/consd.s"
-        .section prog7, (P_PROG0 + 7) * PAGE, V_USER
+        .section prog7, (P_PROG0 + 7 + FS_PAGES - 1) * PAGE, V_USER
         .include "user/piped.s"
-        .section prog8, (P_PROG0 + 8) * PAGE, V_USER
+        .section prog8, (P_PROG0 + 8 + FS_PAGES - 1) * PAGE, V_USER
         .include "user/netd.s"
-        .section prog9, (P_PROG0 + 9) * PAGE, V_USER
+        .section prog9, (P_PROG0 + 9 + FS_PAGES - 1) * PAGE, V_USER
         .include "user/ipd.s"

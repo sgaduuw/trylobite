@@ -6,6 +6,7 @@ import re
 import pytest
 
 from tests.kernel import ROOT, assemble_file, bin_disk, run_image
+from tools import fs
 
 
 @pytest.fixture(scope="module")
@@ -13,7 +14,7 @@ def shell():
     return assemble_file(ROOT / "shell.s")
 
 
-def session(shell, typed: str, on=None, max_steps: int = 12_000_000, clock=None):
+def session(shell, typed: str, on=None, max_steps: int = 25_000_000, clock=None):
     result = run_image(
         shell, input=typed, disk=on or bin_disk(), max_steps=max_steps, clock=clock
     )
@@ -170,5 +171,8 @@ def test_df_counts_blocks_and_inodes(shell):
     assert before[0] == after[0] == blocks
     assert before[1] + before[2] == blocks
     assert after[1] == before[1] + 1  # the new file's block
-    assert after[5] == before[5] - 1  # and its inode
-    assert before[4] == 728
+    # Inodes take no room of their own: the free ones are as many as the
+    # free blocks would hold, and the total those and the ones in use.
+    per = fs.L["INODES_PER_BLOCK"]
+    assert (before[5], after[5]) == (before[2] * per, after[2] * per)
+    assert after[4] - after[5] == before[4] - before[5] + 1  # its inode

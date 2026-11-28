@@ -34,9 +34,10 @@ sea floor, living among the detritus.
   inherited by its children. Only a server can hand one out, and the
   kernel routes `read` and `write` on it to that server, so a handle
   cannot be forged.
-- **A Unix-shaped filesystem** on the block device: inodes, nested
-  directories, a current directory per process, and a host tool to make
-  disk images.
+- **A Unix-shaped filesystem** on the block device, one copy-on-write
+  B-tree after bcachefs: inodes with permissions, owners and times,
+  nested directories, every call a transaction, a current directory per
+  process, and a host tool on the same Rust crate to make disk images.
 - **A shell** with built-ins (`ls`, `cat`, `cd`, `pwd`, `mkdir`, ...),
   programs run from `$PATH` on the disk with arguments and an
   environment, variables (`export`, `$NAME`, `$?`), `<`, `>` and
@@ -131,7 +132,7 @@ detrytus run --input session.txt --disk disk.img
 
 Given a disk and no program, detrytus' boot ROM reads the boot record
 in block 0, loads the kernel's pages from the blocks it names and starts
-the firmware (docs/filesystem.md, Block 0; detrytus platform.md, Booting
+the firmware (docs/filesystem.md, The superblock; detrytus platform.md, Booting
 from a disk). `tools/fs.py boot disk.img shell.s` puts a rebuilt kernel
 on a disk without touching its files. Naming the build instead,
 `detrytus run shell.s --disk disk.img`, loads the same
@@ -396,7 +397,7 @@ while it runs, and the kernel reports each.
 | Process | Name | Job |
 |---------|------|-----|
 | `user/init.s` | | program 0: starts the console, disk and file servers, then the servers and programs `/etc/init` names, then the shell, `/bin/sh` |
-| `user/fsd.s` | `fs` | the file server: paths, directories, open files, starting programs from the disk |
+| `user/rust/fsd` | `fs` | the file server, in Rust (`user/fsd.s` its start): paths, directories, open files, metadata, starting programs from the disk |
 | `user/diskd.s` | `disk` | drives the block device, moving blocks by DMA |
 | `user/consd.s` | `console` | drives the console: input, output, Ctrl-C and Ctrl-Z for the foreground job |
 | `user/piped.s` | `pipe` | pipes |
@@ -451,12 +452,14 @@ emulator, so trylobite has never run on hardware.
 | `kernel/data.s` | the process table, buffers, messages |
 | `kernel/pagetables.s` | the boot address space and the kernel's shared leaf table |
 | `user/` | programs built into the kernel image: `demo-init`, `ping` and `pong` for the demo; `init`, `pingpong` and the servers `fsd`, `diskd`, `consd`, `piped`, `netd` and `ipd` for the shell |
-| `bin/` | programs for the disk, in Rust over trystd, each built on its own: the shell `sh` (its parts in `bin/sh/`), `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `sort`, `diff`, `find`, `tar`, `less`, `cp`, `mv`, `touch`, the system tools `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`, `date`, `ntpd`, `ntpctl`, `dhcp`, `ping`, `ifconfig`, `host`, `nc`, `telnet` and the remote shell `telnetd` for the network, and `rfact`, `rmandel`, `rsqrt`, `rsort`, `tee`, `xargs`, `fetch`, `httpd`, `vi` and `stty` |
+| `bin/` | programs for the disk, in Rust over trystd, each built on its own: the shell `sh` (its parts in `bin/sh/`), `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `sort`, `diff`, `find`, `tar`, `less`, `cp`, `mv`, `touch`, `ls`, `stat`, `chmod`, the system tools `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`, `date`, `ntpd`, `ntpctl`, `dhcp`, `ping`, `ifconfig`, `host`, `nc`, `telnet` and the remote shell `telnetd` for the network, and `rfact`, `rmandel`, `rsqrt`, `rsort`, `tee`, `xargs`, `fetch`, `httpd`, `vi` and `stty` |
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
 | `shell.s` | a 243-page machine starting the shell and its servers |
 | `docs/` | the kernel and the filesystem, described |
 | `Makefile` | `make` builds `disk.img` with the kernel in its boot blocks and the programs of `bin/`, and the kernel's Rust part; `make run` boots it; `make benchmark` times the emulator |
-| `tools/fs.py` | makes and reads filesystem images on the host |
+| `lib/rust/tryfs` | the filesystem's format, shared by the file server and the host tool |
+| `tools/fs.py` | makes and reads filesystem images on the host, through `tools/rust/tryfs` |
+| `tools/server.py` | builds the file server's Rust (`make kernel`) |
 | `tools/kernel.py` | builds the kernel's Rust part (`make kernel`) |
 | `tools/install-detrytus` | installs the pinned `detrytus` command |
 | `tests/` | the tests, and a harness that builds the kernel with test programs |

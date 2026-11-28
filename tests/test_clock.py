@@ -85,11 +85,14 @@ def test_without_a_fixed_clock_the_monotonic_clock_is_real_time():
     assert s2 <= time.monotonic() - started + 1
 
 
+# The clock moves a microsecond a tick, and booting the shell from the disk
+# takes a few million: date runs a few seconds past NOW.
+LATER = r"0[0-9]"
+
+
 def test_date_prints_the_time_of_day(shell):
-    # The clock runs on from NOW as the machine boots: a second may pass.
-    assert re.fullmatch(
-        r"\$ date\nSat Nov 28 01:30:0[01] UTC 2026\n\$ \n", session(shell, "date\n")
-    )
+    out = session(shell, "date\n")
+    assert re.fullmatch(rf"\$ date\nSat Nov 28 01:30:{LATER} UTC 2026\n\$ \n", out), out
 
 
 def test_date_formats_and_other_moments(shell):
@@ -102,12 +105,12 @@ def test_date_formats_and_other_moments(shell):
         "date -d @68719476736 +%F\n"
         "date -x\n"
     )
-    first, rest = session(shell, typed).split("$ date -d @0\n", 1)
-    # The clock runs on from NOW as the machine boots: a second may pass.
-    assert re.fullmatch(
-        r"\$ date \+%F_%T_%s\n2026-11-28_01:30:0([01])_179582940\1\n", first
-    )
-    assert rest == (
+    out = session(shell, typed)
+    first, rest = out.split("\n$ date -d @0\n", 1)
+    m = re.fullmatch(rf"\$ date \+%F_%T_%s\n2026-11-28_01:30:({LATER})_(\d+)", first)
+    assert m and int(m[2]) == NOW + int(m[1]), first
+    assert "$ date -d @0\n" + rest == (
+        "$ date -d @0\n"
         "Thu Jan  1 00:00:00 UTC 1970\n"
         "$ date -u -d @951782400 '+%a %j %e %y %%'\n"
         "Tue 060 29 00 %\n"

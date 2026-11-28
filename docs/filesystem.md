@@ -1,14 +1,20 @@
 # The filesystem
 
 A filesystem on detrytus' block device, shaped like a Unix one: files
-and directories are inodes, directories are files of names and inode
-numbers with `.` and `..`, and programs reach files by path through
-descriptors, with `open`, `read`, `write`, `lseek`, `readdir`, `stat`
-and `close`, and `unlink`, `rename`, `mkdir` and `rmdir`. A process, the file
-server (`user/fsd.s`), reads and changes it, answering other processes'
-calls; `tools/fs.py` builds and changes images
-on the host. Every number below is named in `include/layout.s`, which the
-tool reads too.
+and directories are inodes with permissions, an owner and four times,
+directories hold names with `.` and `..`, and programs reach files by
+path through descriptors, with `open`, `read`, `write`, `lseek`,
+`readdir`, `stat` and `close`, and `unlink`, `rename`, `mkdir`,
+`rmdir`, `utimes`, `chmod` and `chown`. Every record lives in one
+copy-on-write B-tree, after bcachefs: a change never writes over what
+the disk's tree points to, so the disk always holds the tree as the last
+call left it.
+
+One Rust crate, `lib/rust/tryfs`, is the format: the file server
+(`user/rust/fsd`, a process answering other processes' calls) and the
+host's disk tool (`tools/rust/tryfs`, which `tools/fs.py` runs) are both
+built on it. Every number below is named in `include/layout.s`, which
+the crate reads too.
 
 ## Blocks
 
@@ -16,30 +22,38 @@ A block is one page, 19,683 trytes or 6,561 words. Memory is centred
 (detrytus isa.md 5.2), so offsets are given from a block's centre, as
 a program's block window sees them: trytes run
 from −9,841 to 9,841 and words sit at −9,840, −9,837, ..., 9,840. A
-word's low tryte comes first.
+word's low tryte comes first. The superblock's words after the boot
+record, and a node's, are numbered from the block's first word instead:
+word `k` is at `BLOCK_W0 + 3k`.
 
-| Block | Holds |
-|-------|-------|
-| 0 | the header and the map of free blocks |
-| 1 (`FS_INODE_BLOCK`) | the inode table |
-| 2 and on | the data of files and directories, and indirect blocks |
+Block 0 is the superblock. Every other block is free, a node of the
+tree, a file's data, or one of the kernel's (the boot record's). Which
+blocks are free is not on the disk: mounting walks the tree and marks
+every block it reaches, so there is no map to keep in step with it, and
+no way for the two to disagree. A filesystem has 2 to `FS_MAX_BLOCKS`
+(19,683) blocks; the disk may have more.
 
-## Block 0
+## The superblock
 
-| Offset | Name | Contents |
-|--------|------|----------|
-| −9,840 (word 0) | `FS_HEAD_MAGIC` | `FS_MAGIC`: a blank disk, all zeros, is not a filesystem |
-| −9,837 (word 1) | `FS_HEAD_VERSION` | `FS_VERSION`, 2 (version 1 was a flat directory and a FAT) |
-| −9,834 (word 2) | `FS_HEAD_BLOCKS` | how many blocks the filesystem has, 3 to `FS_MAX_BLOCKS` (19,656); the disk may have more |
-| −9,831 (word 3) | `FS_HEAD_BOOT` | `BOOT_MAGIC` (20,261,128) on a disk the kernel boots from, else 0 |
-| −9,828 (word 4) | `BOOT_FIRST` | the kernel's first block |
-| −9,825 (word 5) | `BOOT_COUNT` | how many blocks it has |
-| −9,822 (word 6) | `BOOT_PAGE` | the RAM page its first block loads into: 1 |
-| −9,819 (word 7) | `BOOT_ENTRY` | where it starts: `FW_BOOT`, the firmware |
-| −9,814 (`FS_MAP`) | the map | one tryte per block, from block 0: `MAP_USED` (1) or `MAP_FREE` (0) |
+| Word | Name | Contents |
+|------|------|----------|
+| 0 | `FS_HEAD_MAGIC` | `FS_MAGIC`: a blank disk, all zeros, is not a filesystem |
+| 1 | `FS_HEAD_VERSION` | `FS_VERSION`, 3 (1 was a flat directory and a FAT, 2 an inode table) |
+| 2 | `FS_HEAD_BLOCKS` | how many blocks the filesystem has |
+| 3 | `FS_HEAD_BOOT` | `BOOT_MAGIC` (20,261,128) on a disk the kernel boots from, else 0 |
+| 4 | `BOOT_FIRST` | the kernel's first block |
+| 5 | `BOOT_COUNT` | how many blocks it has |
+| 6 | `BOOT_PAGE` | the RAM page its first block loads into: 1 |
+| 7 | `BOOT_ENTRY` | where it starts: `FW_BOOT`, the firmware |
+| 9 | `SB_ROOT` | the tree's root node |
+| 10 | `SB_SEQ` | how many commits there have been: the one that wrote this |
+| 11 | `SB_NEXT_INO` | the next inode number to hand out; numbers are not used again |
+| 12 | `SB_INODES` | inodes in use |
+| 13 | `SB_SUM` | the sum of words 0 to 12 |
 
-The map runs to the block's last tryte. Blocks 0 and 1 are always used,
-as is every block an inode holds or the boot record names, and no other.
+A sum runs over words from 0, `s = 2s + w` for each, kept within a
+word (`FS_SUM_RADIX`). A superblock or node whose sum is wrong is
+damaged, and the filesystem does not mount (`E_IO`).
 
 Words 3 to 8 are detrytus' **boot record** (detrytus
 docs/platform.md, Booting from a disk): with no program, `detrytus run
@@ -48,46 +62,122 @@ RAM pages from `BOOT_PAGE` and jumps to `BOOT_ENTRY`. `tools/fs.py new
 --boot shell.s` and `tools/fs.py boot` put a build's pages 1 and up
 (the kernel, the firmware and the built-in programs) in the first run
 of free blocks long enough, and fill the record in; the file server
-leaves both alone. Word 8 stays 0.
+leaves both alone, and never allocates the kernel's blocks. Word 8
+stays 0.
+
+## The tree
+
+A node is a block: a header, then items packed one after another in key
+order.
+
+| Word | Name | Contents |
+|------|------|----------|
+| 0 | | `NODE_MAGIC` |
+| 1 | `N_LEVEL` | 0 for a leaf, one more than its children's above |
+| 2 | `N_COUNT` | how many items it holds |
+| 3 | `N_USED` | the words its items take |
+| 4 | `N_SEQ` | the commit that wrote it |
+| 5 | `N_SUM` | the sum of the header and items, this word counted as 0 |
+| 9 (`N_ITEMS`) | | the first item |
+
+An item is its key's length and its value's, in words (`IT_KLEN`,
+`IT_VLEN`), then its key, then its value. A leaf's items are the
+filesystem's records. An inner node's values are each one block, the
+child holding keys from that item's key up to the next item's; the
+first covers every key below the second. A leaf that would overflow
+splits in two by words, and the split goes up the way to it; a root that
+splits gets a new root above it. A node left empty is taken out of its
+parent, and a root with one child gives way to it. There are no links
+between siblings, which copy-on-write would have to keep up: the next
+leaf is found from the parent's next key. A tree has at most 8 levels,
+far more than `FS_MAX_BLOCKS` blocks need.
+
+Keys compare word by word, a shorter key first when one is the start of
+the other. Every key starts with an inode number and a kind, so each
+inode's records sit together, its own record first:
+
+| Key | Value |
+|-----|-------|
+| `[ino, K_INODE]` (−1) | the inode, `INODE_WORDS` (15) words, below |
+| `[dir, K_DIRENT, name...]` (0) | an entry of directory `dir`: the inode it names (`DE_INO`) and that inode's type (`DE_TYPE`) |
+| `[ino, K_EXTENT, end]` (1) | a run of the file's data: its first disk block (`EX_START`) and how many (`EX_LEN`), for the file's blocks `end − EX_LEN` to `end − 1` |
+
+An extent is keyed by its end so that the extent holding file block `b`
+is the first whose key is after `[ino, K_EXTENT, b]`. A block of a file
+no extent covers is a hole, and reads as zeros (`NO_BLOCK`, 0, is never
+data). A file of `n` trytes has `⌈n / 19,683⌉` blocks at most, and the
+rest of its last block is zero. Writing the block after an extent's
+last grows the extent when the next disk block is free, so a file
+written from the start usually has one extent.
 
 ## Inodes
 
-Block 1 holds `FS_INODES` (729) inodes of `INODE` (27) trytes, inode `i`
-from `BLOCK_W0 + 27 × i`. Inode 0 is never used, so `NO_INO` (0) means
-none; inode 1 (`ROOT_INO`) is the root directory, `/`. Each is nine
-words, at these offsets from its first:
+| Word | Name | Contents |
+|------|------|----------|
+| 0 | `IN_TYPE` | `T_FILE` (1) or `T_DIR` (2) |
+| 1 | `IN_MODE` | its permissions, Unix's bits up to 0o7777 (`MODE_MAX`): a new file's are 0o644 (`MODE_FILE`), a directory's 0o755 (`MODE_DIR`) |
+| 2 | `IN_UID` | its owner: 0 until there are users |
+| 3 | `IN_GID` | its group: 0 too |
+| 4 | `IN_LINKS` | a file's names; a directory's 2 (its name and its `.`) and one for each subdirectory's `..` |
+| 5 | `IN_SIZE` | a file's size in trytes; a directory's entries, `.` and `..` counted |
+| 6 | `IN_ATIME` | when it was last read |
+| 8 | `IN_MTIME` | when its contents last changed |
+| 10 | `IN_CTIME` | when anything about it last changed |
+| 12 | `IN_BTIME` | when it was made |
+| 14 | `IN_PARENT` | a directory's parent (the root's is itself); 0 for a file |
 
-| Offset | Name | Contents |
-|--------|------|----------|
-| 0 | `I_TYPE` | `T_FREE` (0) unused, `T_FILE` (1) a file, `T_DIR` (2) a directory |
-| 3 | `I_LINKS` | how many directory entries name it: a file's names; a directory's own name, its `.`, and each subdirectory's `..` |
-| 6 | `I_SIZE` | its size in trytes |
-| 9 | `I_DIRECT` | its first `NDIRECT` (5) data blocks, a word each |
-| 24 | `I_INDIRECT` | a block holding the numbers of the rest, a word each, or `NO_BLOCK` |
+A time is two words, seconds since 1970 and nanoseconds, from the
+kernel's clock (`SYS_CLOCK`, kernel.md): the server reads it once per
+call that may change something, so every time one call sets is the same.
+Inode 0 is never used, so `NO_INO` (0) means none; inode 1 (`ROOT_INO`)
+is the root directory, `/`.
 
-Block `k` of a file, counting from 0, is direct block `k` while `k` is
-below 5, and word `k − 5` of the indirect block after that, so a file
-holds at most 6,566 blocks. A block number of `NO_BLOCK` (0) is a hole,
-which reads as zeros; block 0 is never data. A file of `n` trytes has
-`⌈n / 19,683⌉` blocks, and the rest of its last block is zero. Fields
-of an unused inode are zero.
+Reading moves the access time only while it is no later than the
+modification or change time, as Linux's `relatime` has it: so `ls -lu`
+says whether a file was read since it last changed, and reading does
+not write the disk every time.
 
 ## Directories
 
-A directory's data is entries of `DIRENT` (21) trytes, `DIRENTS` (937)
-to a block, entry `k` from `BLOCK_W0 + 21 × k` of its block; its size is
-21 trytes per entry. For now a directory has one block, so it holds at
-most 937 entries. Offsets are from an entry's first word:
+A directory's entries are its `K_DIRENT` items. A name of 1 to
+`NAME_MAX` (60) code points packs into `NAME_WORDS` (20) words, three
+code points to a word with the first the most significant, so names
+sort as their code points do and a directory lists in that order. A
+name holds no space, slash or control character, and is unique in its
+directory. `.` and `..` are not stored: the server answers them from
+the directory itself and its `IN_PARENT`, and they cannot be made,
+removed or renamed. A directory takes no block of its own; its entries
+share leaves with every other record, so a directory may hold as many
+names as the disk has room for.
 
-| Offset | Name | Contents |
-|--------|------|----------|
-| −1 | `D_NAME` | the name: 18 trytes, one code point each, ended and padded with 0 |
-| 18 | `D_INO` | the inode it names, or `NO_INO` when the entry is unused |
+## Transactions
 
-A name has 1 to `NAME_MAX` (17) code points, none of them a space, a
-slash or a control character, and is unique in its directory. Every
-directory starts with `.`, naming itself, and `..`, naming its parent;
-the root's `..` is the root. An unused entry's name is zero too.
+Every call that changes the filesystem is one transaction:
+
+1. A node about to change is first copied to a free block, and its
+   parent to point to the copy, and so up to the root; a node this call
+   has already copied changes in place. Blocks the call allocates are
+   *fresh*: nothing on the disk points to them.
+2. Blocks the call stops using (old nodes, a removed file's data) are
+   *freed*, but stay in use until the commit, since the tree on the
+   disk still points to them.
+3. To commit, the server writes every block it changed, then the
+   superblock naming the new root. Only then are the freed blocks free.
+4. A call that fails part way aborts: it forgets its changed blocks and
+   gives back its fresh ones, and the disk still holds the last commit.
+
+So the machine may power off at any time and the disk holds a whole
+filesystem: the old one until the superblock is written, the new one
+after. The one exception is file data, which a write puts in the file's
+block in place, as most Unix filesystems do; a new block is fresh like
+any other. A new data block goes after the one before it in the file
+if that is free, else the first free one from there on, else the first
+from where the last search stopped (wrapping round), so files tend to
+lie in runs. A node goes in the last free block instead: nodes gather
+at the end of the disk and data at the start, so copying nodes at every
+change does not leave free blocks scattered among a file's, and the free
+space between stays in one run, where `tools/fs.py boot` can put a
+kernel.
 
 ## Paths
 
@@ -164,21 +254,28 @@ kernel has no page for one of the server's windows (below). The
 others are `E_NOENT` (no such name), `E_NOTDIR` (a name on the way is a
 file), `E_NAMETOOLONG`, `E_BADF` (no such open descriptor, or not open
 for this), `E_ISDIR`, `E_MFILE`, `E_INVAL`, `E_NOEXEC`, `E_EXIST`,
-`E_NOSPC` (no free block or inode), `E_NOTEMPTY`, `E_FBIG` (past a
+`E_NOSPC` (no free block), `E_NOTEMPTY`, `E_FBIG` (past a
 file's last block) and `E_BUSY`.
 
 | Operation | Call | Does |
 |-----------|------|------|
 | `FS_OPEN` (0) | `open(path, flags)` | gives the caller's lowest free descriptor (of `NDESC`, 9), at position 0 of the file or directory. `flags` is below. `E_MFILE` when the caller has no descriptor free, or the server has `NFILE` (27) files open; with `O_CREAT` the file may have been made by then |
-| `FS_STAT` (5) | `stat(path, buffer)` | four words at the word-aligned buffer: `ST_INO`, `ST_TYPE`, `ST_LINKS` and `ST_SIZE` |
+| `FS_STAT` (5) | `stat(path, buffer)` | `STAT` (48) trytes at the word-aligned buffer, a word each but the times: `ST_INO`, `ST_TYPE`, `ST_LINKS`, `ST_SIZE`, `ST_MODE`, `ST_UID`, `ST_GID`, then `ST_ATIME`, `ST_MTIME`, `ST_CTIME` and `ST_BTIME`, two words each (seconds, nanoseconds), and `ST_BLOCKS`, the disk blocks its data takes |
 | `FS_SPAWN` (6) | `spawnf(path, args, n)` | starts the program file at the path as the caller's child, with the `n` trytes of arguments at `args` in the caller's memory (Program arguments): the server reads its blocks into consecutive windows (the first stays where its cache read it if the rest fit after it), and gives them to `spawnw` with the caller as the parent. Anything but a program file is `E_NOEXEC` |
 | `FS_UNLINK` (8) | `unlink(path)` | removes a file's name from its directory, and frees the file when no name is left. A directory is `E_ISDIR`, a name `.` or `..` `E_INVAL` |
 | `FS_MKDIR` (9) | `mkdir(path)` | makes an empty directory, holding `.` and `..`: `E_EXIST` if the name is taken |
 | `FS_RMDIR` (10) | `rmdir(path)` | removes an empty directory (`E_NOTEMPTY` otherwise); the root is `E_BUSY`, a name `.` or `..` `E_INVAL` |
 | `FS_CHDIR` (11) | `chdir(path)` | makes the directory the caller's current one; a file is `E_NOTDIR` |
 | `FS_GETCWD` (12) | `getcwd(buffer, n)` | the current directory's path from the root, ended with 0, to the buffer: its length. `E_NOROOM` (Unix's `ERANGE`) when it and its 0 need more than `n` trytes, `E_NAMETOOLONG` when it is longer than `PATH_MAX` |
-| `FS_STATFS` (13) | `statfs(buffer)` | how full the disk is, four words at the word-aligned buffer: `SF_BLOCKS` (in the filesystem) and `SF_BFREE` (free in the map), `SF_INODES` (728, inodes 1 to 728) and `SF_IFREE` (free ones). `bin/df` says them. Adding it did not move `FS_PROTOCOL`: an older client never sends it |
+| `FS_STATFS` (13) | `statfs(buffer)` | how full the disk is, four words at the word-aligned buffer: `SF_BLOCKS` (in the filesystem) and `SF_BFREE` (free), `SF_INODES` and `SF_IFREE`. Inodes take no fixed room, so `SF_IFREE` is as many as the free blocks would hold as leaves of inodes (`INODES_PER_BLOCK`, 344, each), and `SF_INODES` those and the ones in use. `bin/df` says them |
 | `FS_RENAME` (14) | `rename(from, to)` | gives what `from` names the name `to`, in the same directory or another; a directory moved to another parent gets that as its `..`. A file already named `to` is replaced, and freed if that was its last name; the same file under both names is left alone. Below, what it refuses |
+| `FS_UTIMES` (15) | `utimes(path, times)` | sets its access and modification times from four words at the word-aligned `times`: seconds and nanoseconds for each. Nanoseconds of `UTIME_NOW` (−1) set that time to now, `UTIME_OMIT` (−2) leave it, and any other outside 0 to 999,999,999 is `E_INVAL`. The change time becomes now |
+| `FS_CHMOD` (16) | `chmod(path, mode)` | sets its permissions; a mode outside 0 to 0o7777 is `E_INVAL` |
+| `FS_CHOWN` (17) | `chown(path, uid, gid)` | sets its owner and group, `KEEP_ID` (−1) leaving one as it is; any other negative is `E_INVAL` |
+
+There are no users yet, so the server checks no permissions: anyone may
+read, write, `chmod` or `chown` anything. The fields are there so that
+tools can show and keep them, and a later kernel can enforce them.
 
 Numbers 1 to 4 and 7 were `close`, `read`, `lseek`, `readdir` and
 `write` before `FS_PROTOCOL` 2; they are descriptor calls on what
@@ -190,7 +287,7 @@ Numbers 1 to 4 and 7 were `close`, `read`, `lseek`, `readdir` and
 | `read(fd, buffer, n)` | copies up to `n` trytes from the position, and moves it past them: how many, never past the end of the file or of the block the position is in, so a caller loops until it gets 0. A directory is `E_ISDIR` |
 | `write(fd, buffer, n)` | copies up to `n` trytes to the position, or the end with `O_APPEND`, and moves it past them: how many, never past the end of the block the position is in, so a caller loops. A write past the end grows the file, leaving holes; one past its last block is `E_FBIG` |
 | `iocall(fd, IO_LSEEK, offset, whence)` | sets the position to `offset` from the start, where it is or the end (`SEEK_SET`, `SEEK_CUR`, `SEEK_END`): the new position. It may pass the end, but not the start |
-| `iocall(fd, IO_READDIR, buffer, 0)` | the next entry in use of a directory: its name to the buffer, `NAME_MAX + 1` trytes, ended with 0, and its inode as the result; 0 at the end. The position counts 21 trytes per entry, used or not. A file is `E_NOTDIR` |
+| `iocall(fd, IO_READDIR, buffer, 0)` | the next entry of a directory: its name to the buffer, `NAME_MAX + 1` trytes, ended with 0, and its inode as the result; 0 at the end. `.` and `..` come first, then the rest in name order. The position counts one per entry, and seeking back to 0 starts again. A file is `E_NOTDIR` |
 
 `flags` is the access mode, `O_RDONLY` (0), `O_WRONLY` (1) or `O_RDWR`
 (2), plus any of `O_CREAT` (3: make a file that is not there),
@@ -208,8 +305,7 @@ for the same reason, and never replaces a directory: one named `to` is
 `E_ISDIR` for a file and `E_EXIST` for a directory, where Unix lets a
 directory replace an empty one. A directory may not move inside itself
 (`E_INVAL`), the root may not move (`E_BUSY`) nor be replaced
-(`E_EXIST`), and neither name may be `.` or `..` (`E_INVAL`). A new file or directory takes the lowest free inode and its
-blocks the lowest free blocks.
+(`E_EXIST`), and neither name may be `.` or `..` (`E_INVAL`).
 
 Descriptors are the kernel's, so a child inherits its parent's open
 files, and the shell can point a program's standard input or output at
@@ -227,29 +323,43 @@ parent's current directory; one the kernel starts from its image
 `getcwd` by climbing: each directory's `..` is its parent, and the
 parent's entry for it gives its name.
 
-## The server's blocks
+## The file server
 
-The server keeps blocks in its `NWIN` (9) block windows, as a cache:
-a block it needs and has not got is read into the window used least
-recently, by a `DK_READ` call to the disk server (`user/diskd.s`),
-while the server, and so every call waiting for it, sleeps. A call touches at most four blocks at once (block 0, the
-inode table, and an indirect and a data block, or a directory's and a
-new directory's), so none it is using goes. Each window is a page the kernel makes (`window`) the
-first time the server reads into it; with no free page for one, the
-call fails with `E_NOMEM`. The server finds the disk server by its name,
-`disk`, when it starts, waiting for it; with none, or one of another
-protocol, every call finds no filesystem.
+The server (`user/rust/fsd`, with its system-call stubs and start in
+`user/fsd.s`) is Rust built with `tools/server.py` into
+`user/fsd-rust.s`, which `user/fsd.s` includes; `make kernel` builds it
+with the kernel's Rust. Its image takes `FS_PAGES` (4) pages, the only
+built-in program of more than one (its `IMAGE_PAGES` word, kernel.md,
+Memory). `tools/server.py` also checks that its deepest chain of
+calls fits its stack, about 9,800 trytes below `V_USER`, and fails the
+build if it does not. Its state, about 14,000 trytes, most of it the
+sets of which blocks are in use, is in its heap (`brk`), not its image,
+where those zeros would take a page. Searching a leaf and summing a
+node are loops in `user/fsd.s` (a register wraps as the sum does), and
+a name's code points are its words' trytes, rather than Rust's 64-bit
+arithmetic, which takes dozens of steps for each number; the crate's
+`Store` trait lets a store do these its own way.
 
-A call that changes the filesystem first gathers the blocks it needs
-and checks everything that can fail, then changes them in its windows,
-marking them dirty, and writes each dirty one back with `DK_WRITE` before
-it replies. So when a call returns its changes are on the disk, the
-machine may power off at any time between calls, and a call that fails
-has changed nothing. A dirty window is never the one reused.
+It keeps blocks in its `NWIN` (9) block windows, as a cache: a block
+it needs and has not got is read into the window used least recently,
+by a `DK_READ` call to the disk server (`user/diskd.s`), while the
+server, and so every call waiting for it, sleeps. The tree never needs
+more than four blocks at once, so none it is using goes. A window that
+changed is dirty until the commit writes it; one may be written early
+to make room only if it is fresh, since nothing on the disk points to
+it yet. Each window is a page the kernel makes (`window`) the first
+time the server reads into it; with no free page for one, the call
+fails with `E_NOMEM`. The server also remembers the last few inodes and
+extents it read, until the tree changes. It finds the disk server by
+its name, `disk`, when it starts, waiting for it; with none, or one of
+another protocol, every call finds no filesystem.
 
-The server takes for granted that nothing else writes the disk while it
-runs: a block another process writes through the disk server is not
-seen in its windows.
+The server mounts the filesystem at its first call, and again after the
+disk refused a block, walking the whole tree; so a disk it cannot read
+is `E_NOFS` and a damaged one `E_IO`, for every call until one mounts.
+It takes for granted that nothing else writes the disk while it runs: a
+block another process writes through the disk server is not seen in its
+windows.
 
 ## The shell
 
@@ -257,7 +367,11 @@ seen in its windows.
 and file servers are up, has eight file
 built-ins. `ls [DIR]` lists a directory,
 the current one when none is given, leaving out names that start with a dot: a
-file's size and name, a directory's name and a slash. `cat PATH` prints
+file's size and name, a directory's name and a slash. Given an option
+first (`ls -l`, `ls -la`), it runs `/bin/ls` instead, which says each
+name's type and permissions, links, owner, group, size and modification
+time as Unix's `ls -l` does (`-a` keeps the names starting with a dot,
+`.` and `..` among them). `cat PATH` prints
 a file. `write PATH TEXT` makes the file hold the rest of the line,
 replacing what it held; `rm PATH`, `mkdir PATH` and `rmdir PATH` make
 the calls of those names. `cd [DIR]` moves the shell to the directory,
@@ -274,7 +388,10 @@ no filesystem, is `sh: no such program: NAME`; a text file or a
 directory is `sh: not a program: NAME`. The programs in `bin/` are
 meant for `/bin`: besides `hello`, `fail` and `spin`, which tests run,
 they are `echo`, `upper`, `wc`, `head`, `grep`, `sort`, `diff` and
-`less` for text, and `cp`, `mv`, `touch`, `find` and `tar` for files
+`less` for text, and `cp`, `mv`, `touch`, `find` and `tar` for files,
+and `ls`, `stat` (every field of an inode, its times to the nanosecond)
+and `chmod MODE PATH...` (an octal mode) for what the inodes hold;
+`touch` sets an existing file's times to now
 (docs/kernel.md, The shell).
 
 ## Program files
@@ -359,14 +476,25 @@ tools/fs.py rm disk.img docs/old
 tools/fs.py put disk.img bin/hello.rs            # built first: /bin/hello
 tools/fs.py mkdir disk.img etc
 tools/fs.py put disk.img etc/init etc/init       # what init starts (kernel.md)
+tools/fs.py check disk.img                       # fsck: says what is wrong
 detrytus run shell.s --disk disk.img
 ```
 
+`tools/fs.py` is a Python front end over `tools/rust/tryfs`, a host
+program built on the same `lib/rust/tryfs` crate as the file server,
+which it builds with `cargo` the first time (or runs the one `$TRYFS`
+names). That program takes the commands above and more (`mv`, `rmdir`,
+`chmod`, `chown`, `utimes`, `stat`, `info`, `get`) on an image, and
+answers in lines of JSON, which is how the tests read a disk:
+`tools.fs.Filesystem` wraps it.
+
 Images are detrytus disk files, two bytes per tryte, as long as the
-filesystem. The tool checks an image when it opens one: it walks the
-tree from the root, and every inode in use must be reached, with as
-many links as names, and every block must be in the map exactly when
-one inode holds it. It refuses a name, text or path that does not fit.
+filesystem. The tool checks an image when it opens one, as `check`
+does: mounting walks the tree and checks each node's sum, level and
+that no block is used twice, and then every key must be in order, every
+entry must name an inode that is there, every inode must be reached
+from the root with as many links as names, extents must stay within
+their file's size, and the superblock's counts must be right. It refuses a name, text or path that does not fit.
 Given an image assembled by `detrytus asm`, or a `.s` file, which it
 assembles with `detrytus` first, `put` and `new` store it as a program
 file, named after the file without `.dti` or `.s`, in `/bin` unless a
@@ -376,4 +504,30 @@ directory with anything in it.
 
 ## Later
 
-Directories of more than one block.
+- Users, and permission checks on the fields every inode already has.
+- Checksums on file data, and more than one superblock, as bcachefs
+  keeps, so that a damaged block is found and the last commit survives
+  one.
+- Snapshots: since nothing reachable from a superblock is written
+  over, keeping an old root is most of one.
+- Inline data: a small file's trytes as an item in the tree instead of
+  a block of its own.
+
+## Credits
+
+The design borrows its ideas, not its code, from others' work:
+
+- **bcachefs**, by Kent Overstreet and its contributors: one B-tree of
+  keyed items for inodes, directory entries and extents, extents keyed
+  by where they end, and a superblock that commits a transaction. Eelco
+  pointed us at it, and at its move from C to Rust, which showed how a
+  filesystem's format can live in one Rust crate. Nothing here is
+  read from its sources or shares its on-disk format.
+- **btrfs** and Ohad Rodeh's "B-trees, Shadowing, and Clones" (ACM
+  Transactions on Storage, 2008), the copy-on-write ("shadowing")
+  B-tree that btrfs is built on: copying each changed node, and those
+  above it, to free blocks, so the old tree stays whole until the
+  superblock moves. Keeping no free map, and finding free blocks by
+  walking the tree at mount, is our own simplification for small
+  disks; both of them keep one.
+- **Linux's relatime**, for when reading moves the access time.

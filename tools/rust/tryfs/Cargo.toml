@@ -1,0 +1,12 @@
+[package]
+name = "tryfs-tool"
+version = "0.1.0"
+edition = "2024"
+description = "The host's disk tool: makes and changes trylobite filesystem images with lib/rust/tryfs, the file server's own code (tools/fs.py drives it)"
+
+[[bin]]
+name = "tryfs"
+path = "src/main.rs"
+
+[dependencies]
+tryfs = { path = "../../../lib/rust/tryfs", features = ["std"] }

@@ -17,7 +17,9 @@ def report(console: str) -> list[str]:
 def test_the_kernel_says_what_it_found_before_it_starts_init(harts):
     result = run(DONE, ram_pages=40, disk=(new_disk(), 5))
     assert result.exit_code == 0, result.console
-    free = 40 - result.image.symbols["P_FREE"]  # + 1, less the log's page
+    symbols = result.image.symbols
+    first_free = symbols["P_PROG0"] + symbols["NPROG"]  # a page each, no fs here
+    free = 40 - first_free  # + 1, less the log's page
     assert report(result.console) == [
         "trylobite: version 0.1.0, a microkernel for detrytus, the "
         "balanced-ternary machine",

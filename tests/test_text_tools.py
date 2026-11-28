@@ -21,6 +21,10 @@ def shell():
     return assemble_file(ROOT / "shell.s")
 
 
+# 2023-11-14 22:13:20 UTC, a time for a file to keep.
+WHEN = 1_700_000_000
+
+
 def tree_disk(blocks: int = 90, **texts: str):
     """A disk of bin/ with a small tree, docs/ holding a.txt, b.md and
     sub/c.txt, beside the texts."""
@@ -289,6 +293,11 @@ def test_tar_makes_an_archive_any_tar_reads(shell):
 
 def test_tar_lists_and_extracts(shell):
     on = tree_disk(notes="some notes\n")
+    fs = Filesystem.load(on[0])
+    fs.chmod("docs/a.txt", 0o600)
+    fs.chown("docs/a.txt", 5, 7)
+    fs.utimes("docs/a.txt", WHEN, WHEN)
+    fs.save(on[0])
     out = said(
         shell,
         "tar cf a.tar docs notes\ntar tvf a.tar\nmkdir out\ncd out\n"
@@ -316,6 +325,13 @@ def test_tar_lists_and_extracts(shell):
     fs = Filesystem.load(on[0])
     assert fs.read("out/notes") == "some notes\n"
     assert fs.read("out/docs/b.md") == "# bee\n"
+    # Each member keeps its mode, owner and time, and the mode and time
+    # come back.
+    with archive(fs, "a.tar") as tar:
+        a = tar.getmember("docs/a.txt")
+        assert (a.mode, a.uid, a.gid, a.mtime) == (0o600, 5, 7, WHEN)
+    made = fs.stat("out/docs/a.txt")
+    assert (made.mode, made.mtime.secs) == (0o600, WHEN)
 
 
 def test_tar_through_a_pipe_and_with_programs(shell):

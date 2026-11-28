@@ -348,7 +348,9 @@ impl Shell {
         if let Some(body) = self.function(&name) {
             return Ok(Started::Shell(Job::Function(body, args, redirs)));
         }
-        if let Some(f) = builtin::find(&name) {
+        // ls with an option (ls -l) is /bin/ls's: the built-in knows none.
+        let option = name == b"ls" && args.get(1).is_some_and(|a| a.text.first() == Some(&b'-'));
+        if let Some(f) = builtin::find(&name).filter(|_| !option) {
             return Ok(Started::Shell(Job::Builtin(f, args, assigns, redirs)));
         }
         let mark = self.saves.len();

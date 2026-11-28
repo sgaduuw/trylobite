@@ -116,7 +116,8 @@ fn name_arg(args: &[Arg]) -> Option<&[u8]> {
 
 /// ls [DIR]: each entry of DIR, or of the current directory, but those
 /// whose names start with a dot: a file's size and name, a directory's
-/// name and a slash.
+/// name and a slash. With an option first it is /bin/ls instead
+/// (run.rs).
 fn ls(_: &mut Shell, args: &[Arg]) -> i32 {
     let dir = arg(args, 1).unwrap_or(b".");
     let d = match File::open(dir) {

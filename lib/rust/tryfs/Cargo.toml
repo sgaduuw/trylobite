@@ -1,0 +1,19 @@
+[package]
+name = "tryfs"
+version = "0.1.0"
+edition = "2024"
+description = "The trylobite filesystem: a copy-on-write B-tree of inodes, directory entries and extents, shared by the file server and the host disk tool"
+# include/layout.s's numbers, each an i64: the filesystem works in words.
+build = "../trystd/build.rs"
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+# The host's side: a store holding a whole disk image in memory, and the
+# checker (fsck). The file server builds without it, for detrytus.
+std = []
+
+# The tests walk thousands of files through a whole disk image.
+[profile.test]
+opt-level = 2

@@ -15,9 +15,9 @@
 //! member and its data in 512-tryte records, two empty records at the
 //! end: each tryte where a byte would be, so an archive of text files
 //! is a tar file any tar reads, once its trytes are written out as bytes.
-//! The filesystem keeps no modes, owners or times yet, so a file is
-//! archived as 0644 and a directory as 0755, owned by 0 and from time 0,
-//! and those are not restored. A name longer than 100 is split into the
+//! Each member keeps its mode, owner, group and modification time;
+//! taking it out restores the mode and the time (not the owner, as a
+//! Unix tar run by an ordinary user does). A name longer than 100 is split into the
 //! header's prefix. Members whose names climb out with `..` are not
 //! taken out, and a leading `/` is dropped, as GNU tar does. Exit with 0,
 //! or with 2 if anything failed (said on standard error).
@@ -26,6 +26,7 @@
 use trystd::fs::{self, File};
 use trystd::prelude::*;
 use trystd::sys;
+use trystd::time::SystemTime;
 
 trystd::main!(run);
 
@@ -252,12 +253,12 @@ impl Tar<'_> {
         if self.verbose {
             self.say(&name);
         }
-        let (mode, kind, size) = if meta.is_dir() { (0o755, DIRECTORY, 0) } else { (0o644, REGULAR, meta.len()) };
-        octal(&mut h, MODE, mode);
-        octal(&mut h, UID, 0);
-        octal(&mut h, GID, 0);
+        let (kind, size) = if meta.is_dir() { (DIRECTORY, 0) } else { (REGULAR, meta.len()) };
+        octal(&mut h, MODE, meta.mode() as u64);
+        octal(&mut h, UID, meta.uid().max(0) as u64);
+        octal(&mut h, GID, meta.gid().max(0) as u64);
         octal(&mut h, SIZE, size);
-        octal(&mut h, MTIME, 0);
+        octal(&mut h, MTIME, meta.modified().map_or(0, |t| t.unix_seconds().max(0) as u64));
         h[TYPEFLAG] = kind;
         h[MAGIC.0..MAGIC.0 + MAGIC.1].copy_from_slice(b"ustar\x0000");
         let sum = checksum(&h);
@@ -385,9 +386,11 @@ impl Tar<'_> {
             if is_dir {
                 self.make_dirs(&path, true);
                 self.skip(from, records)?;
+                restore(&h, &path);
             } else if kind == REGULAR || kind == 0 {
                 self.make_dirs(&path, false);
                 self.extract_file(from, &path, size)?;
+                restore(&h, &path);
             } else {
                 let e = io::Error::new(io::ErrorKind::Unsupported, "not a file or directory; skipped");
                 self.complain(&path, &e);
@@ -447,6 +450,18 @@ impl Tar<'_> {
             left -= n as u64;
         }
         Ok(())
+    }
+}
+
+/// Give what was taken out the header's mode and modification time,
+/// as far as the filesystem allows.
+fn restore(h: &Header, path: &[u8]) {
+    if let Some(mode) = read_octal(h, MODE) {
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode as u32));
+    }
+    if let Some(secs) = read_octal(h, MTIME) {
+        let t = SystemTime::from_unix_seconds(secs as i64);
+        let _ = fs::set_times(path, fs::FileTimes::new().set_modified(t));
     }
 }
 

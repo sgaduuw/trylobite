@@ -218,11 +218,14 @@ def build(
         *(["ip"] if ip else []),
     ]
     server = ""
+    shift = ""  # the file server's image takes FS_PAGES pages
     for k, name in enumerate(servers, 3):
         server += f"""
-        .section prog{k}, (P_PROG0 + {k}) * PAGE, V_USER
+        .section prog{k}, (P_PROG0 + {k}{shift}) * PAGE, V_USER
         .include "{SERVERS[name]}"
 """
+        if name == "fs":
+            shift = " + FS_PAGES - 1"
     init = "".join(start(k) for k in range(3, 3 + len(servers))) + init
     source = f"""
         .equ  NPROG, {3 + len(servers)}
@@ -445,7 +448,7 @@ def bin_disk(
 def run_image(
     image: Image,
     ram_pages: int | None = None,
-    max_steps: int = 4_000_000,
+    max_steps: int = 10_000_000,  # the shell build boots in about 1,430,000
     harts: int | None = None,
     plug: list[tuple[int, int]] = (),
     unplug: list[tuple[int, int]] = (),
@@ -501,7 +504,7 @@ def run(
     init: str,
     prog1: str = DONE,
     prog2: str = DONE,
-    ram_pages: int = RAM_PAGES,
+    ram_pages: int | None = None,
     max_steps: int = 2_000_000,
     harts: int | None = None,
     plug: list[tuple[int, int]] = (),
@@ -518,8 +521,12 @@ def run(
     clock: int | None = None,
 ) -> Run:
     image = build(
-        init, prog1, prog2, ram_pages, files, disk_server, console, pipes, net, ip
+        init, prog1, prog2, RAM_PAGES, files, disk_server, console, pipes, net, ip
     )
+    if ram_pages is None:
+        # RAM_PAGES, and the pages the file server's image takes past one,
+        # each twice: in the image and in its process.
+        ram_pages = RAM_PAGES + 2 * (image.symbols.get("FS_PAGES", 1) - 1)
     return run_image(
         image, ram_pages, max_steps, harts, plug, unplug, input, disk, link, clock
     )

@@ -2797,3 +2797,63 @@ continue signals under them.
   in temporaries now.
 - `SIGTTOU` is defined and stops, but nothing sends it: background
   writes to the console are allowed, as with TOSTOP off.
+
+### 2026-11-28 · A B-tree filesystem with metadata
+
+Eelco asked for file times, modes and owners. Porting FFS or ext4 was
+weighed against a filesystem of our own after bcachefs (whose move from
+C to Rust he pointed at), and he chose Route B: one copy-on-write
+B-tree of every record, in Rust (docs/filesystem.md). The choices:
+
+- **One tree, keyed [ino, kind, ...].** Inodes, directory entries and
+  extents are items in the same tree, as in bcachefs and btrfs, so a
+  file's records sit together, directories have no size limit, and
+  there is no inode table or free map to size at format time. Balanced
+  ternary keys compare word by word with no sign trickery, and a 6,561
+  word block holds hundreds of items, so the tree stays two or three
+  levels deep on any disk detrytus has.
+- **Copy-on-write, committed by the superblock.** A call copies the
+  nodes it changes to free blocks and writes the superblock last, so
+  every call is a transaction and a crash leaves the old or the new
+  tree, never half. That replaced the old server's "gather everything,
+  then change" discipline, which every new call had to get right by
+  hand. File data is still written in place, as in most Unix
+  filesystems; checksummed data and spare superblocks are later work.
+- **No free map on the disk.** Mounting walks the tree and marks what it
+  reaches. The walk reads each node once, and only nodes: data
+  blocks are counted from the extents. A map that could disagree with the tree is gone, along
+  with the code to keep it right. Blocks freed by a call stay in use
+  until its commit.
+- **One crate for the format, shared by the server and the host tool.**
+  `lib/rust/tryfs` is `no_std` with a `Store` trait: the file server's
+  store is its block windows, the host's a whole image in memory. The
+  Python disk tool became a front end over a Rust program, so the
+  format is implemented once and the tests read disks through the same
+  code that wrote them, with an fsck (`check`) on every load.
+- **The file server in Rust, in four pages.** `user/rust/fsd` replaced
+  `user/fsd.s`'s logic, leaving that file as stubs. It needed a kernel
+  image to hold programs of more than one page (`IMAGE_PAGES`), and a
+  stack check in the build (`tools/server.py`), since an inlined call
+  chain overflowed the stack below `V_USER` silently at first. It is
+  slower per call than the assembly was, and that shows: a process
+  busy for long is interrupted every `QUANTUM` (500 ticks then) at several
+  hundred steps each, so a slow server pays twice. Caching the last
+  inodes and extents, u32 division, fewer key copies, node sums and the
+  leaf search in assembly (through hooks on the crate's `Store` trait,
+  so the host keeps the Rust), names unpacked from a word's trytes, the
+  server's state in its heap and same-sized records overwritten in place
+  brought a small read from about 70,000 steps to about 11,000, a
+  243-tryte write from 240,000 to about 140,000, a stat from 145,000 to
+  54,000, and the server's share of booting the shell from 1.56 million
+  to well under 675,000.
+  With the longer timer slices (`QUANTUM` 10,000), booting the shell
+  build takes about 1.43 million steps against 1.17 million with the
+  assembly server, but `ls bin`, a readdir and a stat for each of some
+  fifty programs, takes 5.5 million against 2.4: a stat is still
+  slow. The tests' step budgets grew, and CI's shell session, which
+  lists /bin, needs more than detrytus' default 10 million.
+- **Relatime.** Reading moves the access time only when it is no later
+  than the last change, as Linux does, so reads do not write the disk.
+- **No permission checks yet.** Mode, uid and gid are stored, shown and
+  set (`chmod`, `chown`, `utimes`, FS_PROTOCOL 4), but there are no
+  users to check them against.
