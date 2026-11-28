@@ -32,11 +32,13 @@ pub struct Windows {
 }
 
 /// Window `k`'s centre, as the disk server and spawnw take it.
+#[inline(always)]
 pub fn centre(k: usize) -> i64 {
     V_BLOCK + PAGE * k as i64
 }
 
 /// Window `k`'s first word.
+#[inline(always)]
 fn base(k: usize) -> *mut u8 {
     (centre(k) + BLOCK_W0) as usize as *mut u8
 }
@@ -157,17 +159,21 @@ impl Store for Windows {
             Some(k) => k,
             None => self.victim()?,
         };
-        let p = base(k);
-        for i in 0..BLOCK_WORDS as usize {
-            sys::set_word(p, i, 0);
-        }
+        let p = base(k).wrapping_sub(1); // the first tryte
+        unsafe { core::ptr::write_bytes(p, 0, 3 * BLOCK_WORDS as usize) };
         self.w[k] = Win { block: b, used: 0, dirty: true, checked: true, node: false };
         self.touch(k);
         Ok(k)
     }
 
+    #[inline(always)]
     fn word(&self, s: Slot, i: usize) -> i64 {
         sys::word(base(s), i)
+    }
+
+    fn sum_words(&self, s: Slot, n: usize, skip: usize) -> i64 {
+        debug_assert_eq!(skip, tryfs::layout::N_SUM as usize);
+        sys::sum(base(s), n)
     }
 
     fn set_word(&mut self, s: Slot, i: usize, w: i64) {

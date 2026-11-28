@@ -22,7 +22,7 @@ def said(shell, typed: str, on=None) -> str:
     """What the shell printed between booting and its exit, without the
     kernel's lines."""
     result = run_image(
-        shell, input=typed, disk=on or bin_disk(notes=NOTES), max_steps=10_000_000
+        shell, input=typed, disk=on or bin_disk(notes=NOTES), max_steps=25_000_000
     )
     assert result.exit_code == 0, result.console
     return re.sub(r"trylobite: [^\n]*\n", "", result.after_boot)
@@ -31,7 +31,7 @@ def said(shell, typed: str, on=None) -> str:
 def test_touch_makes_empty_files_and_leaves_others_alone(shell):
     on = bin_disk(notes=NOTES)
     assert said(shell, "touch a b notes\nls\ntouch\n", on) == (
-        "$ touch a b notes\n$ ls\nbin/\n40 notes\n0 a\n0 b\n"
+        "$ touch a b notes\n$ ls\n0 a\n0 b\nbin/\n40 notes\n"
         "$ touch\nusage: touch FILE...\nsh: exit 1\n$ \n"
     )
     assert said(shell, "touch no/a bin\n", on) == (
@@ -49,7 +49,7 @@ def test_head_says_the_first_lines_of_files_or_its_input(shell):
     )
     assert said(shell, "ls bin | head -n 2\nhead -n 1 < notes\n", on) == (
         "$ ls bin | head -n 2\n"
-        f"{_size('cp')} cp\n{_size('date')} date\n"
+        f"{_size('chmod')} chmod\n{_size('cp')} cp\n"
         "$ head -n 1 < notes\none apple\n$ \n"
     )
 
@@ -105,7 +105,7 @@ def test_cp_copies_a_file_and_into_a_directory(shell):
     typed = "cp notes copy\nmkdir d\ncp notes big d\ncp notes copy\nls d\n"
     assert said(shell, typed, on) == (
         f"$ cp notes copy\n$ mkdir d\n$ cp notes big d\n$ cp notes copy\n"
-        f"$ ls d\n40 notes\n{len(big)} big\n$ \n"
+        f"$ ls d\n{len(big)} big\n40 notes\n$ \n"
     )
     made = Filesystem.load(on[0])
     assert made.read("copy") == NOTES
@@ -137,7 +137,7 @@ def test_mv_renames_replaces_and_moves_into_directories(shell):
     typed = "mv notes n\nmv n old\nmkdir d\nmkdir e\nmv old e d\ncd d/e\npwd\nls ..\n"
     assert said(shell, typed, on) == (
         "$ mv notes n\n$ mv n old\n$ mkdir d\n$ mkdir e\n$ mv old e d\n"
-        "$ cd d/e\n$ pwd\n/d/e\n$ ls ..\n40 old\ne/\n$ \n"
+        "$ cd d/e\n$ pwd\n/d/e\n$ ls ..\ne/\n40 old\n$ \n"
     )
     made = Filesystem.load(on[0])  # checks the moved directory's ..
     assert made.read("d/old") == NOTES

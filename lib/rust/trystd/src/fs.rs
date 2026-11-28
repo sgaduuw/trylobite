@@ -45,10 +45,36 @@ impl OwnedFd {
     }
 
     /// Keep it from children (FD_NOINHERIT), or let them have it.
-    pub(crate) fn set_inherit(&self, inherit: bool) -> io::Result<()> {
-        let flags = if inherit { 0 } else { sys::FD_NOINHERIT };
-        sys::check(sys::call(sys::SYS_FDFLAGS, &[self.0, flags])).map(|_| ())
+    pub fn set_inherit(&self, inherit: bool) -> io::Result<()> {
+        set_inherit(self.0, inherit)
     }
+}
+
+// --- descriptors by number, as Unix's dup2, close and fcntl ---------------------
+// For a program that arranges its own descriptors, as the shell does for
+// redirections and pipelines; the rest take OwnedFd and File.
+
+/// Make descriptor `to` a copy of `fd`, closing what `to` named.
+pub fn dup2(fd: i32, to: i32) -> io::Result<()> {
+    sys::check(sys::call(sys::SYS_DUP2, &[fd, to])).map(|_| ())
+}
+
+/// Close descriptor `fd`; one that is not open is let be.
+pub fn close(fd: i32) {
+    sys::call(sys::SYS_CLOSE, &[fd]);
+}
+
+/// Whether descriptor `fd` names something: dup2 onto itself changes
+/// nothing (fdflags would clear its flags), and is E_BADF if it does not.
+pub fn is_open(fd: i32) -> bool {
+    sys::call(sys::SYS_DUP2, &[fd, fd]) >= 0
+}
+
+/// Keep descriptor `fd` from the children this program starts
+/// (FD_NOINHERIT), or let them have it again.
+pub fn set_inherit(fd: i32, inherit: bool) -> io::Result<()> {
+    let flags = if inherit { 0 } else { sys::FD_NOINHERIT };
+    sys::check(sys::call(sys::SYS_FDFLAGS, &[fd, flags])).map(|_| ())
 }
 
 impl Drop for OwnedFd {
@@ -181,6 +207,20 @@ impl File {
 
     pub fn from_fd(fd: OwnedFd) -> File {
         File { fd }
+    }
+
+    /// The next name in a directory opened with `open`, into `name`,
+    /// "." and ".." included; None at the end. `read_dir` gives the
+    /// same as `DirEntry`s, on the heap; this needs none.
+    pub fn read_name<'a>(
+        &self,
+        name: &'a mut [u8; sys::NAME_MAX as usize + 1],
+    ) -> io::Result<Option<&'a [u8]>> {
+        if self.fd.iocall(sys::IO_READDIR, name.as_mut_ptr() as i32, 0)? == 0 {
+            return Ok(None);
+        }
+        let len = name.iter().position(|&c| c == 0).unwrap_or(name.len());
+        Ok(Some(&name[..len]))
     }
 }
 

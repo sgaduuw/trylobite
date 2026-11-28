@@ -6,6 +6,7 @@ import re
 import pytest
 
 from tests.kernel import ROOT, assemble_file, bin_disk, run_image
+from tools import fs
 
 
 @pytest.fixture(scope="module")
@@ -13,7 +14,7 @@ def shell():
     return assemble_file(ROOT / "shell.s")
 
 
-def session(shell, typed: str, on=None, max_steps: int = 12_000_000):
+def session(shell, typed: str, on=None, max_steps: int = 25_000_000):
     result = run_image(shell, input=typed, disk=on or bin_disk(), max_steps=max_steps)
     assert result.exit_code == 0, result.console
     return result
@@ -58,7 +59,7 @@ def test_free_adds_up(shell):
     assert lines[1].split() == ["total", "used", "free"]
     pages = [int(n) for n in lines[2].split()[1:]]
     trytes = [int(n) for n in lines[3].split()[1:]]
-    assert pages[0] == 81 and pages[1] + pages[2] == pages[0]
+    assert pages[0] == 243 and pages[1] + pages[2] == pages[0]
     assert trytes == [n * 19683 for n in pages]
 
 
@@ -127,11 +128,11 @@ def test_top_shows_a_screen_each_period(shell):
             assert 99.0 <= sum(float(x) for x in m.groups()) <= 100.0, cpu
         mem = lines[2 + kernel.HARTS]
         m = re.fullmatch(
-            r"Mem   : +81 pages total, +(\d+) free, +(\d+) used  "
+            r"Mem   : +243 pages total, +(\d+) free, +(\d+) used  "
             r"\(19,683 trytes a page\)",
             mem,
         )
-        assert m and int(m[1]) + int(m[2]) == 81, mem
+        assert m and int(m[1]) + int(m[2]) == 243, mem
         table = lines[4 + kernel.HARTS :]
         header = "PID PPID STATE PAGES CPU% TIME NAME"
         assert table[0].split() == header.split()
@@ -148,5 +149,8 @@ def test_df_counts_blocks_and_inodes(shell):
     assert before[0] == after[0] == blocks
     assert before[1] + before[2] == blocks
     assert after[1] == before[1] + 1  # the new file's block
-    assert after[5] == before[5] - 1  # and its inode
-    assert before[4] == 728
+    # Inodes take no room of their own: the free ones are as many as the
+    # free blocks would hold, and the total those and the ones in use.
+    per = fs.L["INODES_PER_BLOCK"]
+    assert (before[5], after[5]) == (before[2] * per, after[2] * per)
+    assert after[4] - after[5] == before[4] - before[5] + 1  # its inode

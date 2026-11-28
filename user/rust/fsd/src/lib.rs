@@ -74,14 +74,27 @@ struct Server {
     a: [i64; 3],
 }
 
-static mut SERVER: Server = Server {
-    fs: Fs::new(Windows::new()),
-    files: [CLOSED; NF],
-    cwd: [NO_INO; NP],
-    caller: 0,
-    whose: 0,
-    a: [0; 3],
-};
+/// The server's state, about 14,000 trytes (most of it the bit sets of
+/// which blocks are in use), in its heap rather than its image, where
+/// those zeros would take a page and so two of RAM. brk's pages are
+/// zeroed, so only what is not zero in a new server is set.
+fn server() -> &'static mut Server {
+    let at = (HEAP_START + 7) & !7; // as Rust aligns an i64
+    let end = at + core::mem::size_of::<Server>() as i64;
+    if sys::call(SYS_BRK, end, 0, 0, 0, 0) < 0 {
+        sys::exit(E_NOMEM);
+    }
+    let p = at as usize as *mut Server;
+    unsafe {
+        (&raw mut (*p).fs.store).write(Windows::new());
+        for k in 0..NF {
+            (&raw mut (*p).files[k]).write(CLOSED);
+        }
+        let srv = &mut *p;
+        srv.fs.reset();
+        srv
+    }
+}
 
 /// A path, as code points.
 struct Path {
@@ -117,7 +130,7 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
 /// server finds the name taken, and leaves with why.
 #[unsafe(no_mangle)]
 pub extern "C" fn fsd_main() -> ! {
-    let srv = unsafe { &mut *(&raw mut SERVER) };
+    let srv = server();
     sys::call(SYS_NAME, sys::addr(b"fsd\0".as_ptr()), 0, 0, 0, 0);
     let disk = sys::call(SYS_LOOKUP, sys::addr(b"disk\0".as_ptr()), LOOKUP_WAIT, 0, 0, 0);
     if disk >= 0 && sys::more(0) == DISK_PROTOCOL {
@@ -543,7 +556,9 @@ impl Server {
         }
         let dir = self.fs.iget(last.dir)?;
         if let Some(ino) = self.fs.lookup(&dir, name)? {
-            if self.fs.iget(ino)?.is_dir() {
+            // Not empty before busy, as the shell's own directory with
+            // files in it is "not empty" on Unix too.
+            if self.fs.iget(ino)?.is_dir() && self.fs.dir_empty(ino)? {
                 self.busy(ino)?;
             }
         }

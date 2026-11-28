@@ -10,6 +10,9 @@ unsafe extern "C" {
     fn fs_exit(code: i32) -> !;
     /// SYS_CLOCK's seconds and microseconds, as two words at `out`.
     fn fs_clock(out: *mut u8);
+    /// A node's sum over `n` words from `p`, N_SUM's counted as 0, as a
+    /// word at `out` (lib/rust/tryfs/src/sum.rs).
+    fn fs_sum(p: *const u8, n: i32, out: *mut u8);
     #[link_name = "detrytus.lw"]
     fn lw(p: *const u8) -> i64;
     #[link_name = "detrytus.sw"]
@@ -43,11 +46,20 @@ pub fn clock() -> (i64, i64) {
     (word(out, 0), word(out, 1) * 1000)
 }
 
+/// The sum of the `n` words from `p`, word N_SUM counted as 0.
+pub fn sum(p: *const u8, n: usize) -> i64 {
+    let out = words();
+    unsafe { fs_sum(p, n as i32, out) };
+    word(out, 0)
+}
+
 /// Word `i` from the word-aligned address `p`.
+#[inline(always)]
 pub fn word(p: *const u8, i: usize) -> i64 {
     unsafe { lw(p.wrapping_add(3 * i)) }
 }
 
+#[inline(always)]
 pub fn set_word(p: *mut u8, i: usize, w: i64) {
     unsafe { sw(p.wrapping_add(3 * i), w) }
 }

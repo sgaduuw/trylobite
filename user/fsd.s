@@ -89,6 +89,27 @@ fs_clock:
         sw    a1, 3(t1)
         ret
 
+# fs_sum(p, n, out): a node's sum (lib/rust/tryfs/src/sum.rs) over the
+# n words from p, word N_SUM counted as 0, as a word at out. s = 2s + w
+# wraps in a register just as sum.rs keeps it within a word, so this is
+# the same sum in a few steps a word instead of 64-bit arithmetic's
+# hundreds.
+fs_sum:
+        li    t0, 0                    # t0: the sum
+        li    t1, 0                    # t1: the word's index
+        li    t3, N_SUM
+        beqz  a1, 3f
+1:      lw    t2, 0(a0)
+        bne   t1, t3, 2f
+        li    t2, 0
+2:      add   t0, t0, t0
+        add   t0, t0, t2
+        addi  a0, a0, 3
+        addi  t1, t1, 1
+        blt   t1, a1, 1b
+3:      sw    t0, 0(a2)
+        ret
+
 # memcpy(dst, src, n) and memmove(dst, src, n): dst. Blocks are copied
 # with these too, and the Rust copies and clears its keys and items with
 # them often, so they go a word (3 trytes) at a time where dst and src

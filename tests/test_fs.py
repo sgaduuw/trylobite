@@ -82,7 +82,12 @@ def test_files_carry_their_metadata():
     made = Filesystem.new(6)
     made.write("f", "x")
     node = made.stat("f")
-    assert (node.type, node.mode, node.uid, node.gid) == (L["T_FILE"], L["MODE_FILE"], 0, 0)
+    assert (node.type, node.mode, node.uid, node.gid) == (
+        L["T_FILE"],
+        L["MODE_FILE"],
+        0,
+        0,
+    )
     assert node.btime == node.mtime == node.ctime
     made.chmod("f", 0o600)
     made.chown("f", 5, 7)

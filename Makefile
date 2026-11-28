@@ -46,6 +46,8 @@ FSD_RUST := user/fsd-rust.s
 FSD_SOURCES := $(shell find user/rust lib/rust/tryfs -type f -not -path '*/target/*') lib/rust/trystd/build.rs include/layout.s
 
 PROGRAMS := $(sort $(wildcard bin/*.s bin/*.tc bin/*.rs))
+# The modules of a program too big for one file, such as bin/sh/.
+MODULES := $(shell find bin -mindepth 2 -type f -name "*.rs")
 # What a program can include, import or link against.
 SOURCES := $(shell find lib include -type f -not -path '*/target/*')
 # What the kernel on the disk is built from.
@@ -65,7 +67,7 @@ $(KERNEL_RUST): $(KERNEL_SOURCES) tools/kernel.py
 $(FSD_RUST): $(FSD_SOURCES) tools/server.py
 	tools/server.py -o $@
 
-$(DISK): $(PROGRAMS) $(SOURCES) $(BOOT_SOURCES) etc/init tools/fs.py $(shell find tools/rust -type f -not -path '*/target/*')
+$(DISK): $(PROGRAMS) $(MODULES) $(SOURCES) $(BOOT_SOURCES) etc/init tools/fs.py $(shell find tools/rust -type f -not -path '*/target/*')
 	tools/fs.py new $@.tmp $(BLOCKS) $(PROGRAMS) --boot shell.s
 	tools/fs.py mkdir $@.tmp etc
 	tools/fs.py put $@.tmp etc/init etc/init

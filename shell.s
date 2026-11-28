@@ -1,26 +1,28 @@
 # Milestone 3: the kernel starts init, which starts the servers and then
-# a shell that runs the programs typed at it. Programs other than
-# pingpong live on the disk: put bin/ on one and give the shell
-# something to read with --input:
+# the shell, /bin/sh, that runs the programs typed at it. The shell and
+# every program but pingpong live on the disk: put bin/ on one and give
+# the shell something to read with --input:
 #
-#   tools/fs.py new disk.img 20 bin/*.s
+#   tools/fs.py new disk.img 84 bin/*.rs
 #   printf 'hello\nfail\npingpong\n' > session.txt
 #   detrytus run shell.s --input session.txt --disk disk.img
 #
 # The kernel asks the machine how much RAM it has, so any --ram-pages
 # works, from enough for the programs to the most the emulator allows.
 
-        .equ  NPROG, 11                # init, ping, pong, pingpong, the file
+        .equ  NPROG, 10                # init, ping, pong, pingpong, the file
                                        # server, the disk server, the console
-                                       # server, the pipe server, the shell,
-                                       # the network server and the IP server
+                                       # server, the pipe server, the network
+                                       # server and the IP server
         .equ  INIT_FSD, 4              # the programs init starts, by number
         .equ  INIT_DISKD, 5
         .equ  INIT_CONSD, 6
         .equ  INIT_PIPED, 7
-        .equ  INIT_SH, 8
-        .equ  INIT_NETD, 9
-        .equ  INIT_IPD, 10
+        .equ  INIT_NETD, 8
+        .equ  INIT_IPD, 9
+        .equ  INIT_SH, 0               # the shell: 0 for /bin/sh on the disk
+                                       # (bin/sh.rs); tests give a program
+                                       # of the image instead
 
         .include "include/kernel.s"
         .section prog0, P_PROG0 * PAGE, V_USER
@@ -37,8 +39,6 @@
         .section prog7, (P_PROG0 + 7 + FS_PAGES - 1) * PAGE, V_USER
         .include "user/piped.s"
         .section prog8, (P_PROG0 + 8 + FS_PAGES - 1) * PAGE, V_USER
-        .include "user/sh.s"
-        .section prog9, (P_PROG0 + 9 + FS_PAGES - 1) * PAGE, V_USER
         .include "user/netd.s"
-        .section prog10, (P_PROG0 + 10 + FS_PAGES - 1) * PAGE, V_USER
+        .section prog9, (P_PROG0 + 9 + FS_PAGES - 1) * PAGE, V_USER
         .include "user/ipd.s"

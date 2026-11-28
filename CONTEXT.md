@@ -2408,76 +2408,127 @@ asking, POSIX-shaped but small (docs/kernel.md, Signals). The choices:
 - **No SIGSTOP/SIGCONT and no signals for faults.** Job control waits for
   a shell that needs it, and a fault still ends the process as
   `WAIT_FAULTED`.
-=======
-### 2026-11-28 · Line editing and Tab completion in the assembly shell
 
-Eelco asked for a more usable console before more vi work, Tab
-completion first. The shell (`user/sh.s`) now has a line editor: cursor
-movement and editing in the middle, the Emacs-style Ctrl keys of bash's
-default mode, a 16-line history and Tab completion of commands and
-paths (docs/kernel.md, Line editing).
+### 2026-11-28 · ntpd's status: a server of its own, and ntpctl
 
-- **Extended in assembly, not rewritten in Rust.** The direction is
-  Rust-only, but the shell is a program of the kernel image that init
-  starts before any disk program, and its parsing, quoting, pipelines,
-  redirections and built-ins are pinned down by its tests. A
-  Rust shell is a step of its own, worth taking with the rest of the
-  boot path; the editor is about 600 lines of assembly that would carry
-  over to it as a design.
-- **Only backspace and overprinting.** Moving left is a backspace and
-  moving right prints the character there again; a change prints the
-  line's tail again and backs up over it. No cursor-addressing
-  sequences, so the echo is plain text the tests can read.
-- **Tab is not a space any more.** It completes; a pasted tab rings
-  the bell. Completion reads directories with `IO_READDIR` and asks
-  `FS_STAT` only for the names it prints or completes, to put a slash
-  after a directory. It leaves `.` and `..` out always, and other dot
-  names unless the word starts with a dot; it does not look inside
-  quotes.
-- **Limits:** the line is still 60 characters; the list assumes 80
-  columns; no reverse search (Ctrl-R) and no history kept across boots.
+Eelco found ntpd too quiet to tell what it was doing and asked for a
+client listing its sources and their latency. ntpd now asks up to four
+addresses of its server each round and takes the time from the one
+with the shortest round trip, and between rounds serves as `ntp`;
+`bin/ntpctl` asks it.
 
-### 2026-11-28 · Every tool of bin/ in Rust
+- **IPC, not a control socket or a status file.** Servers are found by
+  name here, so ntpd registers one and waits in `receive` with an alarm
+  for its next round, where it slept before. Rejected: a UDP control
+  port, as ntpd and chronyd use (it needs the IP server to deliver to
+  its own address, and a port to guard), and a file ntpd rewrites
+  (stale after a crash or a reboot, and a disk write every round).
+- **The answer is text, lines of words**, as chronyc's `-c` output:
+  ntpctl and ntpd are separate programs with no shared crate between
+  them, and a new field is a new word at the end of a line.
+- **Several addresses, shortest round trip wins**, the simplest of
+  NTP's selection rules: a pool name gives several servers, and one
+  that stops answering no longer stalls the clock. Full NTP's filters
+  and clustering stay out.
+- trystd's `sys` gained what a Rust server needs, `register`,
+  `receive`, `reply`, `copy_out` and `alarm_until`: ntpd is the first
+  server written in Rust.
 
-Eelco asked for the tools that were not Rust yet to be ported. The
-assembly and Trice programs of `bin/` (`echo`, `upper`, `wc`, `head`,
-`grep`, `cp`, `mv`, `touch`, `ps`, `free`, `uptime`, `uname`, `dmesg`,
-`sleep`, `df`, `ping`, `ifconfig`, `host`, `nc`, and the test programs
-`hello`, `fail`, `spin`) are now Rust over trystd, with the same
-arguments, output and exit codes. `kill` stays assembly: the signals
-work rewrites it, with a new `SYS_KILL`.
+### 2026-11-28 · The shell in Rust, from the disk
 
-- **trystd grew what the tools needed, typed**, rather than tools
-  calling `sys::call` themselves: `os` (the kernel's reports: `info`,
-  `process`/`processes` with a `State` enum, `hart`, `read_log`/`log`),
-  and in `net` the IP server's own calls (`config`, `set_config`,
-  `set_nameserver`, `ping`). top keeps its own hand-tuned calls (its
-  step budget).
-- **Four pages, as before.** A process's image shares its page with its
-  stack, so an image past about 9,800 trytes takes a fifth page, and a
-  heap a sixth. Written the obvious way (`println!`, `Vec` of
-  arguments, `&mut dyn Read`), the tools were 12,000 to 17,000 trytes
-  and 5 or 6 pages against assembly's 4, and the 81-page test machine
-  ran out of memory in three-program pipelines (`xargs < words | wc`,
-  rstd's children). core::fmt alone is 6,000 trytes. trystd gained
-  `io::Line`, a line put together on the stack with numbers written by
-  hand and errors by `Error::description`, and the small tools use it,
-  return exit codes, take readers generically and walk their arguments:
-  `wc`, `head`, `grep` are about 8,000 trytes, `ps` 5,400, `echo` 3,000,
-  all in four pages, and faster for skipping core::fmt's ~1,000 steps a
-  number. Rejected: raising the test machine's RAM, which would have
-  hidden the cost on every machine. `ping`, `host` and `nc` resolve
-  names into a `Vec`, so they keep a heap and are 13,000 to 16,000.
-- **Errors say the error.** Where the old tools said "cannot open" or
-  "cannot make", the new ones say the `io::Error`, as Unix does: `wc:
-  nope: no such file or directory`. Messages that say more than the
-  error (`mv: d: cannot move there`, `ping`'s and `nc`'s network
-  failures) are kept. A DNS server that ARP cannot find is "the name
-  server did not answer", as lib/dns.tc said, not "timed out".
-- **ps names the thread states** (futex, join, dying) the assembly
-  showed as `?`.
-- **`recho` and `rhello` went**: `echo` and `hello` are Rust now.
-  `lib/dns.tc` went too, as trystd's `net::lookup_host` is the
-  resolver; `lib/io.tc`, `lib/ip.tc` and `lib/start.s` stay for Trice
-  test programs (`tests/dnsd.tc`).
->>>>>>> origin/main
+Eelco asked for the shell to be rewritten in Rust, the last large
+assembly program of userland, with what it does kept and room left for
+variables and scripting next. `user/sh.s` is gone; the shell is
+`bin/sh.rs`, with its parts in `bin/sh/` (the line editor, the lexer,
+running a line, the built-ins), over trystd.
+
+- **On the disk, not in the image.** A program of the kernel image has
+  one page for its code, data and stack, and the shell is some 20,000
+  trytes of Rust; embedding it would also have meant building Rust into
+  every assembled kernel, with core's symbols clashing with the kernel's
+  own Rust. Init already starts programs from the disk for `/etc/init`
+  through the file server, and the kernel itself boots from the disk, so
+  init now starts `/bin/sh` the same way, with "sh" as its argument for
+  ps. Without a file server or `/bin/sh` there is no shell: init says
+  `init: cannot start /bin/sh` and exits with 1. Before, a shell with no
+  filesystem could only run pingpong. Tests that want a shell of their
+  own give init a program of the image (`INIT_SH`, 0 for the disk).
+- **Five pages, no heap.** The image is over half a page, so it takes a
+  fifth page (assembly's took four); everything it keeps is in fixed
+  buffers (the line, 16 history lines, tokens), so it never grows a
+  sixth. The image's page that `sh.s` held is free RAM now, which pays
+  for that, but the file server also maps two more block windows sooner,
+  having read the shell's file, and `xargs < words | wc` (xargs with a
+  heap, its echo, wc and the shell) no longer fit on 81 pages: on main
+  it fitted only because the file server had not grown yet when the test
+  ran. Eelco: "the test machine should have enough pages to do anything
+  comfortably", so `SHELL_RAM_PAGES` is 243 (3^5) now, which reverses
+  the earlier choice to keep it tight to show what costs memory; boot
+  touches no free page, so a larger machine costs the tests nothing.
+  `bin_disk` is 60 blocks, for the shell's two. trystd gained what that needed without the heap: `process::spawn_file`
+  (FS_SPAWN with an argument block) and `spawn_image`, descriptors by
+  number (`fs::dup2`, `close`, `is_open`, `set_inherit`),
+  `File::read_name`, `env::current_dir_in`, and a `console` module (open,
+  foreground).
+- **Same keys, words and messages.** The tests of the assembly shell
+  pass unchanged but for the disks they boot (they need `/bin/sh` now,
+  and `ls /` shows `bin/`). One deliberate change: `|`, `<` and `>` are
+  operators wherever they stand unquoted, as in a Unix shell, so
+  `hello>out` redirects (the assembly shell only saw words starting with
+  them), and a line of redirections alone makes its files.
+- **Shaped for what comes next.** The lexer keeps tokens with their kind
+  (word, |, <, >, >>) and the spaces before each, so `;`, `&&`, `||`
+  and `&` are new kinds there; `Runner::line` runs one pipeline and
+  waits, so lists and `if`/`for` call it per pipeline; expansion
+  (variables, globbing) goes between lexing and running, and needs the
+  lexer to remember which characters were quoted. A shell given
+  standard input keeps it, where reading a script (`sh < script`) starts.
+- **Still 60 characters a line**, as the tests pin; a longer line is a
+  constant now (`LINE_MAX`).
+
+## A B-tree filesystem with metadata (2026-11-28)
+
+Eelco asked for file times, modes and owners. Porting FFS or ext4 was
+weighed against a filesystem of our own after bcachefs (whose move from
+C to Rust he pointed at), and he chose Route B: one copy-on-write
+B-tree of every record, in Rust (docs/filesystem.md). The choices:
+
+- **One tree, keyed [ino, kind, ...].** Inodes, directory entries and
+  extents are items in the same tree, as in bcachefs and btrfs, so a
+  file's records sit together, directories have no size limit, and
+  there is no inode table or free map to size at format time. Balanced
+  ternary keys compare word by word with no sign trickery, and a 6,561
+  word block holds hundreds of items, so the tree stays two or three
+  levels deep on any disk detrytus has.
+- **Copy-on-write, committed by the superblock.** A call copies the
+  nodes it changes to free blocks and writes the superblock last, so
+  every call is a transaction and a crash leaves the old or the new
+  tree, never half. That replaced the old server's "gather everything,
+  then change" discipline, which every new call had to get right by
+  hand. File data is still written in place, as in most Unix
+  filesystems; checksummed data and spare superblocks are later work.
+- **No free map on the disk.** Mounting walks the tree and marks what it
+  reaches. The walk reads each node once, and only nodes: data
+  blocks are counted from the extents. A map that could disagree with the tree is gone, along
+  with the code to keep it right. Blocks freed by a call stay in use
+  until its commit.
+- **One crate for the format, shared by the server and the host tool.**
+  `lib/rust/tryfs` is `no_std` with a `Store` trait: the file server's
+  store is its block windows, the host's a whole image in memory. The
+  Python disk tool became a front end over a Rust program, so the
+  format is implemented once and the tests read disks through the same
+  code that wrote them, with an fsck (`check`) on every load.
+- **The file server in Rust, in four pages.** `user/rust/fsd` replaced
+  `user/fsd.s`'s logic, leaving that file as stubs. It needed a kernel
+  image to hold programs of more than one page (`IMAGE_PAGES`), and a
+  stack check in the build (`tools/server.py`), since an inlined call
+  chain overflowed the stack below `V_USER` silently at first. It is
+  slower per call than the assembly was; caching the last inodes and
+  extents, u32 division for in-block offsets and fewer key copies took
+  a small read from about 70,000 steps to about 11,000, most of the
+  rest being the kernel's IPC.
+- **Relatime.** Reading moves the access time only when it is no later
+  than the last change, as Linux does, so reads do not write the disk.
+- **No permission checks yet.** Mode, uid and gid are stored, shown and
+  set (`chmod`, `chown`, `utimes`, FS_PROTOCOL 4), but there are no
+  users to check them against.

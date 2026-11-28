@@ -26,7 +26,7 @@ def session(shell, typed: str, etc_init: str | None = None) -> str:
         disk=bin_disk(programs=(NTPSD,), etc_init=etc_init),
         link="loop",
         clock=NOW,
-        ram_pages=243,  # two Rust programs beside the shell's
+        ram_pages=729,  # Rust programs beside the shell's
         max_steps=200_000_000,
     )
     assert result.exit_code == 0, result.console
@@ -41,6 +41,7 @@ def test_ntpd_asks_and_only_init_s_programs_set_the_clock(shell):
         "ntpsd kiss | ntpd -n 10.0.0.2\n"
         "ntpd -q 10.0.0.2\n"
         "ntpd -x\n"
+        "ntpctl\n"
         "date +%T\n",
     )
     assert re.fullmatch(
@@ -54,6 +55,7 @@ def test_ntpd_asks_and_only_init_s_programs_set_the_clock(shell):
         r"ntpd: 10\.0\.0\.2: the server sent a kiss of death\nsh: exit 1\n"
         r"\$ ntpd -q 10\.0\.0\.2\nntpd: 10\.0\.0\.2: no answer\nsh: exit 1\n"
         r"\$ ntpd -x\nusage: ntpd \[-n \| -q\] \[SERVER\]\nsh: exit 2\n"
+        r"\$ ntpctl\nntpctl: ntpd is not running\nsh: exit 1\n"
         # So the clock is as it was, seconds after boot.
         r"\$ date \+%T\n01:30:\d\d\n"
         r"\$ \n",
@@ -68,3 +70,33 @@ def test_ntpd_from_etc_init_sets_the_clock(shell):
         r"ntpd: clock stepped by \+3600\.0\d{5} s \(10\.0\.0\.2\)\n", out
     ), out
     assert re.search(r"\$ date \+%T\n02:30:\d\d\n", out), out
+    out = session(
+        shell, "sleep 5000000\nntpctl\nntpctl -s status\nntpctl -x\n", etc_init
+    )
+    assert re.search(
+        r"\$ ntpctl\n"
+        r"1/1 sources answering, clock synced to 10\.0\.0\.2, "
+        r"stepped \+3600\.0\d{5} s \ds ago\n"
+        r"10\.0\.0\.2 asks every 1024 s\n\n"
+        r"  remote +refid +st +when +poll reach +delay ms +offset ms\n"
+        # Asked once (reach 001), its own server 192.0.2.1, seconds ago.
+        r"\* 10\.0\.0\.2 +192\.0\.2\.1 +2 +\ds +1024 +001 "
+        r"+\d+\.\d{3} +\+3600\d{3}\.\d{3}\n"
+        r"\$ ntpctl -s status\n1/1 sources answering, clock synced to 10\.0\.0\.2, "
+        r"stepped \+3600\.0\d{5} s \ds ago\n10\.0\.0\.2 asks every 1024 s\n"
+        r"\$ ntpctl -x\nusage: ntpctl \[-s status\|sources\|all\]\nsh: exit 2\n",
+        out,
+    ), out
+
+
+def test_ntpctl_shows_a_source_that_does_not_answer(shell):
+    etc_init = "pipe\nnet\nip\n/bin/ntpd 10.0.0.9\n"
+    out = session(shell, "sleep 9000000\nntpctl -s all\n", etc_init)
+    assert re.search(
+        r"\$ ntpctl -s all\n"
+        r"0/1 sources answering, clock unsynced\n"
+        r"10\.0\.0\.9 asks every 64 s\n\n"
+        r"  remote[^\n]*\n"
+        r"\? 10\.0\.0\.9 +- +- +- +64 +000 +- +-\n",
+        out,
+    ), out

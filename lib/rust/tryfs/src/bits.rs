@@ -74,6 +74,24 @@ impl Bits {
         None
     }
 
+    /// The last block from `end` - 1 down to `from` that is not in the
+    /// set, if any.
+    pub fn last_clear(&self, from: i64, end: i64) -> Option<i64> {
+        let mut b = end - 1;
+        while b >= from {
+            let i = b as usize / 32;
+            if self.w[i] == u32::MAX && b % 32 == 31 {
+                b -= 32; // a whole word in use
+                continue;
+            }
+            if !self.has(b) {
+                return Some(b);
+            }
+            b -= 1;
+        }
+        None
+    }
+
     /// How many of blocks 0 to `end` - 1 are in the set.
     pub fn count(&self, end: i64) -> i64 {
         let mut n = 0;

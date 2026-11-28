@@ -31,8 +31,6 @@ jobs:
         run: detrytus run demo.s --ram-pages 40
       - name: Boot the demo on three harts
         run: detrytus run demo.s --ram-pages 40 --harts 3
-      - name: Run a shell session
-        run: printf 'hello\nfail\npingpong\nexit\n' | detrytus run shell.s --ram-pages 81 --harts 3 --input -
       - name: Use files from the shell
         run: |
           printf 'hello, disk\n' > notes
@@ -50,6 +48,9 @@ jobs:
           tools/fs.py ls disk.img docs
           tools/fs.py cat disk.img docs/motd | grep -q 'made in the shell'
           tools/fs.py cat disk.img docs/hi | grep -q 'hello from a balanced-ternary machine'
+      - name: Run a shell session on three harts
+        # The shell is /bin/sh: it needs the disk.
+        run: printf 'hello\nfail\npingpong\nexit\n' | detrytus run shell.s --ram-pages 243 --harts 3 --input - --disk disk.img
       - name: Boot the shell from the disk
         run: |
           printf 'hello\nuname -a\nexit\n' | detrytus run --harts 3 --input - --disk disk.img | tee boot.txt

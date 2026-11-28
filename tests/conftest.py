@@ -16,7 +16,9 @@ def kernel_built():
         kernel_rust.build()
         server_rust.build()
     except kernel_rust.BuildError as e:
-        pytest.exit(f"cannot build the kernel's or file server's Rust: {e}", returncode=1)
+        pytest.exit(
+            f"cannot build the kernel's or file server's Rust: {e}", returncode=1
+        )
 
 
 @pytest.fixture(autouse=True, params=[1, 3], ids=["1hart", "3harts"])

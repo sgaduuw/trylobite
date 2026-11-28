@@ -137,17 +137,27 @@ impl<S: Store> Fs<S> {
     /// Put an item of key `k` and value `v`, in place of one of that key
     /// if there is one.
     pub fn put(&mut self, k: &Key, v: &[i64]) -> Result<()> {
-        self.forget_cached();
+        self.forget_for(k);
         let mut path = Path { depth: 0, block: [0; DEPTH], pos: [0; DEPTH] };
         self.descend(k.words(), &mut path)?;
         let mut level = path.depth - 1;
         let mut b = self.cow(path.block[level])?;
         let s = self.node(b)?;
         let (pos, exact) = node::find(&self.store, s, k.words(), false);
-        if exact {
-            node::remove(&mut self.store, s, pos);
-        }
-        let mut split = self.insert_at(b, pos, k, v)?;
+        let mut split = if exact && node::vlen(&self.store, s, pos) == v.len() {
+            // The same size: the new value over the old, as an inode's
+            // record is at every write.
+            let at = node::value_at(&self.store, s, pos);
+            for (i, &w) in v.iter().enumerate() {
+                self.store.set_word(s, at + i, w);
+            }
+            None
+        } else {
+            if exact {
+                node::remove(&mut self.store, s, pos);
+            }
+            self.insert_at(b, pos, k, v)?
+        };
         while level > 0 {
             level -= 1;
             let child = b;
@@ -170,7 +180,7 @@ impl<S: Store> Fs<S> {
             let s = self.node(b)?;
             let first = node::key(&self.store, s, node::ITEMS);
             let up = node::level(&self.store, s) + 1;
-            let nb = self.alloc(b)?;
+            let nb = self.alloc_node()?;
             let s = self.store.zero(nb)?;
             node::init(&mut self.store, s, up);
             node::insert(&mut self.store, s, node::ITEMS, &first, &[b]);
@@ -204,7 +214,7 @@ impl<S: Store> Fs<S> {
         if cut >= end {
             return Err(E_IO); // one item takes a whole node: cannot happen
         }
-        let rb = self.alloc(b)?;
+        let rb = self.alloc_node()?;
         let r = self.store.zero(rb)?;
         node::init(&mut self.store, r, level);
         let s = self.node(b)?;
@@ -232,7 +242,7 @@ impl<S: Store> Fs<S> {
 
     /// Take away the item of key `k`: false if there was none.
     pub fn delete(&mut self, k: &Key) -> Result<bool> {
-        self.forget_cached();
+        self.forget_for(k);
         let mut path = Path { depth: 0, block: [0; DEPTH], pos: [0; DEPTH] };
         self.descend(k.words(), &mut path)?;
         let mut level = path.depth - 1;
@@ -276,7 +286,7 @@ impl<S: Store> Fs<S> {
                 self.root = node::value(&self.store, s, node::ITEMS, 0);
             } else {
                 // Every leaf went: an empty leaf is the root.
-                let nb = self.alloc(old)?;
+                let nb = self.alloc_node()?;
                 let s = self.store.zero(nb)?;
                 node::init(&mut self.store, s, 0);
                 self.root = nb;

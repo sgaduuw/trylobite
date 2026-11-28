@@ -365,7 +365,13 @@ class Filesystem:
         """A new filesystem of count blocks, on a disk of disk_blocks."""
         made = cls(b"")
         done = subprocess.run(
-            [tryfs_binary(), "new", str(made.image), str(count), str(disk_blocks or count)],
+            [
+                tryfs_binary(),
+                "new",
+                str(made.image),
+                str(count),
+                str(disk_blocks or count),
+            ],
             capture_output=True,
             text=True,
         )

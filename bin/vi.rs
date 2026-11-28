@@ -2,22 +2,37 @@
 //! file is read whole into memory as lines and written back whole with
 //! `:w`; a FILE that does not exist yet is made by the first write.
 //!
-//! Normal mode moves and changes:
+//! Normal mode moves:
 //!
 //!   h j k l, arrows   left, down, up, right     0 ^ $   line start, text, end
 //!   w b e             words                     gg G    first, last line
+//!   f t F T + char    to (or till) a character on the line; ; again, , back
+//!   %                 to the matching bracket   + - Enter  next, previous line
+//!   / ? + text        search forward, back      n N     again, the other way
 //!   Ctrl-F Ctrl-B     a screen down, up         Ctrl-D Ctrl-U  half a screen
-//!   x X               delete under, before      dd D    delete line, to end
-//!   yy p P            copy line, put after, before
-//!   r C               replace one character     J       join with the next line
+//!
+//! A search is plain text, except that a leading `^` ties it to a line's
+//! start and a trailing `$` to its end; it goes round the end of the file.
+//!
+//! The operators d (delete), c (change: delete, then insert) and y (copy)
+//! take a move after them, or themselves for whole lines: `dw`, `c$`,
+//! `y2j`, `d/word`, `dd`, `cc`, `yy`. `cw` changes to the word's end.
+//! Other changes:
+//!
+//!   x X               delete under, before      D C     delete, change to end
+//!   s S               change a character, line  Y       copy the line
+//!   p P               put after, before         J       join with the next line
+//!   r                 replace a character       ~       swap case
 //!   i a I A o O       insert before, after, at line start, end, below, above
-//!   u                 undo the last change (again: redo it)
-//!   ZZ                write if changed, and quit
+//!   .                 repeat the last change
+//!   u Ctrl-R          undo, redo (the last 50 changes)
+//!   ZZ ZQ             write if changed and quit; quit
 //!   :                 a command: w [FILE], q, q!, wq, x, NUMBER, $
 //!
-//! A count before a move or change repeats it (`3dd`, `5j`). Insert
+//! A count before a move or change repeats it (`3dd`, `5j`, `d2w`). Insert
 //! mode takes text, Enter and Backspace (which joins lines at a line's
-//! start) and arrows; Escape goes back to normal mode.
+//! start) and arrows; Escape goes back to normal mode. An insert is one
+//! change to undo, and `.` repeats it with the text typed.
 //!
 //! The terminal is driven with ANSI sequences: the alternate screen
 //! while the editor runs, and each row written in place. The screen is
@@ -57,6 +72,7 @@ const CTRL_H: u8 = 8;
 const CTRL_L: u8 = 12;
 const CTRL_N: u8 = 14;
 const CTRL_P: u8 = 16;
+const CTRL_R: u8 = 18;
 const CTRL_U: u8 = 21;
 const DEL: u8 = 127;
 
@@ -161,16 +177,36 @@ impl Input {
 enum Mode {
     Normal,
     Insert,
-    /// Typing a `:` command into `Editor::cmd`.
+    /// Typing a `:` command or a `/` or `?` search into `Editor::cmd`,
+    /// after `Editor::prompt`.
     Command,
 }
 
-/// A copy of the text and cursor, for `u`.
+/// What a motion did, for an operator: the range it covers runs to the
+/// character before the cursor (exclusive), takes the cursor's character
+/// too (inclusive), or is whole lines.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    /// Not a motion.
+    No,
+    /// A motion that could not move (no match): an operator does nothing.
+    Fail,
+    Exclusive,
+    Inclusive,
+    Lines,
+}
+
+/// A copy of the text and cursor, for `u` and Ctrl-R.
 struct Snapshot {
     lines: Vec<Vec<u8>>,
     cy: usize,
     cx: usize,
+    changed: bool,
 }
+
+/// The changes `u` can take back, oldest dropped first: each is a copy
+/// of the whole text.
+const UNDO_MAX: usize = 50;
 
 struct Editor {
     /// Never empty: an empty file is one empty line.
@@ -188,13 +224,30 @@ struct Editor {
     changed: bool,
     msg: Vec<u8>,
     cmd: Vec<u8>,
-    /// Lines `dd` and `yy` took, for `p` and `P`.
+    /// The command line's first character: `:`, `/` or `?`.
+    prompt: u8,
+    /// Text the operators and `x` took, for `p` and `P`: whole lines, or
+    /// (when `whole` is false) a piece of text, a line break between
+    /// each two parts.
     yank: Vec<Vec<u8>>,
-    undo: Option<Snapshot>,
-    /// A count being typed, 0 for none.
-    count: usize,
-    /// The first key of a two-key command (d, y, g, r, Z), or 0.
-    pending: u8,
+    whole: bool,
+    undo: Vec<Snapshot>,
+    redo: Vec<Snapshot>,
+    /// The normal-mode command being typed: count, operator, count,
+    /// motion, the motion's character.
+    keys: Vec<u8>,
+    /// The keys since the command began, and those of the last change,
+    /// for `.`.
+    rec: Vec<Key>,
+    dot: Vec<Key>,
+    /// The last search, and whether it went backwards (`?`).
+    pattern: Vec<u8>,
+    back: bool,
+    /// The last f, t, F or T and its character, for `;` and `,`.
+    find: (u8, u8),
+    /// An operator's motion is moving: the cursor may go past the
+    /// line's last character.
+    oping: bool,
     quit: bool,
     /// What the last Escape changed: the mode and column before it.
     escaped: Option<(Mode, usize)>,
@@ -311,10 +364,18 @@ impl Editor {
             changed: false,
             msg: Vec::new(),
             cmd: Vec::new(),
+            prompt: b':',
             yank: Vec::new(),
-            undo: None,
-            count: 0,
-            pending: 0,
+            whole: false,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            keys: Vec::new(),
+            rec: Vec::new(),
+            dot: Vec::new(),
+            pattern: Vec::new(),
+            back: false,
+            find: (0, 0),
+            oping: false,
             quit: false,
             escaped: None,
             screen: Vec::with_capacity(ROWS * (COLS + 12)),
@@ -396,7 +457,9 @@ impl Editor {
         match fs::write(&name[..], &bytes) {
             Ok(()) => {
                 if to.is_none() || self.name.as_ref().map(|n| n.as_bytes()) == to {
+                    // Every text undo goes back to differs from the file now.
                     self.changed = false;
+                    self.undo.iter_mut().chain(self.redo.iter_mut()).for_each(|s| s.changed = true);
                 }
                 self.msg.clear();
                 self.msg.push(b'"');
@@ -432,11 +495,7 @@ impl Editor {
     /// The last column the cursor may be on: past the end in insert mode.
     fn max_x(&self) -> usize {
         let n = self.line().len();
-        if self.mode == Mode::Insert || n == 0 {
-            n
-        } else {
-            n - 1
-        }
+        if self.mode == Mode::Insert || self.oping || n == 0 { n } else { n - 1 }
     }
 
     fn clamp_x(&mut self) {
@@ -551,52 +610,360 @@ impl Editor {
         self.set_x(x);
     }
 
+    /// f, t (forward) or F, T (backward) to the `n`th `c` on the line.
+    /// `again` for `;` and `,`: a t or T does not stop where it stands.
+    fn find_char(&mut self, kind: u8, c: u8, n: usize, again: bool) -> bool {
+        let till = kind == b't' || kind == b'T';
+        let line = &self.lines[self.cy];
+        let mut p = self.cx;
+        if kind == b'f' || kind == b't' {
+            p += (till && again) as usize;
+            for _ in 0..n {
+                match line.iter().skip(p + 1).position(|&b| b == c) {
+                    Some(k) => p += k + 1,
+                    None => return false,
+                }
+            }
+            self.set_x(p - till as usize);
+        } else {
+            p = p.saturating_sub((till && again) as usize);
+            for _ in 0..n {
+                match line[..p.min(line.len())].iter().rposition(|&b| b == c) {
+                    Some(k) => p = k,
+                    None => return false,
+                }
+            }
+            self.set_x(p + till as usize);
+        }
+        true
+    }
+
+    /// `%`: from the first bracket at or after the cursor on the line to
+    /// the one that matches it.
+    fn bracket(&mut self) -> bool {
+        const PAIRS: &[u8] = b"()[]{}";
+        let Some(off) = self.line().iter().skip(self.cx).position(|b| PAIRS.contains(b)) else {
+            return false;
+        };
+        let (mut y, mut x) = (self.cy, self.cx + off);
+        let k = PAIRS.iter().position(|&b| b == self.at(y, x)).unwrap_or(0);
+        let (open, close) = (PAIRS[k & !1], PAIRS[k | 1]);
+        let mut depth = 0isize;
+        loop {
+            let b = self.at(y, x);
+            depth += (b == open) as isize - (b == close) as isize;
+            if depth == 0 {
+                break;
+            }
+            let step = if k & 1 == 0 { self.next(y, x) } else { self.prev(y, x) };
+            match step {
+                Some(p) => (y, x) = p,
+                None => return false,
+            }
+        }
+        self.cy = y;
+        self.set_x(x);
+        true
+    }
+
+    /// Where `self.pattern` matches line `y`: the first place at or after
+    /// `from` (forward) or the last before `to`, both bytes. A pattern
+    /// that starts with `^` matches only at a line's start, one that ends
+    /// with `$` only at its end; the rest is plain text.
+    fn match_in(&self, y: usize, from: usize, to: usize, back: bool) -> Option<usize> {
+        let mut pat = &self.pattern[..];
+        let start = pat.first() == Some(&b'^');
+        if start {
+            pat = &pat[1..];
+        }
+        let end = pat.last() == Some(&b'$');
+        if end {
+            pat = &pat[..pat.len() - 1];
+        }
+        let line = &self.lines[y];
+        if pat.len() > line.len() {
+            return None;
+        }
+        let ok = |&p: &usize| {
+            p >= from
+                && p < to
+                && line[p..p + pat.len()] == *pat
+                && (!start || p == 0)
+                && (!end || p + pat.len() == line.len())
+        };
+        let mut all = 0..=line.len() - pat.len();
+        if back { all.rfind(ok) } else { all.find(ok) }
+    }
+
+    /// `n`: to the next match of the last search, in its direction or
+    /// (`back`) the other way, round the end of the text.
+    fn search(&mut self, back: bool) -> bool {
+        if self.pattern.is_empty() {
+            self.say(b"No previous regular expression");
+            return false;
+        }
+        let n = self.lines.len();
+        let (cy, cx) = (self.cy, self.cx);
+        for k in 0..=n {
+            let y = if back { (cy + n - k % n) % n } else { (cy + k) % n };
+            let (from, to) = match (k, back) {
+                (0, false) => (cx + 1, usize::MAX),
+                (0, true) => (0, cx),
+                (_, false) if k == n => (0, cx + 1),
+                (_, true) if k == n => (cx, usize::MAX),
+                _ => (0, usize::MAX),
+            };
+            if let Some(x) = self.match_in(y, from, to, back) {
+                if (!back && y < cy) || (!back && y == cy && k > 0) {
+                    self.say(b"search hit BOTTOM, continuing at TOP");
+                } else if (back && y > cy) || (back && y == cy && k > 0) {
+                    self.say(b"search hit TOP, continuing at BOTTOM");
+                }
+                self.cy = y;
+                self.set_x(x);
+                return true;
+            }
+        }
+        self.say(b"Pattern not found: ");
+        self.msg.extend_from_slice(&self.pattern.clone());
+        false
+    }
+
+    /// Move as motion `m` (with its character `arg`) does, `n` times;
+    /// `given` is the count as typed, 0 for none. What sort of motion it
+    /// was, or Kind::No when `m` is not one.
+    fn motion(&mut self, m: u8, arg: u8, n: usize, given: usize) -> Kind {
+        let text = self.text();
+        let page = text.saturating_sub(2).max(1);
+        let ok = |moved: bool| if moved { Kind::Exclusive } else { Kind::Fail };
+        match m {
+            b'h' | CTRL_H => self.set_x(self.cx.saturating_sub(n)),
+            b'l' | b' ' => self.set_x(self.cx + n),
+            b'0' => self.set_x(0),
+            b'^' => self.set_x(self.first_text()),
+            b'w' => (0..n).for_each(|_| self.word_forward()),
+            b'b' => (0..n).for_each(|_| self.word_back()),
+            b'n' => return ok(self.search(self.back)),
+            b'N' => return ok(self.search(!self.back)),
+            b'e' => {
+                (0..n).for_each(|_| self.word_end());
+                return Kind::Inclusive;
+            }
+            b'$' => {
+                self.cy = (self.cy + n - 1).min(self.lines.len() - 1);
+                self.set_x(usize::MAX);
+                self.want = usize::MAX;
+                return Kind::Inclusive;
+            }
+            b'%' => return if self.bracket() { Kind::Inclusive } else { Kind::Fail },
+            b'f' | b't' | b'F' | b'T' | b';' | b',' => {
+                let again = m == b';' || m == b',';
+                if !again {
+                    self.find = (m, arg);
+                }
+                let (mut kind, c) = self.find;
+                if m == b',' {
+                    kind ^= b'f' ^ b'F'; // the same letter, the other case
+                }
+                if c == 0 || !self.find_char(kind, c, n, again) {
+                    return Kind::Fail;
+                }
+                return if kind == b'f' || kind == b't' {
+                    Kind::Inclusive
+                } else {
+                    Kind::Exclusive
+                };
+            }
+            _ => {
+                match m {
+                    b'j' | CTRL_N => self.to_line(self.cy + n),
+                    b'k' | CTRL_P => self.to_line(self.cy.saturating_sub(n)),
+                    b'+' | b'\r' => {
+                        self.to_line(self.cy + n);
+                        self.set_x(self.first_text());
+                    }
+                    b'-' => {
+                        self.to_line(self.cy.saturating_sub(n));
+                        self.set_x(self.first_text());
+                    }
+                    b'G' | b'g' => {
+                        if m == b'g' && arg != b'g' {
+                            return Kind::No;
+                        }
+                        let last = if m == b'G' { self.lines.len() } else { 1 };
+                        self.to_line((if given > 0 { given } else { last }) - 1);
+                        self.set_x(self.first_text());
+                    }
+                    CTRL_F => {
+                        self.top = (self.top + page * n).min(self.lines.len() - 1);
+                        self.to_line(self.top.max(self.cy));
+                    }
+                    CTRL_B => {
+                        self.top = self.top.saturating_sub(page * n);
+                        self.to_line(self.cy.min(self.top + text - 1));
+                    }
+                    CTRL_D => self.to_line(self.cy + text / 2),
+                    CTRL_U => self.to_line(self.cy.saturating_sub(text / 2)),
+                    _ => return Kind::No,
+                }
+                return Kind::Lines;
+            }
+        }
+        Kind::Exclusive
+    }
+
     // --- changes -----------------------------------------------------------
 
     /// Keep the text as it is for `u`, before a change.
     fn save(&mut self) {
-        self.undo = Some(Snapshot { lines: self.lines.clone(), cy: self.cy, cx: self.cx });
-    }
-
-    fn undo(&mut self) {
-        match self.undo.take() {
-            Some(snap) => {
-                let now = Snapshot {
-                    lines: core::mem::replace(&mut self.lines, snap.lines),
-                    cy: self.cy,
-                    cx: self.cx,
-                };
-                self.undo = Some(now);
-                self.cy = snap.cy.min(self.lines.len() - 1);
-                self.set_x(snap.cx);
-                self.changed = true;
-            }
-            None => self.say(b"Already at oldest change"),
+        if self.undo.len() == UNDO_MAX {
+            self.undo.remove(0);
         }
-    }
-
-    fn delete_lines(&mut self, n: usize) {
-        let end = (self.cy + n).min(self.lines.len());
-        self.yank = self.lines.drain(self.cy..end).collect();
-        if self.lines.is_empty() {
-            self.lines.push(Vec::new());
-        }
-        self.cy = self.cy.min(self.lines.len() - 1);
-        self.set_x(self.first_text());
+        let snap = self.snapshot();
+        self.undo.push(snap);
+        self.redo.clear();
         self.changed = true;
+    }
+
+    fn snapshot(&self) -> Snapshot {
+        Snapshot { lines: self.lines.clone(), cy: self.cy, cx: self.cx, changed: self.changed }
+    }
+
+    /// `u` (`redo` false) or Ctrl-R: back to the text one list holds, the
+    /// text as it is now going on the other.
+    fn undo(&mut self, redo: bool) {
+        let (from, to) =
+            if redo { (&mut self.redo, &mut self.undo) } else { (&mut self.undo, &mut self.redo) };
+        let Some(snap) = from.pop() else {
+            return self.say(if redo {
+                b"Already at newest change"
+            } else {
+                b"Already at oldest change"
+            });
+        };
+        to.push(Snapshot {
+            lines: core::mem::replace(&mut self.lines, snap.lines),
+            cy: self.cy,
+            cx: self.cx,
+            changed: self.changed,
+        });
+        self.changed = snap.changed;
+        self.cy = snap.cy.min(self.lines.len() - 1);
+        self.set_x(snap.cx);
+    }
+
+    /// Operator `op` (d, c or y) over what motion `m` moves across, or over
+    /// `n` whole lines when `m` is the operator again (dd, cc, yy).
+    fn operate(&mut self, op: u8, mut m: u8, arg: u8, n: usize, given: usize) {
+        let (sy, sx) = (self.cy, self.cx);
+        let kind = if m == op {
+            self.cy = (sy + n - 1).min(self.lines.len() - 1);
+            Kind::Lines
+        } else {
+            // cw changes the word, not the blanks after it, as ce does.
+            if op == b'c' && m == b'w' && class(self.at(sy, sx)) != 0 {
+                m = b'e';
+            }
+            self.oping = true;
+            let kind = self.motion(m, arg, n, given);
+            self.oping = false;
+            kind
+        };
+        let to = (self.cy, self.cx);
+        self.cy = sy;
+        self.cx = sx;
+        match kind {
+            Kind::No => self.say(b"Unknown command"),
+            Kind::Fail => {}
+            _ => self.apply(op, kind, (sy, sx), to),
+        }
+        self.clamp_x();
+    }
+
+    fn apply(&mut self, op: u8, kind: Kind, a: (usize, usize), b: (usize, usize)) {
+        let (a, mut b) = if b < a { (b, a) } else { (a, b) };
+        if kind == Kind::Lines {
+            self.yank = self.lines[a.0..=b.0].to_vec();
+            self.whole = true;
+            self.cy = a.0;
+            if op == b'y' {
+                return;
+            }
+            self.save();
+            self.lines.drain(a.0..=b.0);
+            if op == b'c' || self.lines.is_empty() {
+                self.lines.insert(a.0, Vec::new());
+            }
+            self.cy = a.0.min(self.lines.len() - 1);
+            self.cx = 0;
+            if op == b'c' {
+                return self.insert_mode();
+            }
+            return self.set_x(self.first_text());
+        }
+        // An exclusive motion that ends at a line's start stops at the end
+        // of the line before: dw on a line's last word keeps the break.
+        if kind == Kind::Exclusive && b.1 == 0 && b.0 > a.0 {
+            b = (b.0 - 1, usize::MAX);
+        }
+        if kind == Kind::Inclusive {
+            b.1 = b.1.saturating_add(1);
+        }
+        b.1 = b.1.min(self.lines[b.0].len());
+        let mut text = Vec::new();
+        for y in a.0..=b.0 {
+            let from = if y == a.0 { a.1 } else { 0 };
+            let to = if y == b.0 { b.1 } else { self.lines[y].len() };
+            text.push(self.lines[y][from.min(to)..to].to_vec());
+        }
+        if a != b {
+            self.yank = text;
+            self.whole = false;
+        }
+        self.cy = a.0;
+        if op != b'y' && a != b {
+            self.save();
+            let tail = self.lines[b.0].split_off(b.1);
+            self.lines.drain(a.0 + 1..=b.0);
+            self.lines[a.0].truncate(a.1);
+            self.lines[a.0].extend_from_slice(&tail);
+        }
+        if op == b'c' {
+            if a == b {
+                self.save();
+            }
+            self.insert_mode();
+            self.cx = a.1;
+            self.want = a.1;
+        } else {
+            self.set_x(a.1);
+        }
     }
 
     fn put(&mut self, below: bool) {
         if self.yank.is_empty() {
             return;
         }
-        let at = if below { self.cy + 1 } else { self.cy };
-        for (k, line) in self.yank.iter().enumerate() {
-            self.lines.insert(at + k, line.clone());
+        if self.whole {
+            let at = if below { self.cy + 1 } else { self.cy };
+            for (k, line) in self.yank.iter().enumerate() {
+                self.lines.insert(at + k, line.clone());
+            }
+            self.cy = at;
+            return self.set_x(self.first_text());
         }
-        self.cy = at;
-        self.set_x(self.first_text());
-        self.changed = true;
+        let cy = self.cy;
+        let line = &mut self.lines[cy];
+        let at = (self.cx + (below && !line.is_empty()) as usize).min(line.len());
+        let tail = line.split_off(at);
+        line.extend_from_slice(&self.yank[0]);
+        for (k, part) in self.yank[1..].iter().enumerate() {
+            self.lines.insert(cy + 1 + k, part.clone());
+        }
+        let last = cy + self.yank.len() - 1;
+        let end = self.lines[last].len();
+        self.lines[last].extend_from_slice(&tail);
+        self.set_x(if last == cy { end.saturating_sub(1) } else { at });
     }
 
     fn join(&mut self) {
@@ -615,7 +982,6 @@ impl Editor {
         }
         line.extend_from_slice(&next[start..]);
         self.set_x(at);
-        self.changed = true;
     }
 
     fn insert_mode(&mut self) {
@@ -629,7 +995,6 @@ impl Editor {
         self.lines.insert(at, Vec::new());
         self.cy = at;
         self.cx = 0;
-        self.changed = true;
         self.insert_mode();
     }
 
@@ -642,6 +1007,10 @@ impl Editor {
         if key == Key::Esc {
             self.escaped = Some((mode, cx));
         }
+        if mode == Mode::Normal && self.keys.is_empty() {
+            self.rec.clear();
+        }
+        self.rec.push(key);
         match self.mode {
             Mode::Normal => self.normal(key),
             Mode::Insert => self.insert(key),
@@ -661,127 +1030,153 @@ impl Editor {
         }
     }
 
+    /// A key in normal mode: onto the command being typed, which runs once
+    /// it is whole. Keys that are not characters stand for the command
+    /// they move as.
     fn normal(&mut self, key: Key) {
-        let pending = core::mem::replace(&mut self.pending, 0);
-        if pending != 0 {
-            let n = core::mem::replace(&mut self.count, 0).max(1);
-            return self.second(pending, key, n);
-        }
-        if let Key::Char(b) = key {
-            if b.is_ascii_digit() && (b != b'0' || self.count > 0) {
-                self.count = (self.count * 10 + (b - b'0') as usize).min(99_999);
-                return;
+        let b = match key {
+            Key::Char(CTRL_C) | Key::Esc => return self.keys.clear(),
+            Key::Char(b) => b,
+            Key::Enter => b'\r',
+            Key::Backspace => CTRL_H,
+            Key::Left => b'h',
+            Key::Right => b'l',
+            Key::Up => b'k',
+            Key::Down => b'j',
+            Key::Home => b'0',
+            Key::End => b'$',
+            Key::Delete => b'x',
+            Key::PageUp => CTRL_B,
+            Key::PageDown => CTRL_F,
+        };
+        self.keys.push(b);
+        self.run_keys();
+    }
+
+    /// Run the command in `self.keys` if it is whole: [count] [operator
+    /// [count]] command [character]. A search's motion waits for its
+    /// pattern on the command line.
+    fn run_keys(&mut self) {
+        let keys = self.keys.clone();
+        let mut i = 0;
+        let count = |i: &mut usize| {
+            let mut n = 0usize;
+            while *i < keys.len() && keys[*i].is_ascii_digit() && (keys[*i] != b'0' || n > 0) {
+                n = (n * 10 + (keys[*i] - b'0') as usize).min(99_999);
+                *i += 1;
             }
+            n
+        };
+        let n1 = count(&mut i);
+        let mut op = 0;
+        let mut n2 = 0;
+        if i < keys.len() && b"dcy".contains(&keys[i]) {
+            op = keys[i];
+            i += 1;
+            n2 = count(&mut i);
         }
-        if !matches!(key, Key::Char(b'd' | b'y' | b'g' | b'r' | b'Z')) {
-            self.msg.clear();
+        let Some(&m) = keys.get(i) else { return };
+        let arg = if b"fFtTrgZ".contains(&m) {
+            match keys.get(i + 1) {
+                Some(&a) => a,
+                None => return,
+            }
+        } else {
+            0
+        };
+        if m == b'/' || m == b'?' {
+            self.mode = Mode::Command;
+            self.prompt = m;
+            self.cmd.clear();
+            return;
         }
-        let given = core::mem::replace(&mut self.count, 0);
+        self.keys.clear();
+        self.msg.clear();
+        let given = if n1 == 0 && n2 == 0 { 0 } else { n1.max(1) * n2.max(1) };
+        let change = (op != 0 && op != b'y') || b"xXDCsSrJpP~iaIAoO".contains(&m);
+        self.command(op, m, arg, given);
+        if change && self.mode == Mode::Normal {
+            self.dot = self.rec.clone();
+        }
+    }
+
+    /// A whole normal-mode command.
+    fn command(&mut self, op: u8, m: u8, arg: u8, given: usize) {
         let n = given.max(1);
-        let text = self.text();
-        let page = text.saturating_sub(2).max(1);
-        match key {
-            Key::Char(b'h') | Key::Left | Key::Backspace => self.set_x(self.cx.saturating_sub(n)),
-            Key::Char(b'l') | Key::Char(b' ') | Key::Right => self.set_x(self.cx + n),
-            Key::Char(b'j') | Key::Char(CTRL_N) | Key::Down => self.to_line(self.cy + n),
-            Key::Char(b'k') | Key::Char(CTRL_P) | Key::Up => self.to_line(self.cy.saturating_sub(n)),
-            Key::Char(b'+') | Key::Enter => {
-                self.to_line(self.cy + n);
-                self.set_x(self.first_text());
-            }
-            Key::Char(b'-') => {
-                self.to_line(self.cy.saturating_sub(n));
-                self.set_x(self.first_text());
-            }
-            Key::Char(b'0') | Key::Home => self.set_x(0),
-            Key::Char(b'^') => self.set_x(self.first_text()),
-            Key::Char(b'$') | Key::End => {
-                self.cy = (self.cy + n - 1).min(self.lines.len() - 1);
-                self.set_x(usize::MAX);
-                self.want = usize::MAX;
-            }
-            Key::Char(b'w') => (0..n).for_each(|_| self.word_forward()),
-            Key::Char(b'b') => (0..n).for_each(|_| self.word_back()),
-            Key::Char(b'e') => (0..n).for_each(|_| self.word_end()),
-            Key::Char(b'G') => {
-                let y = if given > 0 { given - 1 } else { self.lines.len() - 1 };
-                self.to_line(y);
-                self.set_x(self.first_text());
-            }
-            Key::Char(CTRL_F) | Key::PageDown => {
-                self.top = (self.top + page * n).min(self.lines.len() - 1);
-                self.to_line(self.top.max(self.cy));
-            }
-            Key::Char(CTRL_B) | Key::PageUp => {
-                self.top = self.top.saturating_sub(page * n);
-                self.to_line(self.cy.min(self.top + text - 1));
-            }
-            Key::Char(CTRL_D) => self.to_line(self.cy + text / 2),
-            Key::Char(CTRL_U) => self.to_line(self.cy.saturating_sub(text / 2)),
-            Key::Char(b'x') | Key::Delete => {
-                if !self.line().is_empty() {
-                    self.save();
-                    let end = (self.cx + n).min(self.line().len());
-                    let cx = self.cx;
-                    self.lines[self.cy].drain(cx..end);
-                    self.clamp_x();
-                    self.changed = true;
-                }
-            }
-            Key::Char(b'X') => {
-                if self.cx > 0 {
-                    self.save();
-                    let start = self.cx.saturating_sub(n);
-                    let cx = self.cx;
-                    self.lines[self.cy].drain(start..cx);
-                    self.set_x(start);
-                    self.changed = true;
-                }
-            }
-            Key::Char(b'D') | Key::Char(b'C') => {
+        if op != 0 {
+            return self.operate(op, m, arg, n, given);
+        }
+        // Commands that are an operator and a motion.
+        let alias = match m {
+            b'x' => b"dl",
+            b'X' => b"dh",
+            b'D' => b"d$",
+            b'C' => b"c$",
+            b's' => b"cl",
+            b'S' => b"cc",
+            b'Y' => b"yy",
+            _ => b"  ",
+        };
+        if alias[0] != b' ' {
+            return self.operate(alias[0], alias[1], 0, n, given);
+        }
+        match self.motion(m, arg, n, given) {
+            Kind::No => {}
+            _ => return,
+        }
+        match m {
+            b'r' if arg >= b' ' && arg != DEL && !self.line().is_empty() => {
                 self.save();
+                let end = (self.cx + n).min(self.line().len());
                 let cx = self.cx;
-                self.lines[self.cy].truncate(cx);
-                self.changed = true;
-                if key == Key::Char(b'C') {
-                    self.insert_mode();
-                } else {
-                    self.set_x(cx);
-                }
+                self.lines[self.cy][cx..end].fill(arg);
+                self.set_x(end - 1);
             }
-            Key::Char(b'J') => {
+            b'~' if !self.line().is_empty() => {
+                self.save();
+                let end = (self.cx + n).min(self.line().len());
+                let cx = self.cx;
+                for b in &mut self.lines[self.cy][cx..end] {
+                    *b ^= if b.is_ascii_alphabetic() { 0x20 } else { 0 };
+                }
+                self.set_x(end);
+            }
+            b'J' => {
                 self.save();
                 (0..n.max(2) - 1).for_each(|_| self.join());
             }
-            Key::Char(b'p') | Key::Char(b'P') => {
+            b'p' | b'P' if !self.yank.is_empty() => {
                 self.save();
-                (0..n).for_each(|_| self.put(key == Key::Char(b'p')));
+                (0..n).for_each(|_| self.put(m == b'p'));
             }
-            Key::Char(b'u') => self.undo(),
-            Key::Char(b'i') | Key::Char(b'a') | Key::Char(b'I') | Key::Char(b'A') => {
+            b'u' => (0..n).for_each(|_| self.undo(false)),
+            CTRL_R => (0..n).for_each(|_| self.undo(true)),
+            b'.' => {
+                let dot = self.dot.clone();
+                for _ in 0..n {
+                    dot.iter().for_each(|&k| self.key(k));
+                }
+            }
+            b'i' | b'a' | b'I' | b'A' => {
                 self.save();
                 self.insert_mode();
-                self.cx = match key {
-                    Key::Char(b'a') if !self.line().is_empty() => self.cx + 1,
-                    Key::Char(b'I') => self.first_text(),
-                    Key::Char(b'A') => self.line().len(),
+                self.cx = match m {
+                    b'a' if !self.line().is_empty() => self.cx + 1,
+                    b'I' => self.first_text(),
+                    b'A' => self.line().len(),
                     _ => self.cx,
                 };
             }
-            Key::Char(b'o') => self.open_line(true),
-            Key::Char(b'O') => self.open_line(false),
-            Key::Char(b':') => {
+            b'o' => self.open_line(true),
+            b'O' => self.open_line(false),
+            b':' => {
                 self.mode = Mode::Command;
+                self.prompt = b':';
                 self.cmd.clear();
             }
-            Key::Char(b'd' | b'y' | b'g' | b'r' | b'Z') => {
-                if let Key::Char(b) = key {
-                    self.pending = b;
-                    self.count = given;
-                }
-            }
-            Key::Char(CTRL_G) => {
-                self.msg.clear();
+            b'Z' if arg == b'Z' => self.ex(b"x"),
+            b'Z' if arg == b'Q' => self.ex(b"q!"),
+            CTRL_G => {
                 self.quoted_name();
                 if self.changed {
                     self.msg.extend_from_slice(b" [Modified]");
@@ -791,37 +1186,9 @@ impl Editor {
                 self.msg.extend_from_slice(b" of ");
                 decimal(&mut self.msg, self.lines.len());
             }
-            Key::Char(CTRL_L) => self.out(b"\x1b[2J"),
-            Key::Esc | Key::Char(CTRL_C) => {}
+            CTRL_L => self.out(b"\x1b[2J"),
+            b'r' | b'~' | b'p' | b'P' => {}
             _ => self.say(b"Unknown command"),
-        }
-    }
-
-    /// The second key of a two-key command: dd, yy, gg, rX, ZZ.
-    fn second(&mut self, first: u8, key: Key, n: usize) {
-        match (first, key) {
-            (b'd', Key::Char(b'd')) => {
-                self.save();
-                self.delete_lines(n);
-            }
-            (b'y', Key::Char(b'y')) => {
-                let end = (self.cy + n).min(self.lines.len());
-                self.yank = self.lines[self.cy..end].to_vec();
-            }
-            (b'g', Key::Char(b'g')) => {
-                self.to_line(n - 1);
-                self.set_x(self.first_text());
-            }
-            (b'r', Key::Char(c)) if c >= b' ' && c != DEL && !self.line().is_empty() => {
-                self.save();
-                let end = (self.cx + n).min(self.line().len());
-                let cx = self.cx;
-                self.lines[self.cy][cx..end].fill(c);
-                self.set_x(end - 1);
-                self.changed = true;
-            }
-            (b'Z', Key::Char(b'Z')) => self.ex(b"x"),
-            _ => {}
         }
     }
 
@@ -831,12 +1198,16 @@ impl Editor {
                 self.mode = Mode::Normal;
                 self.msg.clear();
                 self.set_x(self.cx.saturating_sub(1));
+                // An insert that typed nothing is no change to undo.
+                if self.undo.last().is_some_and(|s| s.lines == self.lines) {
+                    self.changed = self.undo.pop().is_some_and(|s| s.changed);
+                }
+                self.dot = self.rec.clone();
             }
             Key::Char(b) if b >= b' ' || b == b'\t' => {
                 let cx = self.cx;
                 self.lines[self.cy].insert(cx, b);
                 self.cx += 1;
-                self.changed = true;
             }
             Key::Enter => {
                 let cx = self.cx;
@@ -844,27 +1215,23 @@ impl Editor {
                 self.lines.insert(self.cy + 1, rest);
                 self.cy += 1;
                 self.cx = 0;
-                self.changed = true;
             }
             Key::Backspace => {
                 if self.cx > 0 {
                     self.cx -= 1;
                     let cx = self.cx;
                     self.lines[self.cy].remove(cx);
-                    self.changed = true;
                 } else if self.cy > 0 {
                     let line = self.lines.remove(self.cy);
                     self.cy -= 1;
                     self.cx = self.line().len();
                     self.lines[self.cy].extend_from_slice(&line);
-                    self.changed = true;
                 }
             }
             Key::Delete => {
                 let cx = self.cx;
                 if cx < self.line().len() {
                     self.lines[self.cy].remove(cx);
-                    self.changed = true;
                 }
             }
             Key::Left => self.cx = self.cx.saturating_sub(1),
@@ -885,16 +1252,30 @@ impl Editor {
             Key::Esc | Key::Char(CTRL_C) => {
                 self.mode = Mode::Normal;
                 self.msg.clear();
+                self.keys.clear();
             }
-            Key::Backspace if self.cmd.is_empty() => self.mode = Mode::Normal,
+            Key::Backspace if self.cmd.is_empty() => {
+                self.mode = Mode::Normal;
+                self.keys.clear();
+            }
             Key::Backspace => {
                 self.cmd.pop();
             }
             Key::Enter => {
                 self.mode = Mode::Normal;
                 let cmd = core::mem::take(&mut self.cmd);
-                self.msg.clear();
-                self.ex(&cmd);
+                if self.prompt == b':' {
+                    self.msg.clear();
+                    return self.ex(&cmd);
+                }
+                // A search: the motion it ends becomes n, the way it went.
+                if !cmd.is_empty() {
+                    self.pattern = cmd;
+                }
+                self.back = self.prompt == b'?';
+                self.keys.pop();
+                self.keys.push(b'n');
+                self.run_keys();
             }
             Key::Char(b) if b >= b' ' => self.cmd.push(b),
             _ => {}
@@ -1019,7 +1400,7 @@ impl Editor {
         let mut status = core::mem::take(&mut self.msg);
         if self.mode == Mode::Command {
             status.clear();
-            status.push(b':');
+            status.push(self.prompt);
             status.extend_from_slice(&self.cmd);
         }
         let shown = status.len().min(cols - 1);

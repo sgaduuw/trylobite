@@ -170,10 +170,14 @@ So the machine may power off at any time and the disk holds a whole
 filesystem: the old one until the superblock is written, the new one
 after. The one exception is file data, which a write puts in the file's
 block in place, as most Unix filesystems do; a new block is fresh like
-any other. A new block goes after the one before it in the file if
-that is free, else the first free one from there on, else the first
+any other. A new data block goes after the one before it in the file
+if that is free, else the first free one from there on, else the first
 from where the last search stopped (wrapping round), so files tend to
-lie in runs.
+lie in runs. A node goes in the last free block instead: nodes gather
+at the end of the disk and data at the start, so copying nodes at every
+change does not leave free blocks scattered among a file's, and the free
+space between stays in one run, where `tools/fs.py boot` can put a
+kernel.
 
 ## Paths
 
@@ -353,8 +357,8 @@ windows.
 
 ## The shell
 
-`sh` (`user/sh.s`) starts the disk server and the file server first,
-then has eight file
+`sh` (`bin/sh.rs`), which init starts from `/bin/sh` once the disk
+and file servers are up, has eight file
 built-ins. `ls [DIR]` lists a directory,
 the current one when none is given, leaving out names that start with a dot: a
 file's size and name, a directory's name and a slash. Given an option

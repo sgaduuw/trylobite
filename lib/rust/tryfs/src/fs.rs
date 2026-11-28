@@ -117,7 +117,7 @@ pub struct Fs<S: Store> {
     /// bmap last found: (inode, first file block, blocks, first disk
     /// block), CACHED of each, the oldest replaced. A file read a few
     /// trytes at a time asks for both again and again, and so do two
-    /// read at once; any change to the tree forgets them.
+    /// read at once; a change to a record forgets what they hold of it.
     pub(crate) icache: [Option<Inode>; CACHED],
     pub(crate) ecache: [Option<(i64, i64, i64, i64)>; CACHED],
     pub(crate) inext: usize,
@@ -165,6 +165,28 @@ impl<S: Store> Fs<S> {
         }
     }
 
+    /// Make an `Fs` whose memory was all zeros what [`Fs::new`] makes,
+    /// its store aside: for a program that keeps it in pages it maps (the
+    /// file server's heap) rather than in its image, where its bit sets
+    /// would take thousands of trytes of zeros.
+    pub fn reset(&mut self) {
+        self.mounted = false;
+        self.blocks = 0;
+        self.root = 0;
+        self.seq = 0;
+        self.next_ino = 0;
+        self.inodes = 0;
+        self.now = Time { secs: 0, nanos: 0 };
+        self.committed = Head { root: 0, next_ino: 0, inodes: 0 };
+        self.used.empty();
+        self.fresh.empty();
+        self.freed.empty();
+        self.rotor = 1;
+        self.forget_cached();
+        self.inext = 0;
+        self.enext = 0;
+    }
+
     /// Make a new, empty filesystem of `blocks` blocks on the store's
     /// disk: a superblock, a root directory and a leaf holding it. The
     /// boot record is left as it was.
@@ -188,7 +210,7 @@ impl<S: Store> Fs<S> {
             }
         }
         self.mark_boot()?;
-        let leaf = self.alloc(1)?;
+        let leaf = self.alloc_node()?;
         let s = self.store.zero(leaf)?;
         node::init(&mut self.store, s, 0);
         self.root = leaf;
@@ -280,7 +302,7 @@ impl<S: Store> Fs<S> {
                 let child = node::value(&self.store, s, pos, 0);
                 self.walk(child, here - 1)?;
             } else if node::klen(&self.store, s, pos) == 3
-                && node::key(&self.store, s, pos).kind() == K_EXTENT
+                && self.store.word(s, pos + IT_KEY as usize + 1) == K_EXTENT
             {
                 let start = node::value(&self.store, s, pos, EX_START as usize);
                 let len = node::value(&self.store, s, pos, EX_LEN as usize);
@@ -324,6 +346,18 @@ impl<S: Store> Fs<S> {
         Ok(b)
     }
 
+    /// A free block for a node of the tree, fresh: the last free one.
+    /// Nodes are taken from the end of the disk and data from the start,
+    /// so that copying a node at every change does not scatter free
+    /// blocks among a file's, and the free space between stays in one
+    /// run. E_NOSPC if there are none.
+    pub fn alloc_node(&mut self) -> Result<i64> {
+        let b = self.used.last_clear(1, self.blocks).ok_or(E_NOSPC)?;
+        self.used.set(b);
+        self.fresh.set(b);
+        Ok(b)
+    }
+
     /// Block `b` if it is free, fresh: for growing an extent in place.
     pub fn alloc_at(&mut self, b: i64) -> bool {
         if !self.in_range(b) || self.used.has(b) {
@@ -357,7 +391,7 @@ impl<S: Store> Fs<S> {
             return Ok(b);
         }
         let s = self.node(b)?;
-        let nb = self.alloc(b)?;
+        let nb = self.alloc_node()?;
         let s = self.store.copy_to(s, nb)?;
         self.store.set_node(s);
         self.freed.set(b);
@@ -420,7 +454,30 @@ impl<S: Store> Fs<S> {
         self.inodes = self.committed.inodes;
     }
 
-    /// Forget the inode and extent last read: the tree is changing.
+    /// Forget what the caches hold of the record of key `k`, which is
+    /// changing: an inode's own record, or a file's extents.
+    pub(crate) fn forget_for(&mut self, k: &crate::Key) {
+        let ino = k.ino();
+        match k.kind() {
+            K_INODE => {
+                for c in self.icache.iter_mut() {
+                    if matches!(c, Some(n) if n.ino == ino) {
+                        *c = None;
+                    }
+                }
+            }
+            K_EXTENT => {
+                for c in self.ecache.iter_mut() {
+                    if matches!(c, Some(e) if e.0 == ino) {
+                        *c = None;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Forget every inode and extent cached: the tree is not what it was.
     pub(crate) fn forget_cached(&mut self) {
         self.icache = [None; CACHED];
         self.ecache = [None; CACHED];

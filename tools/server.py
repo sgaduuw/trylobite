@@ -29,7 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tools.kernel import RUST_TARGET, BuildError, run  # noqa: E402
+from tools.kernel import RUST_TARGET, BuildError, run
 
 ROOT = Path(__file__).resolve().parent.parent
 CRATE = ROOT / "user" / "rust" / "fsd"
@@ -89,13 +89,8 @@ def prefixed(text: str) -> str:
     return NAME.sub(lambda m: PREFIX + m[0] if m[0] in names else m[0], text)
 
 
-def stack_depth(text: str, entry: str = ENTRY) -> tuple[int, list[str]]:
-    """The most stack the translation can take from entry down: each
-    function's frame (its first addi sp, sp, -N, and the largest after it,
-    which makes room for a call's arguments), along its deepest chain of
-    calls, a jump to another function counted as a call. A function that
-    calls itself counts RECURSIVE's bound times; any other recursion is a
-    BuildError."""
+def functions(text: str) -> tuple[dict[str, int], dict[str, set[str]]]:
+    """Each function's frame in trytes, and the functions it calls."""
     frames: dict[str, int] = {}
     first: dict[str, int] = {}
     pushed: dict[str, int] = {}
@@ -121,15 +116,26 @@ def stack_depth(text: str, entry: str = ENTRY) -> tuple[int, list[str]]:
         m = re.search(r"\b(?:call|tail|j)\s+([\w$.]+)", line)
         if m and not local.search(m[1]):  # a call, or a jump to a function
             calls[current].add(m[1])
+    return frames, calls
+
+
+def stack_depth(text: str, entry: str = ENTRY) -> tuple[int, list[str]]:
+    """The most stack the translation can take from entry down: each
+    function's frame (its first addi sp, sp, -N, and the largest after it,
+    which makes room for a call's arguments), along its deepest chain of
+    calls, a jump to another function counted as a call. A function that
+    calls itself counts RECURSIVE's bound times; any other recursion is a
+    BuildError."""
+    frames, calls = functions(text)
     memo: dict[str, tuple[int, list[str]]] = {}
 
     def deepest(f: str, chain: tuple[str, ...]) -> tuple[int, list[str]]:
         if f in chain:
-            raise BuildError(f"the file server recurses: {' -> '.join(chain + (f,))}")
+            raise BuildError(f"the file server recurses: {' -> '.join((*chain, f))}")
         if f not in memo:
             others = calls.get(f, set()) - {f}
             below = max(
-                (deepest(g, chain + (f,)) for g in others),
+                (deepest(g, (*chain, f)) for g in others),
                 default=(0, []),
             )
             times = 1

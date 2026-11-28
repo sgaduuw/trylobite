@@ -4,8 +4,12 @@ the disks."""
 
 import pytest
 
-from tests.kernel import ROOT, assemble_file, new_disk, run_image
+from tests.kernel import ROOT, assemble_file, new_disk, run_image, shell_filesystem
 from tools.fs import PAGE, Filesystem
+
+# The blocks /bin/sh takes, with /bin, on every disk here: the shell is
+# on the disk, and ls lists its directory first.
+_, SH_BLOCKS = shell_filesystem(20)
 
 
 @pytest.fixture(scope="module")
@@ -14,21 +18,23 @@ def shell():
 
 
 def disk(blocks: int = 8, dirs: tuple[str, ...] = (), **files: str):
-    """A new disk holding a filesystem with these directories and text
-    files: (path, blocks). A file's name may hold slashes, as __ ."""
+    """A new disk holding a filesystem with the shell, /bin/sh, and these
+    directories and text files: (path, blocks). blocks counts those left
+    once the shell is on it, so that the blocks a test makes are numbered
+    from 1 + SH_BLOCKS. A file's name may hold slashes, as __ ."""
     path = new_disk()
-    made = Filesystem.new(blocks)
+    made, _ = shell_filesystem(blocks + SH_BLOCKS)
     for name in dirs:
         made.mkdir(name)
     for name, text in files.items():
         made.write(name.replace("__", "/"), text)
     made.save(path)
-    return path, blocks
+    return path, blocks + SH_BLOCKS
 
 
 def said(shell, typed: str, on) -> str:
     """What the shell printed between booting and its exit."""
-    result = run_image(shell, input=typed, disk=on, max_steps=5_000_000)
+    result = run_image(shell, input=typed, disk=on, max_steps=15_000_000)
     assert result.exit_code == 0, result.console
     console = result.after_boot
     return console.split("trylobite: process 7 exited")[0]  # the shell
@@ -36,19 +42,20 @@ def said(shell, typed: str, on) -> str:
 
 def test_ls_lists_each_file_with_its_size(shell):
     on = disk(notes="kept on a ternary disk\n", empty="")
-    assert said(shell, "ls\n", on) == "$ ls\n23 notes\n0 empty\n$ \n"
+    # In name order: a directory's entries are sorted in the tree.
+    assert said(shell, "ls\n", on) == "$ ls\nbin/\n0 empty\n23 notes\n$ \n"
 
 
 def test_ls_marks_directories_and_lists_them(shell):
     on = disk(dirs=("docs", "docs/old"), docs__a="one\n", top="x")
     assert said(shell, "ls\nls docs\nls /docs/old/\n", on) == (
-        "$ ls\ndocs/\n1 top\n$ ls docs\nold/\n4 a\n$ ls /docs/old/\n$ \n"
+        "$ ls\nbin/\ndocs/\n1 top\n$ ls docs\n4 a\nold/\n$ ls /docs/old/\n$ \n"
     )
 
 
 def test_ls_hides_names_that_start_with_a_dot(shell):
     on = disk(**{".profile": "hidden\n", "shown": ""})
-    assert said(shell, "ls\n", on) == "$ ls\n0 shown\n$ \n"
+    assert said(shell, "ls\n", on) == "$ ls\nbin/\n0 shown\n$ \n"
 
 
 def test_cat_prints_a_file(shell):
@@ -84,12 +91,13 @@ def test_failures_are_said_and_the_shell_goes_on(shell):
     )
 
 
-def test_a_name_too_long_is_said(shell):
-    on = disk(**{"y" * 17: "ok\n"})
-    out = said(shell, f"cat {'x' * 18}\ncat {'y' * 17}\n", on)
-    assert out == f"$ cat {'x' * 18}\nsh: {'x' * 18}: name too long\n" + (
-        f"$ cat {'y' * 17}\nok\n$ \n"
-    )
+def test_a_long_name_is_a_name(shell):
+    # Names have up to NAME_MAX (60) code points, more than the shell's
+    # line holds after "cat "; tests/test_files.py has the server refuse
+    # a longer one.
+    long = "y" * 56
+    on = disk(**{long: "ok\n"})
+    assert said(shell, f"cat {long}\n", on) == f"$ cat {long}\nok\n$ \n"
 
 
 def test_the_shell_does_not_run_out_of_descriptors(shell):
@@ -100,12 +108,16 @@ def test_the_shell_does_not_run_out_of_descriptors(shell):
     assert out.count("$ cat f\nx\n") == 7
 
 
-def test_a_disk_without_a_filesystem_is_reported(shell):
-    blank = (new_disk(), 3)
-    assert said(shell, "ls\n", blank) == (
-        "$ ls\nsh: .: no filesystem on the disk\n$ \n"
-    )
-    assert "sh: x: no filesystem on the disk\n" in said(shell, "cat x\n", None)
+def test_without_a_filesystem_there_is_no_shell(shell):
+    # The shell is a file: on a blank disk, or with none, init says it
+    # cannot start it and gives up (INIT_LOST).
+    for blank in ((new_disk(), 3), None):
+        result = run_image(shell, input="ls\n", disk=blank)
+        assert result.after_boot == (
+            "init: cannot start /bin/sh\n"
+            "trylobite: process 0 exited with code 1\n"
+            f"trylobite: all processes exited after {result.ticks()} timer interrupts\n"
+        )
 
 
 def test_write_makes_a_file_the_tool_can_read(shell):
@@ -122,7 +134,7 @@ def test_write_replaces_a_file_and_frees_what_it_held(shell):
     said(shell, "write motd new text\n", on)
     made = Filesystem.load(on[0])
     assert made.read("motd") == "new text\n"
-    assert len(made.free_blocks()) == 8 - 4  # 0, 1, / and motd's one block
+    assert len(made.free_blocks()) == 8 - 3  # 0, the tree's leaf and motd's block
 
 
 def test_mkdir_rm_and_rmdir(shell):
@@ -138,20 +150,23 @@ def test_mkdir_rm_and_rmdir(shell):
         "$ mkdir docs\nsh: docs: file exists\n"
         "$ rmdir docs\nsh: docs: directory not empty\n"
         "$ rm docs\nsh: docs: is a directory\n"
-        "$ ls docs\n4 a\n$ rm docs/a\n$ rmdir docs\n$ ls\n"
+        "$ ls docs\n4 a\n$ rm docs/a\n$ rmdir docs\n$ ls\nbin/\n"
         "$ rm nope\nsh: nope: no such file or directory\n$ \n"
     )
     made = Filesystem.load(on[0])
-    assert made.listdir() == []
-    assert made.free_blocks() == list(range(3, 8))
+    assert [name for name, _ in made.listdir()] == ["bin"]
+    # All but block 0, the shell's and the tree's one leaf, at the end.
+    assert made.free_blocks() == list(range(1 + SH_BLOCKS, 7 + SH_BLOCKS))
 
 
 def test_a_full_disk_is_said(shell):
-    on = disk(4, a="first\n")  # block 3 is the only data block, and a's
+    # One block is free: b needs it for its data and another for the
+    # leaf's new copy, but a directory takes no block of its own.
+    on = disk(4, a="first\n")
     out = said(shell, "write b more\nmkdir d\ncat a\n", on)
-    assert "sh: b: no space left\n" in out
-    assert "sh: d: no space left\n" in out
-    assert out.endswith("$ cat a\nfirst\n$ \n")
+    assert out.endswith(
+        "$ write b more\nsh: b: no space left\n$ mkdir d\n$ cat a\nfirst\n$ \n"
+    )
 
 
 def test_cd_pwd_and_relative_paths(shell):

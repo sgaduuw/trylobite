@@ -59,6 +59,17 @@ pub trait Store {
 
     /// The block in slot `s` becomes block `to`, dirty: a copy about to
     /// change. The block it was keeps what the disk has. The new slot.
+    /// The sum (sum.rs) of the slot's first `n` words, word `skip`
+    /// counted as 0. A store that can do it faster says so.
+    fn sum_words(&self, s: Slot, n: usize, skip: usize) -> i64 {
+        let mut sum = 0;
+        for i in 0..n {
+            let w = if i == skip { 0 } else { self.word(s, i) };
+            sum = crate::sum::step(sum, w);
+        }
+        sum
+    }
+
     fn copy_to(&mut self, s: Slot, to: i64) -> Result<Slot>;
 
     /// Forget block `b`, dirty or not: it is free again.

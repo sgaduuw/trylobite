@@ -8,49 +8,57 @@ use core::cmp::Ordering;
 use crate::key::{KEY_WORDS, Key};
 use crate::layout::*;
 use crate::store::{Slot, Store};
-use crate::sum;
 use crate::Result;
 
 pub const ITEMS: usize = N_ITEMS as usize;
 /// Words the items may take.
 pub const ROOM: usize = BLOCK_WORDS as usize - ITEMS;
 
+#[inline(always)]
 pub fn level<S: Store>(st: &S, s: Slot) -> i64 {
     st.word(s, N_LEVEL as usize)
 }
 
+#[inline(always)]
 pub fn count<S: Store>(st: &S, s: Slot) -> usize {
     st.word(s, N_COUNT as usize) as usize
 }
 
+#[inline(always)]
 pub fn used<S: Store>(st: &S, s: Slot) -> usize {
     st.word(s, N_USED as usize) as usize
 }
 
 /// Where the items end.
+#[inline(always)]
 pub fn end<S: Store>(st: &S, s: Slot) -> usize {
     ITEMS + used(st, s)
 }
 
+#[inline(always)]
 pub fn klen<S: Store>(st: &S, s: Slot, pos: usize) -> usize {
     st.word(s, pos + IT_KLEN as usize) as usize
 }
 
+#[inline(always)]
 pub fn vlen<S: Store>(st: &S, s: Slot, pos: usize) -> usize {
     st.word(s, pos + IT_VLEN as usize) as usize
 }
 
 /// Words the item at `pos` takes.
+#[inline(always)]
 pub fn size<S: Store>(st: &S, s: Slot, pos: usize) -> usize {
     IT_KEY as usize + klen(st, s, pos) + vlen(st, s, pos)
 }
 
 /// Where the item at `pos`'s value starts.
+#[inline(always)]
 pub fn value_at<S: Store>(st: &S, s: Slot, pos: usize) -> usize {
     pos + IT_KEY as usize + klen(st, s, pos)
 }
 
 /// Word `i` of the value of the item at `pos`.
+#[inline(always)]
 pub fn value<S: Store>(st: &S, s: Slot, pos: usize, i: usize) -> i64 {
     st.word(s, value_at(st, s, pos) + i)
 }
@@ -72,6 +80,7 @@ pub fn key_into<S: Store>(st: &S, s: Slot, pos: usize, k: &mut Key) {
 }
 
 /// Compare the key of the item at `pos` with `k`.
+#[inline(always)]
 pub fn cmp_key<S: Store>(st: &S, s: Slot, pos: usize, k: &[i64]) -> Ordering {
     let n = klen(st, s, pos);
     let at = pos + IT_KEY as usize;
@@ -166,12 +175,7 @@ pub fn init<S: Store>(st: &mut S, s: Slot, level: i64) {
 /// as 0.
 pub fn sum_of<S: Store>(st: &S, s: Slot) -> i64 {
     let end = end(st, s).min(BLOCK_WORDS as usize);
-    let mut sum = 0;
-    for i in 0..end {
-        let w = if i == N_SUM as usize { 0 } else { st.word(s, i) };
-        sum = sum::step(sum, w);
-    }
-    sum
+    st.sum_words(s, end, N_SUM as usize)
 }
 
 /// Fill in a node's sequence number and sum, just before it is written.
