@@ -2168,3 +2168,39 @@ harts to run them on, so the kernel grew them.
 - **Later:** threads in `ps` marked as such (they show their process's
   name now, with no pages of their own), futex with a timeout (for
   `Condvar::wait_timeout`), thread-local storage beyond `tp`'s words.
+
+### 2026-11-28 · top gets a modern header, and the kernel three more numbers
+
+Eelco asked for a top header like modern BSD and GNU tops. The header
+needs numbers the kernel did not keep, so it gained three, each the
+smallest that serves:
+
+- **Per-hart time, `hartinfo` (49, past the numbers NTP and kernel
+  threads take).** Each hart counts the ticks it
+  ran processes (`ktrap`, beside `PCB_CPU`) and waited in `idle`; the
+  rest is kernel. A stretch under way is counted up to the reading, or
+  a hart idle across two screens would put its whole wait in the second
+  and show more than 100%. The reading carries its own time (`HI_TIME`),
+  so shares do not depend on when the tool got round to asking. Rejected:
+  a whole user/nice/system/interrupt split as Linux has (no nice, and
+  interrupts are short and few), and putting the harts in `info` (its
+  buffer would grow by nine records for every caller).
+- **Load averages in `info`.** Unix's `calc_load`, rounding up while
+  climbing, sampled in `pick` every 5,000,000 ticks, in `LOAD_ONE`
+  (3^9) parts: the 15-minute product stays inside a word.
+- **Boot time in `info` (`SI_BOOTED`).** Uptime in seconds from the
+  real-time clock, the same clock as the time of day, rather than ticks
+  read as microseconds, which they are only with `--clock` or a paced
+  live console.
+
+top itself moved to Rust over trystd, as userland is meant to. Its first
+Rust version cost 25 times the assembly's steps a screen, and three
+causes were worth knowing for any Rust program here: a 64-bit division
+is a bit-at-a-time helper (`ll$sdiv64`, ~3,000 steps), a `u32` kept in a
+struct is four trytes loaded and stored by helpers (`ll$ld4`, `ll$st4`)
+on every use, and `String::push`/`core::fmt` cost ~150 steps a byte and
+~1,000 a number. Written into one buffer, with the length read once a
+call and 32-bit arithmetic, a screen costs about 70,000 steps, against
+the assembly's 9,000 and the first version's 250,000. trystd gained
+`sys::ticks`, `sys::sleep_until` and `Words::word_i64`/`tryte` for it:
+a tick count passes 2^31 after half an hour of a live console.

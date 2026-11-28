@@ -37,6 +37,18 @@ seen:   .words NHART * NPROC           # the epoch each hart last flushed, by sl
 fpu_owner: .words NHART                # whose bank each hart's coprocessor
                                        # holds: a record, or 0 (see resume)
 
+# What each hart did with its time, for hartinfo (info.rs), by index.
+hart_started: .words NHART             # the time CSR when the kernel started it
+hart_user:  .words NHART               # ticks it ran processes (ktrap adds them)
+hart_idle:  .words NHART               # ticks it waited for work (idle)
+hart_ran:   .words NHART               # the time it last resumed a process, 0
+                                       # while in the kernel (resume, ktrap)
+hart_waits: .words NHART               # the time it began to wait for work, 0
+                                       # while not idle (kernel/sched.s)
+booted:     .word 0                    # the real-time clock at boot, Unix seconds
+load_avg:   .words 3                   # load averages, LOAD_ONE a process (sched.rs)
+next_load:  .word 0                    # the time CSR when the next sample is due
+
 names:  .words NSRV * SRV / 3          # server names (rust/trykern/src/names.rs)
 
 

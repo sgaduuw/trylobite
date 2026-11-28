@@ -39,7 +39,7 @@ pub extern "C" fn rk_syscall(p: *mut u8) -> i32 {
 
 /// Each call's routine, by its number (SYS_ in include/layout.s): one
 /// indirect call, where a chain of tests took 40 for the last.
-static CALLS: [fn(Proc) -> i32; SYS_GETTID as usize + 1] = [
+static CALLS: [fn(Proc) -> i32; SYS_HARTINFO as usize + 1] = [
     sys_putc,           // 0
     sys_send,           // 1
     sys_recv,           // 2
@@ -89,6 +89,7 @@ static CALLS: [fn(Proc) -> i32; SYS_GETTID as usize + 1] = [
     thread::sys_join,   // 46
     thread::sys_futex,  // 47
     thread::sys_gettid, // 48
+    sys_hartinfo,       // 49
 ];
 
 const _: () = assert!(
@@ -100,6 +101,7 @@ const _: () = assert!(
         && SYS_RECEIVE == 24
         && SYS_THREAD == 44
         && SYS_GETTID == 48
+        && SYS_HARTINFO == 49
 );
 
 /// A number that names no call.
@@ -330,6 +332,11 @@ fn sys_clock(p: Proc) -> i32 {
     let seconds = load_at(power, POWER_CLOCK);
     p.set(PCB_A1, load_at(power, POWER_CLOCK_US));
     done(p, seconds)
+}
+
+fn sys_hartinfo(p: Proc) -> i32 {
+    info::rk_sys_hartinfo(p.0);
+    RESUME
 }
 
 /// The caller's result is `r`, and it goes on.

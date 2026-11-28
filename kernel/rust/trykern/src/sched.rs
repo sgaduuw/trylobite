@@ -3,10 +3,10 @@
 //! when nobody is ready. kernel/sched.s keeps what touches the hart
 //! itself: leaving, idling with wfi and the lock, and halting.
 
-use crate::kdata::{read, write};
+use crate::kdata::{self, read, write};
 use crate::layout::*;
 use crate::proc::Proc;
-use crate::word::{Word, time};
+use crate::word::{Word, load, store, time};
 
 /// pick: the next ready process after `cur`, any record: `cur`'s turn
 /// last, made ST_RUNNING; or null when none is ready (rk_stuck says
@@ -15,8 +15,12 @@ use crate::word::{Word, time};
 pub extern "C" fn rk_pick(cur: *mut u8) -> *mut u8 {
     // Only once the earliest time one waits for has come: a scan of the
     // table on every switch costs a quantum's worth of steps.
-    if read::sleepers() != 0 && time() >= read::next_wake() {
+    let now = time();
+    if read::sleepers() != 0 && now >= read::next_wake() {
         wake_sleepers();
+    }
+    if now >= read::next_load() {
+        sample_load(now);
     }
     // nready counts the ready: with none, or with only cur, no walk.
     let n = read::nready();
@@ -44,6 +48,41 @@ pub extern "C" fn rk_pick(cur: *mut u8) -> *mut u8 {
     }
     Proc(q).set(PCB_STATE, ST_RUNNING);
     q
+}
+
+/// Fold the processes ready or running into the load averages, once
+/// for each LOAD_PERIOD since the last sample (Unix's calc_load, in
+/// LOAD_ONE parts). A busy hart picks every quantum, so periods with no
+/// pick at all were ones every hart idled through, with nothing to run:
+/// they count as 0, and only the last as what is runnable now. Rounding
+/// up while an average climbs lets it reach a steady load rather than
+/// stop short of it. The new average is the old moved (n - old) *
+/// (LOAD_ONE - e) / LOAD_ONE, which fits an i32 (at most NPROC loads
+/// times 1,574): a 64-bit division is a helper of thousands of steps,
+/// taken with the kernel lock held.
+#[cold]
+fn sample_load(now: Word) {
+    let one = LOAD_ONE as i32;
+    let runnable = Proc::table()
+        .filter(|q| q.is(ST_READY) || q.is(ST_RUNNING))
+        .count() as i32
+        * one;
+    let mut due = read::next_load();
+    let loads = kdata::load_avg_base();
+    while due <= now {
+        due += LOAD_PERIOD;
+        let n = if due > now { runnable } else { 0 };
+        for (k, e) in [LOAD_EXP1, LOAD_EXP5, LOAD_EXP15].into_iter().enumerate() {
+            let at = loads.wrapping_offset(3 * k as isize);
+            let old = load(at) as i32;
+            let d = (n - old) * (one - e as i32);
+            // Up for a climb, down for a fall: floor((old * e + n * (one
+            // - e) + up) / one), as calc_load has it.
+            let step = if d > 0 { (d + one - 1) / one } else { -((one - 1 - d) / one) };
+            store(at, (old + step) as Word);
+        }
+    }
+    write::next_load(due);
 }
 
 /// The first ready record from `at` up to `end`, or null.

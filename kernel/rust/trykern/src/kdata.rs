@@ -25,6 +25,14 @@ unsafe extern "C" {
     static fpu_owner: u8;
     static idle_harts: u8;
     static leaving: u8;
+    static hart_started: u8;
+    static hart_user: u8;
+    static hart_idle: u8;
+    static hart_ran: u8;
+    static hart_waits: u8;
+    static booted: u8;
+    static load_avg: u8;
+    static next_load: u8;
 }
 
 macro_rules! word_of {
@@ -41,7 +49,7 @@ pub mod read {
     use crate::word::{Word, load};
     word_of!(
         ticks, ram_pages, free_count, log_base, log_pos, sleepers, next_wake, irq_armed, free_head,
-        fresh_page, next_slot, nprog, nready, nidle
+        fresh_page, next_slot, nprog, nready, nidle, booted, next_load
     );
 }
 
@@ -59,7 +67,7 @@ pub mod write {
     use crate::word::{Word, store};
     set_word_of!(
         sleepers, next_wake, ram_pages, free_count, free_head, fresh_page, next_slot, irq_armed,
-        nready, nidle
+        nready, nidle, booted, next_load
     );
 }
 
@@ -96,6 +104,36 @@ pub fn fpu_owner_base() -> *mut u8 {
 /// 1 for each hart that waits for work, by hart + HART_MAX: NHART words.
 pub fn idle_harts_base() -> *mut u8 {
     (&raw const idle_harts).cast_mut()
+}
+
+/// The time CSR when the kernel started each hart, by hart + HART_MAX.
+pub fn hart_started_base() -> *mut u8 {
+    (&raw const hart_started).cast_mut()
+}
+
+/// Ticks each hart ran processes in user mode (ktrap adds them).
+pub fn hart_user_base() -> *mut u8 {
+    (&raw const hart_user).cast_mut()
+}
+
+/// Ticks each hart waited for work (idle, kernel/sched.s).
+pub fn hart_idle_base() -> *mut u8 {
+    (&raw const hart_idle).cast_mut()
+}
+
+/// The time each hart last resumed a process, 0 while in the kernel.
+pub fn hart_ran_base() -> *mut u8 {
+    (&raw const hart_ran).cast_mut()
+}
+
+/// The time each hart began to wait for work, 0 while not idle.
+pub fn hart_waits_base() -> *mut u8 {
+    (&raw const hart_waits).cast_mut()
+}
+
+/// The load averages over 1, 5 and 15 minutes: 3 words (sched.rs).
+pub fn load_avg_base() -> *mut u8 {
+    (&raw const load_avg).cast_mut()
 }
 
 /// 1 for each hart the platform asked to go, by hart + HART_MAX.
