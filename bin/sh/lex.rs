@@ -1,133 +1,251 @@
-//! Lexing: a typed line into tokens, its quoting undone.
+//! Lexing: text into words and operators.
 //!
-//! A word is characters up to an unquoted space, |, < or >; each of
-//! those operators is a token of its own, and >> one too. In '...' every
-//! character is itself; in "..." too, but that \" and \\ stand for " and
-//! \; elsewhere \ makes the character after it itself (and is itself at
-//! the end of the line). Quotes join with what touches them, and a word
-//! of quotes alone ("" or '') is an empty word.
+//! A word is characters up to an unquoted blank, newline or operator
+//! character (| & ; < > ( )). The operators are | || & && ; ;; ( ) and
+//! the redirections < > >> and >&N, which a single digit just before
+//! them (2> errors) makes about that descriptor. A newline is a token of
+//! its own, since it ends a command as ; does. A # starting a word, and
+//! all after it on its line, is a comment.
+//!
+//! A word keeps its quotes, backslashes and $ as typed: what they mean
+//! is worked out when the command runs (sh/expand.rs), since a
+//! variable's value can change between lexing and running. The lexer
+//! only finds where each ends: in '...' every character is itself, in
+//! "..." too but that \ keeps the character after it inside, and
+//! elsewhere \ keeps the next character in the word (and a \ before a
+//! newline joins the lines). ${...}, $(...) and $((...)) are part of the
+//! word whatever they hold, to the bracket that closes them.
 //!
 //! Each word keeps how many spaces came before it, so that `write` can
-//! give its text back as typed. New operators (; && || &) and what
-//! expansions need (which characters were quoted) go here.
+//! give its text back as typed, and its line, for errors in scripts.
 
-use crate::LINE_MAX;
+use trystd::prelude::*;
 
-/// A line has at most one token per character.
-pub const TOKS: usize = LINE_MAX;
-
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Kind {
     Word,
+    Newline,
     /// |
     Pipe,
-    /// < PATH
-    In,
-    /// > PATH
-    Out,
-    /// >> PATH
-    Append,
+    /// ||
+    OrIf,
+    /// &
+    Amp,
+    /// &&
+    AndIf,
+    /// ;
+    Semi,
+    /// ;;
+    DSemi,
+    LParen,
+    RParen,
+    /// < PATH, > PATH, >> PATH, or >&N with the N as the token's text:
+    /// `fd` says which descriptor.
+    Redir(Redir),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Redir {
+    In,
+    Out,
+    Append,
+    /// >&N or <&N: a copy of descriptor N.
+    Dup,
+}
+
+#[derive(Clone, Debug)]
 pub struct Tok {
     pub kind: Kind,
-    /// A word's characters, in `Lexed::text`.
-    start: u8,
-    len: u8,
+    /// A word's characters as typed, quotes and all; >&N's N.
+    pub text: Vec<u8>,
     /// Spaces before it, as typed.
     pub gap: u8,
+    /// A redirection's descriptor.
+    pub fd: i8,
+    /// The line it is on, from 1.
+    pub line: u32,
 }
 
-pub struct Lexed {
-    text: [u8; LINE_MAX],
-    toks: [Tok; TOKS],
-    pub n: usize,
+impl Tok {
+    /// Whether this is the plain word `w`: unquoted, so a reserved word
+    /// where one may stand.
+    pub fn is(&self, w: &[u8]) -> bool {
+        self.kind == Kind::Word && self.text == w
+    }
 }
 
-/// A quote that was not closed.
+/// A quote, or a ${, $( or $((, that was not closed: more lines may
+/// close it.
 pub struct Unclosed;
 
-impl Lexed {
-    pub fn tok(&self, k: usize) -> Tok {
-        self.toks[k]
-    }
+/// Whether `c` ends a word, unquoted.
+fn ends_word(c: u8) -> bool {
+    matches!(c, b' ' | b'\t' | b'\n' | b'|' | b'&' | b';' | b'<' | b'>' | b'(' | b')')
+}
 
-    /// The characters of word `k`, its quoting undone.
-    pub fn word(&self, k: usize) -> &[u8] {
-        let t = self.toks[k];
-        &self.text[t.start as usize..(t.start + t.len) as usize]
-    }
-
-    pub fn lex(line: &[u8]) -> Result<Lexed, Unclosed> {
-        let none = Tok { kind: Kind::Word, start: 0, len: 0, gap: 0 };
-        let mut lx = Lexed { text: [0; LINE_MAX], toks: [none; TOKS], n: 0 };
-        let mut t = 0; // where the next word character goes
-        let mut i = 0;
+pub fn lex(src: &[u8]) -> Result<Vec<Tok>, Unclosed> {
+    let mut toks: Vec<Tok> = Vec::new();
+    let mut i = 0;
+    let mut line = 1;
+    loop {
+        let mut gap = 0u8;
         loop {
-            let mut gap = 0;
-            while i < line.len() && line[i] == b' ' {
-                gap += 1;
-                i += 1;
-            }
-            if i == line.len() {
-                return Ok(lx);
-            }
-            let start = t;
-            let kind = match line[i] {
-                b'|' => Kind::Pipe,
-                b'<' => Kind::In,
-                b'>' if line.get(i + 1) == Some(&b'>') => {
+            match src.get(i) {
+                Some(b' ' | b'\t') => gap = gap.saturating_add(1),
+                // A \ ending a line joins it to the next.
+                Some(b'\\') if src.get(i + 1) == Some(&b'\n') => {
                     i += 1;
-                    Kind::Append
+                    line += 1;
                 }
-                b'>' => Kind::Out,
-                _ => Kind::Word,
+                _ => break,
+            }
+            i += 1;
+        }
+        let Some(&c) = src.get(i) else {
+            return Ok(toks);
+        };
+        let tok = |kind, text: &[u8], fd| Tok { kind, text: text.to_vec(), gap, fd, line };
+        let next = src.get(i + 1).copied();
+        // A digit before < or > names the descriptor it redirects.
+        let (fd, at) = if c.is_ascii_digit() && matches!(next, Some(b'<' | b'>')) {
+            ((c - b'0') as i8, i + 1)
+        } else {
+            (-1, i)
+        };
+        let op = src[at];
+        let after = src.get(at + 1).copied();
+        let (kind, len) = match op {
+            b'\n' => (Kind::Newline, 1),
+            b'#' => {
+                // A comment, to the line's end.
+                while i < src.len() && src[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            b'|' if after == Some(b'|') => (Kind::OrIf, 2),
+            b'|' => (Kind::Pipe, 1),
+            b'&' if after == Some(b'&') => (Kind::AndIf, 2),
+            b'&' => (Kind::Amp, 1),
+            b';' if after == Some(b';') => (Kind::DSemi, 2),
+            b';' => (Kind::Semi, 1),
+            b'(' => (Kind::LParen, 1),
+            b')' => (Kind::RParen, 1),
+            b'<' | b'>' if after == Some(b'&') => {
+                // >&N: the N is one digit.
+                let n = src.get(at + 2).copied().filter(u8::is_ascii_digit);
+                let Some(n) = n else {
+                    toks.push(tok(Kind::Redir(Redir::Dup), b"", if fd < 0 { (op == b'>') as i8 } else { fd }));
+                    i = at + 2;
+                    continue;
+                };
+                let fd = if fd < 0 { (op == b'>') as i8 } else { fd };
+                toks.push(tok(Kind::Redir(Redir::Dup), &[n], fd));
+                i = at + 3;
+                continue;
+            }
+            b'<' => (Kind::Redir(Redir::In), 1),
+            b'>' if after == Some(b'>') => (Kind::Redir(Redir::Append), 2),
+            b'>' => (Kind::Redir(Redir::Out), 1),
+            _ => (Kind::Word, 0),
+        };
+        if kind != Kind::Word {
+            let fd = match kind {
+                Kind::Redir(Redir::In) if fd < 0 => 0,
+                Kind::Redir(_) if fd < 0 => 1,
+                _ => fd,
             };
-            if kind != Kind::Word {
-                i += 1;
-            } else {
-                let mut quote = 0;
-                while i < line.len() {
-                    let c = line[i];
-                    i += 1;
-                    let kept = if quote == 0 {
-                        match c {
-                            b' ' | b'|' | b'<' | b'>' => {
-                                i -= 1;
-                                break;
-                            }
-                            b'\'' | b'"' => {
-                                quote = c;
-                                continue;
-                            }
-                            b'\\' if i < line.len() => {
-                                i += 1;
-                                line[i - 1]
-                            }
-                            _ => c,
-                        }
-                    } else if c == quote {
-                        quote = 0;
-                        continue;
-                    } else if quote == b'"'
-                        && c == b'\\'
-                        && matches!(line.get(i), Some(b'"' | b'\\'))
-                    {
-                        i += 1;
-                        line[i - 1]
-                    } else {
-                        c
-                    };
-                    lx.text[t] = kept;
-                    t += 1;
+            toks.push(tok(kind, b"", fd));
+            if kind == Kind::Newline {
+                line += 1;
+            }
+            i = at + len;
+            continue;
+        }
+        let start = i;
+        let (end, lines) = word_end(src, i)?;
+        toks.push(Tok { kind, text: src[start..end].to_vec(), gap, fd: -1, line });
+        line += lines;
+        i = end;
+    }
+}
+
+/// Where the word starting at `i` ends, past its last character, and
+/// how many newlines it holds.
+fn word_end(src: &[u8], mut i: usize) -> Result<(usize, u32), Unclosed> {
+    let mut lines = 0;
+    let mut quote = 0;
+    while i < src.len() {
+        let c = src[i];
+        if quote == 0 && ends_word(c) {
+            break;
+        }
+        if c == b'\n' {
+            lines += 1;
+        }
+        if quote == b'\'' {
+            if c == b'\'' {
+                quote = 0;
+            }
+            i += 1;
+            continue;
+        }
+        match c {
+            b'\\' => {
+                if src.get(i + 1) == Some(&b'\n') {
+                    lines += 1;
                 }
-                if quote != 0 {
-                    return Err(Unclosed);
+                i += 1; // the next character, if any, is kept
+            }
+            b'"' if quote == b'"' => quote = 0,
+            b'"' | b'\'' if quote == 0 => quote = c,
+            b'$' if matches!(src.get(i + 1), Some(b'{' | b'(')) => {
+                let end = closing(src, i + 1)?;
+                lines += src[i..end].iter().filter(|&&c| c == b'\n').count() as u32;
+                i = end;
+                continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    if quote != 0 {
+        return Err(Unclosed);
+    }
+    Ok((i.min(src.len()), lines))
+}
+
+/// Past the bracket that closes the { or ( at `open`, skipping what is
+/// quoted or nested inside.
+pub fn closing(src: &[u8], open: usize) -> Result<usize, Unclosed> {
+    let (o, c) = if src[open] == b'{' { (b'{', b'}') } else { (b'(', b')') };
+    let mut depth = 0;
+    let mut i = open;
+    let mut quote = 0;
+    while i < src.len() {
+        let ch = src[i];
+        i += 1;
+        if quote == b'\'' {
+            if ch == b'\'' {
+                quote = 0;
+            }
+            continue;
+        }
+        match ch {
+            b'\\' => i += 1,
+            b'"' if quote == b'"' => quote = 0,
+            b'"' => quote = ch,
+            b'\'' if quote == 0 => quote = ch,
+            _ if quote != 0 => {}
+            _ if ch == o => depth += 1,
+            _ if ch == c => {
+                depth -= 1;
+                if depth == 0 {
+                    return Ok(i);
                 }
             }
-            lx.toks[lx.n] = Tok { kind, start: start as u8, len: (t - start) as u8, gap };
-            lx.n += 1;
+            _ => {}
         }
     }
+    Err(Unclosed)
 }

@@ -46,7 +46,7 @@ pub extern "C" fn rk_syscall(p: *mut u8) -> i32 {
 
 /// Each call's routine, by its number (SYS_ in include/layout.s): one
 /// indirect call, where a chain of tests took 40 for the last.
-static CALLS: [fn(Proc) -> i32; SYS_MONOTONIC as usize + 1] = [
+static CALLS: [fn(Proc) -> i32; SYS_ENVIRON as usize + 1] = [
     sys_putc,           // 0
     sys_send,           // 1
     sys_recv,           // 2
@@ -101,6 +101,7 @@ static CALLS: [fn(Proc) -> i32; SYS_MONOTONIC as usize + 1] = [
     signal::sys_sigmask, // 51
     signal::sys_sigreturn, // 52
     sys_monotonic,      // 53
+    sys_environ,        // 54
 ];
 
 const _: () = assert!(
@@ -117,6 +118,7 @@ const _: () = assert!(
         && SYS_SIGACTION == 50
         && SYS_SIGRETURN == 52
         && SYS_MONOTONIC == 53
+        && SYS_ENVIRON == 54
 );
 
 /// A number that names no call.
@@ -166,6 +168,11 @@ fn sys_spawn(p: Proc) -> i32 {
         mm::rk_sys_spawn(p.0);
         RESUME
     }
+}
+
+fn sys_environ(p: Proc) -> i32 {
+    mm::rk_sys_environ(p.0);
+    RESUME
 }
 
 fn sys_hart(p: Proc) -> i32 {

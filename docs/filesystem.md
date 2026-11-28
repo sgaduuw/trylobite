@@ -387,10 +387,11 @@ words (redirections left out) as its arguments. Nothing there, or
 no filesystem, is `sh: no such program: NAME`; a text file or a
 directory is `sh: not a program: NAME`. The programs in `bin/` are
 meant for `/bin`: besides `hello`, `fail` and `spin`, which tests run,
-they are `echo`, `upper`, `wc`, `head` and `grep` for text, and `cp`,
-`mv` and `touch` for files, and `ls`, `stat` (every field of an inode,
-its times to the nanosecond) and `chmod MODE PATH...` (an octal mode)
-for what the inodes hold; `touch` sets an existing file's times to now
+they are `echo`, `upper`, `wc`, `head`, `grep`, `sort`, `diff` and
+`less` for text, and `cp`, `mv`, `touch`, `find` and `tar` for files,
+and `ls`, `stat` (every field of an inode, its times to the nanosecond)
+and `chmod MODE PATH...` (an octal mode) for what the inodes hold;
+`touch` sets an existing file's times to now
 (docs/kernel.md, The shell).
 
 ## Program files
@@ -405,8 +406,8 @@ as it needs (`NXPAGE` at most), clears the rest, and starts the new
 process at `V_USER` with `gp` at `USER_GP` and `sp` at `USER_SP`, as
 `spawn` starts a built-in program. `USER_SP` is `V_USER`: the stack
 grows down from just below the image, through the lower half of the
-page, towards the arguments at its bottom (Program arguments), about
-8,800 trytes of it. Since the file server has nine windows, a program
+page, towards the arguments and environment at its bottom (Program
+arguments), about 8,100 trytes of it. Since the file server has nine windows, a program
 file has at most nine blocks.
 
 A program for the disk is a file of its own, assembled where it loads
@@ -437,6 +438,15 @@ parent's memory whoever calls, so the file server passes its client's
 range is `E_INVAL`, a block not all in the parent's memory `E_FAULT`,
 and no program starts. A count of 0 starts the program with no
 arguments: `a0` is 0 and the list is just its 0 word.
+
+Every spawn, `spawn`, `spawnw` and so `spawnf`, also gives the child
+an **environment**: `NAME=value` strings, each ended by 0, then an empty
+string, at most `ENV_MAX` (729) trytes, which it finds at `V_ENV`, just
+after the argument strings. It is a copy of the parent's: the block the
+parent last named with `environ` (docs/kernel.md, The environment), or
+the one it started with. So the file server's `spawnw` gives a program
+its client's environment, not the server's, without the protocol
+changing.
 
 The shell gives a program the words of its command line, split at
 spaces, the command first as typed (`wc`, or `/bin/wc`), without the

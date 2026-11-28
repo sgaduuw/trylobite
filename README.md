@@ -39,7 +39,8 @@ sea floor, living among the detritus.
   nested directories, every call a transaction, a current directory per
   process, and a host tool on the same Rust crate to make disk images.
 - **A shell** with built-ins (`ls`, `cat`, `cd`, `pwd`, `mkdir`, ...),
-  programs run from `/bin` on the disk with arguments, `<`, `>` and
+  programs run from `$PATH` on the disk with arguments and an
+  environment, variables (`export`, `$NAME`, `$?`), `<`, `>` and
   `>>` redirection, `|` pipelines, quoting, line editing with history
   and Tab completion, and Ctrl-C to end a program.
 - **A network stack:** a driver for the network device and an IP
@@ -112,7 +113,7 @@ pong: got 2
 trylobite: process 2 exited with code 0
 pong: got 3
 trylobite: process 1 exited with code 0
-trylobite: all processes exited after 9 timer interrupts
+trylobite: all processes exited after 3 timer interrupts
 ```
 
 The shell build boots from a disk. `make` builds `disk.img`, 100
@@ -184,7 +185,7 @@ $ exit
 trylobite: process 8 exited with code 0
 trylobite: process 7 killed
 trylobite: process 0 exited with code 0
-trylobite: all processes exited after 206 timer interrupts
+trylobite: all processes exited after 11 timer interrupts
 ```
 
 The lines starting `trylobite:` are the kernel's log. It opens with
@@ -246,7 +247,7 @@ $ exit
 trylobite: process 8 exited with code 0
 trylobite: process 7 killed
 trylobite: process 0 exited with code 0
-trylobite: all processes exited after 4020 timer interrupts
+trylobite: all processes exited after 201 timer interrupts
 ```
 
 Every key goes to the machine, as on a serial line: the shell echoes
@@ -338,9 +339,10 @@ gateway needs a host that allows unprivileged ping sockets, or root.
 `ping`, `nc` and `host` take a name wherever they take an address.
 
 The programs on the disk are `hello`, `fail` (exits with 3), `spin`
-(loops for ever, for Ctrl-C), `echo`, `upper` (standard input to output
+(loops for ever, for Ctrl-C), `echo`, `printenv`, `upper` (standard input to output
 in capitals) and `wc` (lines, words and code points), `cp`, `mv`,
-`touch`, `head` and `grep` for files, system tools as on Unix: `ps`,
+`touch`, `head`, `grep`, `sort`, `diff`, `find` and `tar` for files,
+`less` to page through one, system tools as on Unix: `ps`,
 `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df` and
 `date` (docs/kernel.md, System tools), and `ping`, `ifconfig`, `host`,
 `nc`, `dhcp` (which `/etc/init` starts, to take the address from the
@@ -448,7 +450,7 @@ emulator, so trylobite has never run on hardware.
 | `kernel/data.s` | the process table, buffers, messages |
 | `kernel/pagetables.s` | the boot address space and the kernel's shared leaf table |
 | `user/` | programs built into the kernel image: `demo-init`, `ping` and `pong` for the demo; `init`, `pingpong` and the servers `fsd`, `diskd`, `consd`, `piped`, `netd` and `ipd` for the shell |
-| `bin/` | programs for the disk, in Rust over trystd, each built on its own: the shell `sh` (its parts in `bin/sh/`), `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `cp`, `mv`, `touch`, `ls`, `stat`, `chmod`, the system tools `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`, `date`, `ntpd`, `ntpctl`, `dhcp`, `ping`, `ifconfig`, `host`, `nc`, `telnet` and the remote shell `telnetd` for the network, and `rfact`, `rmandel`, `rsqrt`, `rsort`, `tee`, `xargs`, `fetch`, `httpd`, `vi` and `stty` |
+| `bin/` | programs for the disk, in Rust over trystd, each built on its own: the shell `sh` (its parts in `bin/sh/`), `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `sort`, `diff`, `find`, `tar`, `less`, `cp`, `mv`, `touch`, `ls`, `stat`, `chmod`, the system tools `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`, `date`, `ntpd`, `ntpctl`, `dhcp`, `ping`, `ifconfig`, `host`, `nc`, `telnet` and the remote shell `telnetd` for the network, and `rfact`, `rmandel`, `rsqrt`, `rsort`, `tee`, `xargs`, `fetch`, `httpd`, `vi` and `stty` |
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
 | `shell.s` | a 243-page machine starting the shell and its servers |
 | `docs/` | the kernel and the filesystem, described |

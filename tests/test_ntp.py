@@ -67,7 +67,9 @@ def test_ntpd_from_etc_init_sets_the_clock(shell):
     etc_init = "pipe\nnet\nip\n/bin/ntpsd 3600\n/bin/ntpd 10.0.0.2\n"
     out = session(shell, "sleep 5000000\ndate +%T\n", etc_init)
     assert re.search(
-        r"ntpd: clock stepped by \+3600\.0\d{5} s \(10\.0\.0\.2\)\n", out
+        # Loading the shell from disk meanwhile can slow the answer.
+        r"ntpd: clock stepped by \+3600\.[0-4]\d{5} s \(10\.0\.0\.2\)\n",
+        out,
     ), out
     assert re.search(r"\$ date \+%T\n02:30:\d\d\n", out), out
     out = session(
@@ -76,14 +78,14 @@ def test_ntpd_from_etc_init_sets_the_clock(shell):
     assert re.search(
         r"\$ ntpctl\n"
         r"1/1 sources answering, clock synced to 10\.0\.0\.2, "
-        r"stepped \+3600\.0\d{5} s \ds ago\n"
+        r"stepped \+3600\.[0-4]\d{5} s \ds ago\n"
         r"10\.0\.0\.2 asks every 1024 s\n\n"
         r"  remote +refid +st +when +poll reach +delay ms +offset ms\n"
         # Asked once (reach 001), its own server 192.0.2.1, seconds ago.
         r"\* 10\.0\.0\.2 +192\.0\.2\.1 +2 +\ds +1024 +001 "
         r"+\d+\.\d{3} +\+3600\d{3}\.\d{3}\n"
         r"\$ ntpctl -s status\n1/1 sources answering, clock synced to 10\.0\.0\.2, "
-        r"stepped \+3600\.0\d{5} s \ds ago\n10\.0\.0\.2 asks every 1024 s\n"
+        r"stepped \+3600\.[0-4]\d{5} s \ds ago\n10\.0\.0\.2 asks every 1024 s\n"
         r"\$ ntpctl -x\nusage: ntpctl \[-s status\|sources\|all\]\nsh: exit 2\n",
         out,
     ), out

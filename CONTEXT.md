@@ -2579,6 +2579,179 @@ nanoseconds since the machine started, from the host's `Instant`), and
   them adjusted. NTP_STATUS still carries Unix seconds, worked out when
   asked.
 
+### 2026-11-28 · Environment variables
+
+Eelco asked for environment variables and shell scripting, the
+environment first.
+
+- **The kernel copies the environment at spawn, from where the parent
+  says.** A process names its block with a new call, `environ(address)`
+  (54), and every spawn copies that block from the parent's memory to
+  `V_ENV` in the child, just after the arguments, and makes the copy the
+  child's. The other way, an environment argument to `spawnw` and to the
+  file server's `FS_SPAWN`, would have changed the file server's
+  protocol while it is being rewritten, and every caller; this way the
+  file server passes a client's environment on without knowing it
+  exists (it already names its client as the parent), image programs
+  get one too, and a program that never touches its environment passes
+  on what it got, as on Unix.
+- **729 trytes (`ENV_MAX`) at most**, a block of `NAME=value` strings
+  and an empty one after them, so it needs no list of pointers. It
+  shares the half page below the image with the arguments and the
+  stack, which keeps some 8,100 trytes; more would cost every process
+  stack, and this holds a few dozen variables. A block that runs past
+  it is `E_2BIG` (−29), from `environ` and from a spawn.
+- **trystd keeps the block on the heap.** `set_var` and `remove_var`
+  build a new block and name it; they return `io::Result`, unlike
+  std's, since the block can be full. `Command` gained `env` and
+  `env_remove`, and looks names up in `$PATH` (`/bin` when it is not
+  set, as for programs init starts, which have no environment).
+- **The shell keeps its own variables and exports some**, as a Unix
+  shell: `NAME=value`, `export`, `unset`, `env`, `set`, `$NAME`,
+  `${NAME}`, `${NAME:-x}`, `${NAME-x}`, `${#NAME}`, `$?`, `$$`, `~`,
+  `PATH` search and `HOME` for `cd`. An exported variable goes to the
+  environment as it changes, so a spawn needs nothing extra. Words keep
+  their quotes until a command runs, since a variable can change between
+  lexing and running once there are scripts.
+- **The shell uses the heap now**: words, arguments and variables are
+  vectors, and the lines are 240 characters (`LINE_MAX`). Its image grew
+  from some 20,000 to 44,000 trytes, two pages more; the test machine
+  has room for that. Built-ins return a status, and `$?` follows Unix:
+  127 not found, 126 not a program, 128 + the signal.
+- **A new tool, `printenv`**, which says what a program was started
+  with: the shell's `env` is a built-in and cannot show that.
+
+### 2026-11-28 · Shell scripting
+
+The second half of Eelco's env vars and scripting: the shell reads
+POSIX sh, kept reasonable.
+
+- **A parser and a tree.** `bin/sh/parse.rs` turns tokens into lists,
+  and-or lists, pipelines and commands (simple, if, while, until, for,
+  case, groups, functions), which `bin/sh/run.rs` walks. A script runs a
+  command line at a time, as POSIX shells do, so a syntax error late in
+  a file stops it there rather than before it starts.
+- **No fork, so things run in the shell.** Built-ins, functions and
+  compound commands run in the shell process; one may stand in a
+  pipeline, after its programs start, as built-ins already did. `( )` is
+  a group like `{ }`, not a subshell. Background jobs are pipelines of
+  programs only. `$(...)` sends its output to a file the shell reads
+  back (`/tmp/.shPID.N`, or `/` without `/tmp`): a pipe would fill and
+  stall a built-in writing to it, with nobody reading yet.
+- **Background jobs without a non-blocking wait.** The shell learns a
+  job has ended from the process table (its programs are zombies)
+  before each prompt, then waits for them, which cannot block. A
+  `WNOHANG` for `wait` would be the kernel's way; this needed none.
+- **A big stack, switched to in place.** A program's stack is the half
+  page below its image, some 8,000 trytes; a recursive function through
+  `$(...)` overran it within five levels. The shell first ran in a
+  thread with a heap stack, but a thread takes a process slot, shows in
+  `ps` and is not where Ctrl-C and the tests look. Now the first thread
+  moves its own `sp` to 177,147 trytes of heap (`on_stack` in
+  `lib/rust/start.s`, trystd's `thread::with_stack`) and comes back
+  after. Functions, `.`, `eval` and `$(...)` nest at most 40 deep.
+  trystd no longer zeroes a thread's stack either, only its own words.
+- **A kernel bug the thread found.** `bury` handed a child's end only to
+  its parent's first thread, so a parent waiting in another thread
+  slept for ever once the child ended after its wait began. Any thread
+  of the parent waiting for that child gets it now.
+- **POSIX where the old shell refused.** An open quote, or a line
+  ending in `|`, `&&` or `\`, asks for more with `> `; at the end of
+  the input it says `sh: the input ends inside a command`. `$1` is a
+  parameter, so `$1x` with none is `x`. The shell's bigger image loads
+  more slowly, so test disks grew to 72 blocks and shell images get 4
+  million steps by default.
+- **Descriptors are few.** A process has nine. Redirections keep what a
+  descriptor held in the highest spare one, on a stack, and put it
+  back after; nesting runs out at some depth, which the shell says.
+- **Quieter statuses.** The shell still says `sh: exit 3` for a command
+  typed at the prompt, but not for one whose status is tested (an
+  `if`'s or loop's condition, a side of `&&` or `||`, after `!`), nor in
+  a script: there a non-zero status is how `grep` or `test` answers.
+- **What it leaves out:** here-documents, `` `...` ``, `set -e` and
+  other options, `local`, `trap`, `exec`, aliases, and job control
+  beyond `&`, `jobs` and `wait`. `$((...))` has no `?:`. The image is
+  some 99,000 trytes, five pages more than the environment's shell.
+
+### 2026-11-28 · Timer slices of 10 ms, ended early for sleepers
+
+`top` showed a process that only spins spending about a third of its
+time in the kernel. A trace of `spin` (`detrytus run --trace --no-jit`,
+PCs counted by label) put it at 352 kernel steps for every 500-tick
+slice, 44% of the hart: `ktrap` and `resume` save and restore every
+register (about 145 steps between them), and `rk_pick` takes some 150
+even on its path for one ready process (the time, the sleeper and load
+checks). Making that path shorter could save perhaps half; making the
+slice longer saves nearly all of it.
+
+- **`QUANTUM` is 10,000 ticks**, 10 ms at a microsecond a tick, the
+  slice classic Unix used (HZ 100). A spinning process now spends 3.5%
+  of its hart in the kernel, and `make benchmark` takes 505 million steps
+  instead of 841 million (its three Rust programs are busy throughout).
+  Interactivity does not suffer in practice: the emulator runs some 80
+  million ticks a second, so a slice is well under a millisecond of real
+  time, and the live console paces only idle time.
+- **A slice ends no later than the earliest sleeper's time.** Only a
+  pick wakes sleepers and alarms, so with long slices a busy hart would
+  make them up to 10 ms late; `resume` arms `stimecmp` at the earlier of
+  the slice's end and `next_wake` (while `sleepers` says one may wait).
+  A stale `next_wake` (a sleeper killed early) costs one extra pick.
+  `test_a_sleeper_wakes_on_time_beside_a_busy_process` pins it.
+- **No fast path in `on_timer`.** Resuming the same process without a
+  pick when nothing else is ready would save `rk_pick`'s 150 steps, but
+  load sampling and hart leaving rely on a busy hart picking every
+  slice; at 10,000 ticks the saving is under 1.5% and not worth the
+  second path.
+- **Tests that counted on short slices** now say how long they spin in
+  terms of `QUANTUM`: pong spins `QUANTUM` rounds (three steps each) so
+  the demo is still preempted, the kill test lets its child end first,
+  the load test spins a slice past its last period, and the hart that
+  comes back in the hot-plug test does so at time 250,000 (it leaves at
+  its next pick, up to a slice after being asked) with work lasting past
+  it.
+
+### 2026-11-28 · less, find, diff, sort and tar
+
+Eelco asked for a pager and more everyday tools. Each is a Rust program
+of `bin/` over trystd, written as the others are (Unix's options in a
+small way, `NAME: what: why` on standard error, io::Line, no core::fmt),
+and each uses the heap, since each holds a whole input or a list of
+paths: six pages while it runs.
+
+- **less takes its keys from the console, not standard input,** when
+  standard input is the text (`ps | less`), as Unix's opens /dev/tty: a
+  descriptor of its own from `console::open` (`CN_OPEN`). To tell, it asks
+  `io::is_terminal(fd)`, which asks IO_WINSIZE: only the console
+  answers it, even when it does not know its size, while the file and
+  pipe servers say `E_INVAL`. It reads its whole input first, then draws
+  each screen as vi does (alternate screen, a buffer written at once),
+  and takes the console's foreground so Ctrl-C is a key.
+- **sort has its own merge sort.** The slice's `sort_by` (driftsort)
+  inlines the comparison into a dozen parts and made sort 26,000 trytes;
+  a bottom-up merge sort through a second buffer, also stable, made it
+  15,000. `rsort` stays, as the heap's demonstration and the benchmark's
+  program.
+- **diff is Myers' O(ND)** after the lines both files start and end with
+  are set aside, keeping each pass's furthest points for the way back:
+  memory grows as the square of the number of changes, fine for the
+  files this machine holds. Lines compare by an FNV hash first.
+- **find and tar walk with a stack on the heap, not a recursion.** A
+  first version recursed with each level's directory open and a
+  512-tryte record in its frame; ten directories deep it faulted. A
+  process has nine descriptors and the lower half of its page as stack,
+  so each directory's names are now read whole and the directory closed,
+  and the paths still to visit wait on a Vec.
+- **tar writes ustar with a tryte for each byte.** An archive of text is
+  then a real tar file once its trytes are bytes (the tests open it
+  with Python's tarfile, and extract one Python made). Program files are
+  archived raw, trytes beyond 255 and all, which only this tar reads
+  back. The filesystem has no modes, owners or times yet (the COW
+  B-tree rewrite brings them), so tar writes 0644 or 0755, owner 0 and
+  time 0, and find has no -mtime or -perm; both should learn them from
+  the new `stat`.
+- `bin_disk` is 84 blocks now (70 on main, with dhcp, telnet and printenv) and CI's disk
+  100: the five programs take seven blocks more.
+
 ### 2026-11-28 · A B-tree filesystem with metadata
 
 Eelco asked for file times, modes and owners. Porting FFS or ext4 was

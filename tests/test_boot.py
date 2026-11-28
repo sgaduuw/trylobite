@@ -89,7 +89,7 @@ def bootable_disk(**texts: str) -> tuple:
     new --boot, as make builds disk.img)."""
     from tools.fs import Filesystem, boot_image
 
-    path, blocks = bin_disk(blocks=80, **texts)
+    path, blocks = bin_disk(blocks=96, **texts)
     made = Filesystem.load(path)
     made.set_boot(boot_image(assemble_file(ROOT / "shell.s").path.read_bytes()))
     made.save(path)

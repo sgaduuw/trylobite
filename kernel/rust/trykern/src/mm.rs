@@ -124,6 +124,17 @@ fn words(p: *mut u8, n: i32) -> *mut u8 {
 /// pages above the process's own. Its process number, or E_NOSLOT or
 /// E_NOMEM.
 fn spawn(caller: Proc, parent: Word, image: i32, above: i32) -> Word {
+    // The parent's environment, which the child gets a copy of.
+    let env = if parent == NO_PARENT {
+        None
+    } else {
+        let from = Proc::of(parent);
+        let envp = from.get(PCB_ENVP);
+        match env_len(from, envp) {
+            Ok(n) => Some((from, envp, n)),
+            Err(e) => return e,
+        }
+    };
     let Some(s) = free_slot() else {
         return E_NOSLOT;
     };
@@ -195,12 +206,64 @@ fn spawn(caller: Proc, parent: Word, image: i32, above: i32) -> Word {
         ipc::copy_mem(caller, from, s, V_USER - 1, load_at(head, EXEC_SIZE));
     }
 
+    if let Some((from, envp, n)) = env {
+        ipc::copy_mem(from, envp, s, V_ENV, n); // env_len found it all there
+    }
+    s.set(PCB_ENVP, V_ENV); // all 0 without one: an empty environment
+
     s.set(PCB_PTBR, ptbr(root, s));
     s.set(PCB_PC, V_USER);
     s.set(0, USER_SP);
     s.set(PCB_GP, USER_GP); // programs address their data from gp
     s.ready(); // a hart waiting for work can run it
     s.pid()
+}
+
+/// The length of the environment block at `envp` in process `p`'s
+/// memory, its last 0 included: its strings up to the empty one that
+/// ends them. E_FAULT for a tryte `p` does not have, E_2BIG with no end
+/// within ENV_MAX.
+fn env_len(p: Proc, envp: Word) -> Result<Word, Word> {
+    let mut n = 0;
+    let mut at = core::ptr::null_mut();
+    let mut left = 0; // trytes from `at` to its page's end
+    let mut last = 1; // the tryte before; not 0, so a 0 first ends it
+    while n < ENV_MAX {
+        if left == 0 {
+            at = user_at(p, envp + n);
+            if at.is_null() {
+                return Err(E_FAULT);
+            }
+            left = page_left(envp + n);
+        }
+        let t = trytes::get(at);
+        n += 1;
+        if t == 0 && (last == 0 || n == 1) {
+            return Ok(n);
+        }
+        last = t;
+        at = at.wrapping_offset(1);
+        left -= 1;
+    }
+    Err(E_2BIG)
+}
+
+/// environ(address): make the block at a1 the caller's environment, as
+/// a process's children get it (spawn): 0, or E_FAULT or E_2BIG, having
+/// changed nothing.
+#[unsafe(no_mangle)]
+pub extern "C" fn rk_sys_environ(p: *mut u8) {
+    let p = Proc(p);
+    let sp = p.space(); // a thread's environment is its process's
+    let envp = p.get(PCB_A1);
+    let r = match env_len(sp, envp) {
+        Ok(_) => {
+            sp.set(PCB_ENVP, envp);
+            0
+        }
+        Err(e) => e,
+    };
+    p.set(PCB_A0, r);
 }
 
 /// A free slot of the process table, starting after the last one handed

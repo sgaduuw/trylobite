@@ -29,7 +29,7 @@ def session(shell, typed: str, disk=None, max_steps=None):
 def test_a_session_runs_programs_and_reports_how_they_ended(shell):
     # Init is process 0; 1 to 4 are the console, pipe, disk and file
     # servers, which it starts first, and 5 is the shell.
-    result = session(shell, "hello\nfail\nnope\nexit\n")
+    result = session(shell, "hello\nfail\nnope\nexit 0\n")
     transcript, _ = result.after_boot.rsplit(" timer interrupts", 1)
     assert transcript.rsplit(" ", 1)[0] == (
         "$ hello\n"
@@ -40,11 +40,16 @@ def test_a_session_runs_programs_and_reports_how_they_ended(shell):
         "sh: exit 3\n"
         "$ nope\n"
         "sh: no such program: nope\n"
-        "$ exit\n"
+        "$ exit 0\n"
         "trylobite: process 7 exited with code 0\n"
         "trylobite: process 0 exited with code 0\n"
         "trylobite: all processes exited after"
     )
+
+
+def test_exit_without_a_code_exits_with_the_last_status(shell):
+    result = run_image(shell, input="fail\nexit\n", disk=bin_disk())
+    assert result.code_of(7) == 3
 
 
 def test_backspace_and_delete_erase_what_was_typed(shell):
@@ -80,9 +85,9 @@ def test_escape_sequences_leave_nothing_in_the_line(shell):
     assert "hello from a balanced-ternary machine" in result.console
 
 
-def test_a_long_line_keeps_its_first_sixty_characters(shell):
-    result = session(shell, "x" * 70 + "\n")
-    assert f"sh: no such program: {'x' * 60}\n" in result.console
+def test_a_long_line_keeps_its_first_240_characters(shell):
+    result = session(shell, "x" * 250 + "\n", max_steps=20_000_000)
+    assert f"sh: no such program: {'x' * 240}\n" in result.console
 
 
 def test_pingpong_comes_back_to_the_prompt_once_both_are_done(shell):
@@ -103,9 +108,9 @@ def test_programs_come_from_the_disk(shell):
     # Only pingpong is in the kernel image; hello is a file, and without
     # it there is no such program. The shell itself is /bin/sh.
     assert "hello from" in session(shell, "hello\n").console
-    bare, _ = shell_filesystem(8)
+    bare, _ = shell_filesystem(12)
     bare.save(path := new_disk())
-    result = session(shell, "hello\npingpong\n", (path, 8))
+    result = session(shell, "hello\npingpong\n", (path, 12))
     assert "sh: no such program: hello\n" in result.console
     assert "pong: got 3" in result.console
 
@@ -125,54 +130,10 @@ def test_a_word_without_a_slash_is_looked_for_in_bin(shell):
 
 
 def test_ls_lists_the_programs_on_the_disk(shell):
-    # Forty-five programs, some of two blocks, take a while to list.
+    # Every program of bin/, some of two blocks, takes a while to list.
     result = session(shell, "ls bin\nfail\n", max_steps=25_000_000)
     assert "sh: exit 3\n" in result.console
-    listed = result.after_boot.splitlines()[1:46]
-    assert [line.split()[1] for line in listed] == [
-        "chmod",
-        "cp",
-        "date",
-        "df",
-        "dhcp",
-        "dmesg",
-        "echo",
-        "fail",
-        "fetch",
-        "free",
-        "grep",
-        "head",
-        "hello",
-        "host",
-        "httpd",
-        "ifconfig",
-        "kill",
-        "ls",
-        "mv",
-        "nc",
-        "ntpctl",
-        "ntpd",
-        "ping",
-        "ps",
-        "rfact",
-        "rmandel",
-        "rsort",
-        "rsqrt",
-        "rthreads",
-        "sh",
-        "sleep",
-        "spin",
-        "stat",
-        "stty",
-        "tee",
-        "telnet",
-        "telnetd",
-        "top",
-        "touch",
-        "uname",
-        "upper",
-        "uptime",
-        "vi",
-        "wc",
-        "xargs",
-    ]
+    names = sorted(p.stem for p in (ROOT / "bin").glob("*.rs"))
+    assert {"less", "find", "diff", "sort", "tar"} <= set(names)
+    listed = result.after_boot.splitlines()[1 : 1 + len(names)]
+    assert [line.split()[1] for line in listed] == names
