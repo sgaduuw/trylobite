@@ -41,7 +41,7 @@ jobs:
           grep -q 'hello from a balanced-ternary machine' out.txt
           grep -qx '/docs' out.txt
           grep -qx '1 5 38' out.txt
-          grep -qE '^ +[0-9]+ +8 run +4 +[0-9]+ ps$' out.txt  # sh is 8, after /etc/init's ntpd
+          grep -qE '^ +[0-9]+ +9 run +4 +[0-9]+ ps$' out.txt  # sh is 9, after /etc/init's dhcp and ntpd
           grep -qE '^disk0 +100 ' out.txt
           grep -qx 'trylobite 0.1.0 detrytus' out.txt
           tools/fs.py ls disk.img docs

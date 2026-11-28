@@ -719,6 +719,41 @@ before `E_TIMEDOUT`; it gives up to as many addresses as asked for, or
 takes a.b.c.d as it stands and resolves anything else, which is how
 the tools take names.
 
+A datagram sent to 255.255.255.255 goes to every host on the wire
+(Ethernet address ff:ff:ff:ff:ff:ff), with no route and no ARP, and a
+datagram to 255.255.255.255 comes to its port as if to the machine's own
+address (its checksum taken over that address); nothing else to
+everyone is taken, and the echo service answers no broadcast. That is
+what DHCP needs: **`bin/dhcp`** broadcasts a DISCOVER from port 68, takes
+the first OFFER, REQUESTs it, and gives what the ACK says to the IP
+server (`IP_CONFIG` and `IP_NAMESERVER`): the address, the prefix length
+from the mask, the first router and the first name server. It asks from
+the address the machine has, not 0.0.0.0 as RFC 2131 says, so the
+machine works on while it asks; servers answer to everyone. `dhcp -n`
+asks and prints, setting nothing; `dhcp -d`, which `/etc/init` starts,
+keeps the lease, asking again (a REQUEST for the address it has) at half
+of it, and starts over after 60 s when nobody answers; with no answer
+at all the machine keeps 10.0.0.2. detrytus's `--net user` leases
+10.0.0.15/24.
+
+**`bin/telnetd [-p PORT] [-n COUNT]`** is a remote shell: it takes TCP
+connections on port 23 and gives each a `/bin/sh` whose standard input,
+output and error are the connection, through a pipe each way, speaking
+the Telnet protocol (RFC 854). It says it will ECHO and
+SUPPRESS-GO-AHEAD, so a client sends each key as typed and the shell's
+own echo and line editing work as at the console; CR LF and CR NUL
+from the client become CR, the shell's newlines go out as CR LF, and
+Ctrl-C (or Interrupt Process) is `SIGINT` to what the shell runs, or
+the key that drops the line at the prompt. A shell whose standard input
+is not the console leaves the console's foreground alone. There are no
+users or passwords, so nothing starts it unasked: `/etc/init` has a
+line for it to uncomment. On `--net user` only the host reaches it,
+through detrytus' `--forward 2323:23` (`telnet localhost 2323`).
+**`bin/telnet HOST [PORT]`** is the client: in character mode with a
+server that echoes (telnetd), where Ctrl-C goes to the server too, and
+otherwise in line mode, editing a line on the console and sending it at
+Enter, so it talks to any TCP service; Ctrl-] ends it.
+
 `bin/ping HOST [COUNT]`, `bin/ifconfig [ADDRESS/PREFIX [GATEWAY]]`
 (`ifconfig nameserver ADDRESS` sets the name server), `bin/host NAME
 [SERVER]` and `bin/nc` are its tools in the shell; a HOST is an address
@@ -738,8 +773,9 @@ another address with `ifconfig`, and run both with `--live` so that
 their clocks keep to real time. `--net user` reaches the host's
 network through a gateway detrytus plays at 10.0.0.1, the default
 gateway, which translates to the host's sockets and stands for the
-host itself, and answers names at 10.0.0.3 from the host's resolver
-(detrytus `docs/platform.md`). The tests start the servers with
+host itself, answers names at 10.0.0.3 from the host's resolver,
+leases addresses by DHCP, and forwards host ports into the machine
+with `--forward` (detrytus `docs/platform.md`). The tests start the servers with
 `run(..., net=True, link="loop")`, or `ip=True` for both.
 
 ## Files
@@ -794,13 +830,16 @@ cannot follow (`init: /etc/init: no server named www`, `init: cannot
 start /bin/nothing`). Without `/etc/init`, or without a file server to
 read it, init starts every server and no program, so a disk with no
 `/etc` starts the same servers as the `etc/init` that `make` puts on
-`disk.img`, which also starts `bin/ntpd`:
+`disk.img`, which also starts `bin/dhcp -d` and `bin/ntpd`, and has
+the remote shell `bin/telnetd` commented out:
 
 ```text
 pipe
 net
 ip
+/bin/dhcp -d
 /bin/ntpd
+# /bin/telnetd
 ```
 
 Then:
