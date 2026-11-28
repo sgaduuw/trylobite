@@ -1,6 +1,7 @@
 //! The time of day, as std's `time`: `SystemTime::now()` reads the
 //! machine's real-time clock (SYS_CLOCK), and `duration_since` measures
-//! from `UNIX_EPOCH` or any other moment.
+//! from `UNIX_EPOCH` or any other moment. `step_clock` moves the time
+//! of day, for bin/ntpd.
 //!
 //! Where trylobite differs: there is no `Instant`, since the clock the
 //! kernel times intervals with counts ticks, and how fast ticks pass in
@@ -15,6 +16,29 @@ use core::fmt;
 unsafe extern "C" {
     #[link_name = "clock"]
     fn raw_clock() -> u32;
+}
+
+const MICROS: i64 = 1_000_000;
+
+/// Move the time of day by `micros` microseconds, later when positive
+/// (SYS_STEPCLOCK). Not in std, which cannot set the clock. Only a
+/// process init started may (PermissionDenied for the rest): the
+/// servers and the programs /etc/init names, such as bin/ntpd.
+pub fn step_clock(micros: i64) -> crate::io::Result<()> {
+    let mut secs = micros / MICROS; // both towards 0, so of one sign
+    let mut us = (micros % MICROS) as i32;
+    // The call takes an i32 of seconds: a step of more than 68 years
+    // goes in parts.
+    let most = i32::MAX as i64;
+    loop {
+        let part = if secs > most { most } else if secs < -most { -most } else { secs };
+        crate::sys::check(crate::sys::call(crate::sys::SYS_STEPCLOCK, &[part as i32, us]))?;
+        secs -= part;
+        us = 0;
+        if secs == 0 {
+            return Ok(());
+        }
+    }
 }
 
 /// A moment in wall-clock time: seconds and nanoseconds since the Unix

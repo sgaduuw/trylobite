@@ -31,9 +31,12 @@ def edit(shell, typed: str, **texts: str):
 
 
 def vi_exit(out: str) -> int:
-    """The editor's exit code: the first program the shell ran."""
-    codes = re.findall(r"process 8 exited with code (-?\d+)", out)
-    assert len(codes) == 1, out
+    """The editor's exit code: the first process to end after the shell
+    started it."""
+    _, found, after = out.partition("$ vi ")
+    assert found, out
+    codes = re.findall(r"process \d+ exited with code (-?\d+)", after)
+    assert codes, out
     return int(codes[0])
 
 
