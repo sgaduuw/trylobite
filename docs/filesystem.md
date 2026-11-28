@@ -273,8 +273,9 @@ words (redirections left out) as its arguments. Nothing there, or
 no filesystem, is `sh: no such program: NAME`; a text file or a
 directory is `sh: not a program: NAME`. The programs in `bin/` are
 meant for `/bin`: besides `hello`, `fail` and `spin`, which tests run,
-they are `echo`, `upper`, `wc`, `head` and `grep` for text, and `cp`,
-`mv` and `touch` for files (docs/kernel.md, The shell).
+they are `echo`, `upper`, `wc`, `head`, `grep`, `sort`, `diff` and
+`less` for text, and `cp`, `mv`, `touch`, `find` and `tar` for files
+(docs/kernel.md, The shell).
 
 ## Program files
 

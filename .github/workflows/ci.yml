@@ -33,7 +33,7 @@ jobs:
       - name: Use files from the shell
         run: |
           printf 'hello, disk\n' > notes
-          make BLOCKS=84
+          make BLOCKS=100
           tools/fs.py put disk.img notes
           tools/fs.py mkdir disk.img docs
           tools/fs.py put disk.img notes docs/again
@@ -42,7 +42,7 @@ jobs:
           grep -qx '/docs' out.txt
           grep -qx '1 5 38' out.txt
           grep -qE '^ +[0-9]+ +9 run +4 +[0-9]+ ps$' out.txt  # sh is 9, after /etc/init's dhcp and ntpd
-          grep -qE '^disk0 +84 ' out.txt
+          grep -qE '^disk0 +100 ' out.txt
           grep -qx 'trylobite 0.1.0 detrytus' out.txt
           tools/fs.py ls disk.img docs
           tools/fs.py cat disk.img docs/motd | grep -q 'made in the shell'
