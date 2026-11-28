@@ -2533,8 +2533,8 @@ slice longer saves nearly all of it.
 
 - **`QUANTUM` is 10,000 ticks**, 10 ms at a microsecond a tick, the
   slice classic Unix used (HZ 100). A spinning process now spends 3.5%
-  of its hart in the kernel, and `make benchmark` takes 502 million steps
-  instead of 836 million (its three Rust programs are busy throughout).
+  of its hart in the kernel, and `make benchmark` takes 505 million steps
+  instead of 841 million (its three Rust programs are busy throughout).
   Interactivity does not suffer in practice: the emulator runs some 80
   million ticks a second, so a slice is well under a millisecond of real
   time, and the live console paces only idle time.
