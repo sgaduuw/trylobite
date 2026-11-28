@@ -46,7 +46,7 @@ def test_a_new_filesystem_is_an_empty_root():
     assert (root.type, root.links, root.size) == (L["T_DIR"], 2, 2)  # . and ..
     assert (root.mode, root.parent) == (L["MODE_DIR"], L["ROOT_INO"])
     assert made.listdir() == []
-    assert made.free_blocks() == [2]  # the superblock and the tree's leaf
+    assert made.free_blocks() == [1]  # the superblock, and the leaf at the end
     info = made.info()
     assert (info["blocks"], info["inodes"], info["boot"]) == (3, 1, None)
 

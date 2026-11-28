@@ -452,9 +452,10 @@ def test_a_server_without_pages_for_its_windows_says_so():
     # and the two servers take 4 each, the disk server a window more,
     # leaving one window, and an open needs two: block 0 and the tree's
     # root. Each page the file server's image takes past one costs two
-    # more: one in the image, one in its process.
+    # more: one in the image, one in its process; and its state takes a
+    # page of heap.
     program = report(open_("f"), data=string("f", "f"))
-    pages = L["P_PROG0"] + 5 + 15 + fs_more_pages() - 1
+    pages = L["P_PROG0"] + 5 + 15 + fs_more_pages()
     assert said(run(program, ram_pages=pages, disk=disk(f="x"))) == [L["E_NOMEM"]]
     assert said(run(program, ram_pages=pages + 1, disk=disk(f="x"))) == [0]
 

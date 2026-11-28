@@ -334,9 +334,11 @@ Memory). `tools/server.py` also checks that its deepest chain of
 calls fits its stack, about 9,800 trytes below `V_USER`, and fails the
 build if it does not. Its state, about 14,000 trytes, most of it the
 sets of which blocks are in use, is in its heap (`brk`), not its image,
-where those zeros would take a page. Node sums are a loop in
-`user/fsd.s`, where a register wraps as the sum does, rather than Rust's
-64-bit arithmetic.
+where those zeros would take a page. Searching a leaf and summing a
+node are loops in `user/fsd.s` (a register wraps as the sum does), and
+a name's code points are its words' trytes, rather than Rust's 64-bit
+arithmetic, which takes dozens of steps for each number; the crate's
+`Store` trait lets a store do these its own way.
 
 It keeps blocks in its `NWIN` (9) block windows, as a cache: a block
 it needs and has not got is read into the window used least recently,
