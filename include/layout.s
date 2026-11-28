@@ -133,7 +133,7 @@
         .equ  IE_TIMER, 3                 # sie trit 1
         .equ  IE_EXT, 9                   # sie trit 2
         .equ  IE_SOFT, 27                 # sie trit 3
-        .equ  QUANTUM, 500                # timer slice, in emulator ticks
+        .equ  QUANTUM, 10000              # timer slice, in emulator ticks: 10 ms
 
 # --- harts (detrytus isa.md 5.6, platform.md Harts) ---------------------------
 # The kernel runs on harts -HART_MAX .. HART_MAX, the middle nine; others
