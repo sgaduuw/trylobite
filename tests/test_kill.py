@@ -1,13 +1,19 @@
 """kill and Ctrl-C: ending a process that will not end by itself."""
 
+import os
+import shutil
+import subprocess
+
 import pytest
 
+from tests import kernel
 from tests.kernel import (
     EXIT,
     GETC,
     ROOT,
     assemble_file,
     bin_disk,
+    build,
     exit_with,
     run,
     run_image,
@@ -169,3 +175,38 @@ def test_ctrl_c_at_the_prompt_drops_the_line(shell):
     result = run_image(shell, input="hel" + CTRL_C + "hello\nexit\n", disk=bin_disk())
     assert result.exit_code == 0, result.console
     assert "$ hel^C\n$ hello\nhello from" in result.console
+
+
+def test_killing_the_last_sleeper_lets_the_machine_power_off_at_once():
+    # A child asleep until far in the future (as ntpd sleeps 1,024 s
+    # between questions), killed: once its parent exits nobody is left,
+    # and the machine powers off then, not when the dead child's sleep
+    # would have ended. A live console runs an idle machine's clock in
+    # real time (about a million ticks a second), so it would wait those
+    # 1,000 s out: quitting the shell of `make run` left detrytus running.
+    asleep = f"""
+        csrr  a1, time
+        li    t0, 1000000000
+        add   a1, a1, t0
+        li    a0, SYS_SLEEP
+        sys
+        {exit_with("a0")}"""
+    init = spawn_and_wait(before_wait=spin(2000) + "\n        " + kill("s1"))
+    image = build(init, asleep)
+    binary = os.environ.get("DETRYTUS") or shutil.which("detrytus")
+    command = [binary, "run", "--live", "--stats", "--ram-pages", str(image.ram_pages)]
+    with subprocess.Popen(
+        [*command, "--harts", str(kernel.HARTS), str(image.path)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=ROOT,
+    ) as machine:
+        try:
+            out, err = machine.communicate(timeout=60)
+        except subprocess.TimeoutExpired:
+            machine.kill()
+            pytest.fail("the machine stayed on after its last process ended")
+    assert machine.returncode == 0, out + err
+    assert "process 1 killed" in out, out

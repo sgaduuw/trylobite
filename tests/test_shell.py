@@ -57,14 +57,16 @@ def test_only_the_first_word_counts_and_blank_lines_are_skipped(shell):
 def test_a_carriage_return_ends_a_line_and_control_characters_are_dropped(shell):
     # A terminal's Enter may send CR, or CR LF: either ends one line, so
     # neither leaves a stray empty command behind.
-    result = session(shell, "\r\n\rhel\x01lo\r\n\thello\rexit\n")
+    # (Ctrl-R, \x12, is not an editing key: tests/test_shell_editing.py.)
+    result = session(shell, "\r\n\rhel\x12lo\r\nhello\rexit\n")
     assert "no such program" not in result.console
     assert result.console.count("hello from a balanced-ternary machine") == 2
 
 
-def test_arrow_keys_and_other_escape_sequences_are_dropped(shell):
-    # Up arrow (ESC [ A, or ESC O A in application mode), Delete (ESC [ 3 ~)
-    # and Alt+x (ESC x) leave nothing in the line.
+def test_escape_sequences_leave_nothing_in_the_line(shell):
+    # Up arrow (ESC [ A, or ESC O A in application mode) with no history,
+    # Delete (ESC [ 3 ~) at the end of the line, Alt+x (ESC x) and
+    # Ctrl+Right (ESC [ 1 ; 5 C) at the end leave nothing in the line.
     result = session(shell, "\x1b[A\n\x1bOAhe\x1b[3~l\x1bxlo\x1b[1;5C\n")
     assert "no such program" not in result.console
     assert "\x1b" not in result.after_boot
@@ -113,10 +115,10 @@ def test_a_word_without_a_slash_is_looked_for_in_bin(shell):
 
 
 def test_ls_lists_the_programs_on_the_disk(shell):
-    # Thirty-eight programs, some of two blocks, take a while to list.
+    # Thirty-six programs, some of two blocks, take a while to list.
     result = session(shell, "ls bin\nfail\n", max_steps=12_000_000)
     assert "sh: exit 3\n" in result.console
-    listed = result.after_boot.splitlines()[1:39]
+    listed = result.after_boot.splitlines()[1:37]
     assert [line.split()[1] for line in listed] == [
         "cp",
         "date",
@@ -138,9 +140,7 @@ def test_ls_lists_the_programs_on_the_disk(shell):
         "ntpd",
         "ping",
         "ps",
-        "recho",
         "rfact",
-        "rhello",
         "rmandel",
         "rsort",
         "rsqrt",

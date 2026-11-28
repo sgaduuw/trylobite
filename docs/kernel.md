@@ -201,7 +201,8 @@ until the table of `NPROC` (27) wraps around.
 `bin/` has tools that look at the system as Unix's do: `ps`, `top`,
 `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df` and `date`. The kernel
 only reports; the tools read it with a few calls and format it
-(`kernel/rust/trykern/src/info.rs` and `procinfo.rs`), and `df` asks the file server
+(`kernel/rust/trykern/src/info.rs` and `procinfo.rs`; trystd's `os` module reads
+the calls' words for the Rust tools), and `df` asks the file server
 (`FS_STATFS`, docs/filesystem.md).
 
 **The log.** Everything the kernel prints (its own lines, and `putc` and
@@ -670,11 +671,11 @@ Names come from a name server, whose address the IP server keeps for
 programs but never asks itself: `IP_NAMESERVER` with an address sets
 it (0 for none) and with `NS_KEEP` only reads it; either way the answer
 is the one it was, 10.0.0.3 at boot, where detrytus's `--net user`
-plays one. `lib/dns.tc` is the resolver, a stub as on Unix: `resolve`
+plays one. trystd's `net::lookup_host` is the resolver, a stub as on Unix: it
 binds a free UDP port, sends one query for the name's A records with
 recursion desired, and waits 200,000 ticks for the answer, three times
 before `E_TIMEDOUT`; it gives up to as many addresses as asked for, or
-`E_NOENT` for a name that does not exist or has none. `host_address`
+`E_NOENT` (NotFound) for a name that does not exist or has none. `net::host_address`
 takes a.b.c.d as it stands and resolves anything else, which is how
 the tools take names.
 
@@ -795,6 +796,34 @@ The shell finds the console, pipe and file servers by name, does
 without any that is missing, opens the console as descriptor 0 and
 copies it to 1 and 2, then reads a line at a time.
 
+**Line editing.** The shell echoes what is typed and edits the line
+(up to 60 characters) as a Unix shell's line editor does, telling the
+terminal with backspaces, which move left, and characters printed over
+what is there, so any terminal follows:
+
+| Key | Does |
+|-----|------|
+| left, right (Ctrl-B, Ctrl-F) | move the cursor; typing inserts at it |
+| Home, End (Ctrl-A, Ctrl-E) | to the start or end of the line |
+| Backspace; Delete | erase before the cursor; under it (Ctrl-D is not Delete: a live console's Ctrl-D ends its input) |
+| Ctrl-U, Ctrl-K | erase to the start of the line; to its end |
+| Ctrl-W | erase the word before the cursor |
+| up, down (Ctrl-P, Ctrl-N) | the last 16 lines typed, a repeat kept once; down past the newest gives back the line being typed |
+| Tab | complete the word before the cursor |
+| Ctrl-L | clear the screen and print the line again |
+| Ctrl-C | drop the line |
+
+The keys arrive as ANSI sequences (`ESC [ A`, `ESC O H`, `ESC [ 3 ~`,
+...); any other sequence, and other control characters, do nothing.
+Tab completes the first word of a command (at the start of the line or
+after `|`) from the built-ins, `pingpong` and the files of `/bin`, and
+any other word, or one holding a slash, as a path, from its
+directory. One name is typed out, with a space after it, or a slash
+after a directory. Several are typed as far as they agree; when that
+adds nothing the shell rings the bell, and a second Tab lists them in
+columns, then prints the line again. Names starting with a dot are
+left out unless the word starts with one.
+
 **Built-ins:** `exit`, `ls [DIR]`, `cat [PATH]` (standard input without
 one), `write PATH TEXT`, `rm PATH`, `mkdir PATH`, `rmdir PATH`,
 `cd [DIR]` and `pwd`. The system tools are programs (System tools,
@@ -849,7 +878,7 @@ pipeline the line's first program first), which ends it unless it
 catches the signal, and at the prompt drops the line typed so far.
 
 ```bash
-tools/fs.py new disk.img 100 notes.txt bin/*.s bin/*.tc
+tools/fs.py new disk.img 100 notes.txt bin/*.rs
 tools/fs.py mkdir disk.img docs
 tools/fs.py put disk.img README.md docs
 printf 'ls\nls bin\ncat docs/README.md\nwrite docs/motd hello\nhello > docs/hi\n' > session.txt

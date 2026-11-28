@@ -111,6 +111,12 @@ impl Error {
         }
     }
 
+    /// What went wrong, in words: what Display says, without a number
+    /// for a code the library does not know, and without core::fmt.
+    pub fn description(&self) -> &'static str {
+        self.message()
+    }
+
     fn message(&self) -> &'static str {
         let code = match self.repr {
             Repr::Os(code) => code,
@@ -764,4 +770,134 @@ pub fn _eprint(args: fmt::Arguments<'_>) {
     let _ = Held.flush();
     let _ = stderr().write_fmt(args);
     OUT.unlock();
+}
+
+// --- lines without core::fmt -----------------------------------------------------
+
+/// How long a `Line` may grow: a path and words about it fit.
+pub const LINE_MAX: usize = 512;
+
+/// A line of output put together on the stack and written at once,
+/// without core::fmt: `Line::new().str("wc: ").str(name).error(&e).eprint()`.
+///
+/// core::fmt is some 6,000 trytes of a program and about 1,000 steps a
+/// number. A program that stays under half a page (some 9,800 trytes)
+/// runs in its four pages, as an assembly one does, and one past it takes
+/// a fifth (docs/kernel.md, memory map), so the small tools of bin/ write
+/// with this rather than `println!`. What would run past `LINE_MAX` is
+/// dropped.
+pub struct Line {
+    buf: [u8; LINE_MAX],
+    len: usize,
+}
+
+impl Default for Line {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Line {
+    pub const fn new() -> Line {
+        Line { buf: [0; LINE_MAX], len: 0 }
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.buf[..self.len]
+    }
+
+    /// Add bytes. The length is read and written once: a usize in
+    /// memory is four trytes, loaded and stored by helper calls.
+    pub fn bytes(&mut self, s: &[u8]) -> &mut Line {
+        let len = self.len;
+        let n = s.len().min(LINE_MAX - len);
+        self.buf[len..len + n].copy_from_slice(&s[..n]);
+        self.len = len + n;
+        self
+    }
+
+    pub fn str(&mut self, s: &str) -> &mut Line {
+        self.bytes(s.as_bytes())
+    }
+
+    pub fn byte(&mut self, b: u8) -> &mut Line {
+        self.bytes(&[b])
+    }
+
+    /// `s`, then spaces to fill `width` columns (`{s:<width}`).
+    pub fn str_left(&mut self, s: &str, width: usize) -> &mut Line {
+        self.str(s);
+        for _ in s.len()..width {
+            self.byte(b' ');
+        }
+        self
+    }
+
+    /// `n` in decimal.
+    pub fn num(&mut self, n: i64) -> &mut Line {
+        self.num_right(n, 0)
+    }
+
+    /// `n` in decimal, right-aligned in `width` columns (`{n:>width}`).
+    /// A number that fits a u32 is divided as one: a 64-bit division is
+    /// a helper of some 3,000 steps.
+    pub fn num_right(&mut self, n: i64, width: usize) -> &mut Line {
+        let mut digits = [b' '; 24];
+        let mut k = digits.len();
+        let mut m = n.unsigned_abs();
+        while m > u32::MAX as u64 {
+            k -= 1;
+            digits[k] = b'0' + (m % 10) as u8;
+            m /= 10;
+        }
+        let mut m = m as u32;
+        loop {
+            k -= 1;
+            digits[k] = b'0' + (m % 10) as u8;
+            m /= 10;
+            if m == 0 {
+                break;
+            }
+        }
+        if n < 0 {
+            k -= 1;
+            digits[k] = b'-';
+        }
+        let k = k.min(digits.len().saturating_sub(width));
+        self.bytes(&digits[k..])
+    }
+
+    /// What `e` says went wrong.
+    pub fn error(&mut self, e: &Error) -> &mut Line {
+        self.str(e.description())
+    }
+
+    /// An IPv4 address as a.b.c.d.
+    pub fn ip(&mut self, a: crate::net::Ipv4Addr) -> &mut Line {
+        for (i, o) in a.octets().into_iter().enumerate() {
+            if i > 0 {
+                self.byte(b'.');
+            }
+            self.num(o as i64);
+        }
+        self
+    }
+
+    /// Write the line to standard output, with a newline, and start
+    /// again. Standard output is line buffered, so it goes out now.
+    pub fn print(&mut self) -> Result<()> {
+        self.byte(b'\n');
+        let r = stdout().write_all(self.as_bytes()).and_then(|()| stdout().flush());
+        self.len = 0;
+        r
+    }
+
+    /// Write the line to standard error, with a newline, after what
+    /// standard output holds, and start again.
+    pub fn eprint(&mut self) {
+        self.byte(b'\n');
+        let _ = stdout().flush();
+        let _ = stderr().write_all(self.as_bytes());
+        self.len = 0;
+    }
 }

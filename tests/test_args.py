@@ -141,7 +141,7 @@ def test_wc_counts_the_files_it_is_given(shell):
 def test_wc_says_which_file_it_cannot_open(shell):
     on = bin_disk(notes="quiet words\n")
     assert said(shell, "wc nope notes\n", on) == (
-        "$ wc nope notes\nwc: nope: cannot open\n1 2 12 notes\n"
+        "$ wc nope notes\nwc: nope: no such file or directory\n1 2 12 notes\n"
         "1 2 12 total\nsh: exit 1\n$ \n"
     )
 

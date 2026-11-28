@@ -167,8 +167,15 @@ pub extern "C" fn rk_stuck() -> i32 {
             return 0;
         }
     }
+    // sleepers only says one may sleep: one killed asleep, or with an
+    // alarm set, leaves it set until next_wake passes, which can be many
+    // minutes off (ntpd sleeps 1,024 s). Ask the table, so that a machine
+    // whose last sleeper was killed powers off now rather than then.
     if read::sleepers() != 0 {
-        return 0; // the clock will wake a sleeper
+        if Proc::table().any(|q| q.is(ST_SLEEP) || q.get(PCB_ALARM) != 0) {
+            return 0; // the clock will wake a sleeper
+        }
+        write::sleepers(0);
     }
     if Proc::table().any(|q| q.is(ST_RUNNING)) {
         return 0;

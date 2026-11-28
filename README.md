@@ -39,7 +39,8 @@ sea floor, living among the detritus.
   disk images.
 - **A shell** with built-ins (`ls`, `cat`, `cd`, `pwd`, `mkdir`, ...),
   programs run from `/bin` on the disk with arguments, `<`, `>` and
-  `>>` redirection, `|` pipelines, quoting, and Ctrl-C to end a program.
+  `>>` redirection, `|` pipelines, quoting, line editing with history
+  and Tab completion, and Ctrl-C to end a program.
 - **A network stack:** a driver for the network device and an IP
   server that speaks ARP, ICMP echo, UDP and TCP, so two machines
   linked over UDP can `ping` each other, pass datagrams and hold TCP
@@ -113,7 +114,7 @@ trylobite: all processes exited after 9 timer interrupts
 
 The shell build boots from a disk. `make` builds `disk.img`, 100
 blocks with the kernel in its boot blocks and every program of `bin/`
-(assembly, Trice and Rust) in `/bin`; add a note to it and give the
+(Rust, over the system library trystd) in `/bin`; add a note to it and give the
 shell a session to read:
 
 ```bash
@@ -244,8 +245,9 @@ trylobite: all processes exited after 4020 timer interrupts
 ```
 
 Every key goes to the machine, as on a serial line: the shell echoes
-what you type, backspace erases (there is no history or cursor
-movement yet, so arrow keys do nothing), and Ctrl-C ends the program the shell
+what you type and edits the line as a Unix shell does (arrows, Home
+and End, Ctrl-A/E/U/K/W/L, up and down through the last 16 lines, Tab to
+complete a command or a path, twice to list), and Ctrl-C ends the program the shell
 waits for (here the runaway `spin`). `exit` or Ctrl-D (the end of
 input) ends the shell, and init and the machine with it; Ctrl-] stops
 the machine from outside. The terminal is put back as it was afterwards.
@@ -332,27 +334,28 @@ gateway needs a host that allows unprivileged ping sockets, or root.
 
 The programs on the disk are `hello`, `fail` (exits with 3), `spin`
 (loops for ever, for Ctrl-C), `echo`, `upper` (standard input to output
-in capitals) and `wc` (lines, words and code points), system tools
-as on Unix: `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`,
-`sleep`, `df` and `date` (docs/kernel.md, System tools), and `ping`,
-`ifconfig`, `host` and `nc` for the network. `rhello`, `recho`,
-`rfact` (a table of factorials up to 34!, with `println!` and 128-bit
-integers), `rmandel` (the Mandelbrot set in characters, in `f32`
-floating point on detrytus's binary coprocessor), `rsqrt` (square
-roots printed with `{}`, a program of two blocks for core's float
-formatting) and `rsort` (standard input's lines sorted, as Unix's
-`sort`, in `Vec`s and `String`s on the heap) are written in Rust, and
-so are `date`, `top`, `tee`, `xargs`, `fetch` and `httpd`, an HTTP/1.0 client and
-server (`httpd -n 1 notes | fetch -` serves a file to itself),
-`ntpd`, which sets the clock from an NTP server (`ntpd -n pool.ntp.org`
-shows how far off it is; `/etc/init` may start it to keep it right), and
-`vi`, a screen editor in the manner of Unix's (`vi notes`, then `:wq` to
-write and quit). They
-are translated from rustc's LLVM IR by `detrytus ll` (detrytus
-docs/rust.md) and built on trystd (`lib/rust/trystd`), the system
-library: files, standard I/O, processes, sockets and the time of day with std's names,
-over the kernel's calls, in Rust alone. Building them needs `rustup component add
-rust-src` and `rustup target add riscv32imac-unknown-none-elf`.
+in capitals) and `wc` (lines, words and code points), `cp`, `mv`,
+`touch`, `head` and `grep` for files, system tools as on Unix: `ps`,
+`top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df` and
+`date` (docs/kernel.md, System tools), and `ping`, `ifconfig`, `host`
+and `nc` for the network. Then `rfact` (a table of factorials up to
+34!, with `println!` and 128-bit integers), `rmandel` (the Mandelbrot
+set in characters, in `f32` floating point on detrytus's binary
+coprocessor), `rsqrt` (square roots printed with `{}`, a program of two
+blocks for core's float formatting), `rsort` (standard input's lines
+sorted, as Unix's `sort`, in `Vec`s and `String`s on the heap), `tee`,
+`xargs`, `fetch` and `httpd`, an HTTP/1.0 client and server (`httpd -n
+1 notes | fetch -` serves a file to itself), `ntpd`, which sets the
+clock from an NTP server (`ntpd -n pool.ntp.org` shows how far off it
+is; `/etc/init` may start it to keep it right), and `vi`, a screen
+editor in the manner of Unix's (`vi notes`, then `:wq` to write and
+quit). Every one is written in Rust, translated from rustc's LLVM IR
+by `detrytus ll` (detrytus docs/rust.md) and built on trystd
+(`lib/rust/trystd`), the system library: files, standard I/O,
+processes, sockets, the time of day and the kernel's reports on the
+machine with std's names, over the kernel's calls, in Rust alone.
+Building them needs `rustup component add rust-src` and `rustup target
+add riscv32imac-unknown-none-elf`.
 
 The kernel asks the machine how much RAM it has (detrytus' RAM size
 register), so `--ram-pages` can be anything from enough for the
@@ -436,7 +439,7 @@ emulator, so trylobite has never run on hardware.
 | `kernel/data.s` | the process table, buffers, messages |
 | `kernel/pagetables.s` | the boot address space and the kernel's shared leaf table |
 | `user/` | programs built into the kernel image: `demo-init`, `ping` and `pong` for the demo; `init`, `sh`, `pingpong` and the servers `fsd`, `diskd`, `consd`, `piped`, `netd` and `ipd` for the shell |
-| `bin/` | programs for the disk, each assembled on its own: `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `cp`, `mv`, `touch`, the system tools `ps`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`, and `ping`, `ifconfig`, `host` and `nc` for the network; and in Rust, `rhello`, `recho`, `rfact`, `rmandel`, `rsqrt`, `rsort`, `date`, `top`, `tee`, `xargs`, `fetch`, `httpd`, `ntpd` and `vi` |
+| `bin/` | programs for the disk, in Rust over trystd, each built on its own: `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `cp`, `mv`, `touch`, the system tools `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`, `date`, `ntpd`, `ping`, `ifconfig`, `host` and `nc` for the network, and `rfact`, `rmandel`, `rsqrt`, `rsort`, `tee`, `xargs`, `fetch`, `httpd` and `vi` |
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
 | `shell.s` | an 81-page machine starting the shell and its servers |
 | `docs/` | the kernel and the filesystem, described |

@@ -12,6 +12,9 @@
 # built in nor a program in the kernel image names a program file: a
 # path if it has a slash, else a file in /bin, and gets the line's words
 # as its arguments, the command first. It stops at the end of input.
+# The line is edited as typed, as in a Unix shell: the cursor keys,
+# Ctrl-A/E/U/K/W/L, a history on up and down, and Tab completion (the
+# line editor, below).
 #
 # A word after the command that starts with < or > redirects: < PATH makes
 # the file standard input, > PATH standard output, made empty or new, and
@@ -46,6 +49,19 @@
         .equ  SH_SEQ, 3                # inside ESC [ or ESC O, before its final character
         .equ  BS, 8                    # backspace, and delete, both erase
         .equ  DEL, 127
+        .equ  BEL, 7                   # the bell: Tab found nothing to add
+        .equ  CTRL_A, 1                # the editing keys (the line editor)
+        .equ  CTRL_B, 2
+        .equ  CTRL_E, 5
+        .equ  CTRL_F, 6
+        .equ  CTRL_K, 11
+        .equ  CTRL_L, 12
+        .equ  CTRL_N, 14
+        .equ  CTRL_P, 16
+        .equ  CTRL_U, 21
+        .equ  CTRL_W, 23
+        .equ  HIST_N, 16               # lines up and down go through
+        .equ  SH_COLS, 80              # columns Tab's list fills
         .equ  BUF_MAX, 243             # trytes cat reads at a time
         .equ  SH_NOFS, -1              # sh_fs with no file server: no process
                                        # has the number, so a call is E_NOPROC
@@ -136,7 +152,20 @@ prompt: lw    t0, sh_redir             # what the last command redirected
         call  puts
         la    s0, sh_line              # s0: the line
         mv    s1, s0                   # s1: just past what was typed
+        mv    s2, s0                   # s2: the cursor, s0 to s1
+        lw    t0, sh_nhist             # Up starts from the newest line
+        sw    t0, sh_hpos
 
+# --- the line editor ----------------------------------------------------------
+# Keys edit the line at the cursor, as in a Unix shell's: left and right
+# (or Ctrl-B, Ctrl-F), Home and End (Ctrl-A, Ctrl-E), Backspace, Delete
+# (Ctrl-D is the live console's end of input), Ctrl-U and Ctrl-K (erase before and after the cursor),
+# Ctrl-W (the word before it), Ctrl-L (clear the screen), up and down
+# (Ctrl-P, Ctrl-N) through the lines typed before, and Tab, which
+# completes a command or a path. The terminal follows with what any
+# terminal understands: a backspace moves left, a character prints over
+# what is there, so the line's tail is printed again after a change.
+# During the edit s0 to s1 hold the line, unended, and s2 is the cursor.
 read:   li    a0, SYS_READ
         li    a1, STDIN
         la    a2, sh_ch
@@ -146,7 +175,10 @@ read:   li    a0, SYS_READ
         lt    a0, sh_ch
         bnez  a0, got                  # zero, NUL, is ignored
         j     read
-got:    lw    t1, sh_state             # t1: what came before (SH_ values)
+got:    lw    t3, sh_tabbed            # t3: 1 if the last key was a Tab
+                                       # that found several names
+        sw    zero, sh_tabbed
+        lw    t1, sh_state             # t1: what came before (SH_ values)
         sw    zero, sh_state
         li    t0, SH_ESC
         blt   t1, t0, 4f
@@ -155,12 +187,28 @@ got:    lw    t1, sh_state             # t1: what came before (SH_ values)
         beq   a0, t0, 6f               # start a sequence, as the arrow
         li    t0, 'O'                  # keys send; any other character
         bne   a0, t0, read             # after it (Alt+key) is dropped
-6:      li    t0, SH_SEQ
+6:      sw    zero, sh_param
+        li    t0, SH_SEQ
         sw    t0, sh_state
         j     read
-5:      li    t0, '@'                  # in a sequence: everything up to
-        blt   a0, t0, 6b               # its final character, @ to ~, is
-        j     read                     # dropped, so no key leaves a trace
+5:      li    t0, '@'                  # in a sequence: its final character,
+        bge   a0, t0, key_seq          # @ to ~, says the key
+        li    t0, SH_SEQ               # and before it a number, as in
+        sw    t0, sh_state             # ESC [ 3 ~; of several, separated
+        li    t0, '0'                  # by ;, the last counts
+        blt   a0, t0, 7f
+        li    t0, '9'
+        bgt   a0, t0, 7f
+        lw    t0, sh_param
+        li    t1, 10
+        mul   t0, t0, t1
+        add   t0, t0, a0
+        li    t1, '0'
+        sub   t0, t0, t1
+        sw    t0, sh_param
+        j     read
+7:      sw    zero, sh_param
+        j     read
 4:      li    t0, ESC
         bne   a0, t0, 7f
         li    t0, SH_ESC
@@ -178,26 +226,635 @@ got:    lw    t1, sh_state             # t1: what came before (SH_ values)
 2:      li    t0, CTRL_C               # nothing runs: drop the line instead
         beq   a0, t0, cancel
         li    t0, BS
-        beq   a0, t0, erase
+        beq   a0, t0, k_bs
         li    t0, DEL
-        beq   a0, t0, erase
-        li    t0, '\t'                 # a tab is a space,
-        bne   a0, t0, 3f
-        li    a0, ' '
-3:      li    t0, ' '                  # and other control characters
-        blt   a0, t0, read             # are dropped
+        beq   a0, t0, k_bs
+        li    t0, '\t'
+        beq   a0, t0, k_tab
+        li    t0, CTRL_A
+        beq   a0, t0, k_home
+        li    t0, CTRL_E
+        beq   a0, t0, k_end
+        li    t0, CTRL_B
+        beq   a0, t0, k_left
+        li    t0, CTRL_F
+        beq   a0, t0, k_right
+        li    t0, CTRL_U
+        beq   a0, t0, k_kill
+        li    t0, CTRL_K
+        beq   a0, t0, k_killend
+        li    t0, CTRL_W
+        beq   a0, t0, k_word
+        li    t0, CTRL_L
+        beq   a0, t0, k_clear
+        li    t0, CTRL_P
+        beq   a0, t0, k_up
+        li    t0, CTRL_N
+        beq   a0, t0, k_down
+        li    t0, ' '                  # other control characters are
+        blt   a0, t0, read             # dropped
         addi  t0, s0, LINE_MAX
         bge   s1, t0, read             # the line is full: drop it
-        st    a0, 0(s1)
-        addi  s1, s1, 1
-        mv    a1, a0                   # echo it, as a terminal would
+        call  ins_ch
+        j     read
+
+# key_seq: the escape sequence ending in a0, with the number sh_param.
+key_seq:
+        li    t0, 'A'
+        beq   a0, t0, k_up
+        li    t0, 'B'
+        beq   a0, t0, k_down
+        li    t0, 'C'
+        beq   a0, t0, k_right
+        li    t0, 'D'
+        beq   a0, t0, k_left
+        li    t0, 'H'
+        beq   a0, t0, k_home
+        li    t0, 'F'
+        beq   a0, t0, k_end
+        li    t0, '~'                  # ESC [ N ~: Home is 1 or 7, End
+        bne   a0, t0, read             # 4 or 8, Delete 3; the rest, and
+        lw    t0, sh_param             # every other sequence, do nothing
+        li    t1, 1
+        beq   t0, t1, k_home
+        li    t1, 7
+        beq   t0, t1, k_home
+        li    t1, 4
+        beq   t0, t1, k_end
+        li    t1, 8
+        beq   t0, t1, k_end
+        li    t1, 3
+        beq   t0, t1, k_del
+        j     read
+
+k_bs:   beq   s2, s0, read             # nothing before the cursor
+        li    a0, 1
+        call  del_back
+        j     read
+k_del:  beq   s2, s1, read             # nothing after it
+        li    a0, 1
+        call  del_fwd
+        j     read
+k_kill: sub   a0, s2, s0
+        beqz  a0, read
+        call  del_back
+        j     read
+k_killend:
+        sub   a0, s1, s2
+        beqz  a0, read
+        call  del_fwd
+        j     read
+k_word: mv    t0, s2                   # the spaces before the cursor,
+        li    t1, ' '                  # then the word before them
+1:      beq   t0, s0, 2f
+        lt    t2, -1(t0)
+        bne   t2, t1, 2f
+        addi  t0, t0, -1
+        j     1b
+2:      beq   t0, s0, 3f
+        lt    t2, -1(t0)
+        beq   t2, t1, 3f
+        addi  t0, t0, -1
+        j     2b
+3:      sub   a0, s2, t0
+        beqz  a0, read
+        call  del_back
+        j     read
+k_left: beq   s2, s0, read
+        addi  s2, s2, -1
+        li    a1, BS
         call  putc
         j     read
-erase:  beq   s1, s0, read             # nothing to erase
-        addi  s1, s1, -1
-        la    a1, sh_rubout
-        call  puts
+k_right:
+        beq   s2, s1, read
+        lt    a1, 0(s2)                # printing it moves past it
+        addi  s2, s2, 1
+        call  putc
         j     read
+k_home: sub   a0, s2, s0
+        mv    s2, s0
+        li    a1, BS
+        call  rep
+        j     read
+k_end:  mv    a0, s2
+        mv    s2, s1
+        call  show
+        j     read
+k_clear:
+        la    a1, sh_clear
+        call  puts
+        call  redraw
+        j     read
+
+# History: up and down go through the last HIST_N lines typed, oldest
+# first in sh_hist; sh_hpos is the one shown, sh_nhist past the newest,
+# where the line being typed waits in sh_draft.
+k_up:   lw    t0, sh_hpos
+        beqz  t0, read                 # nothing older
+        lw    t1, sh_nhist
+        bne   t0, t1, 1f
+        la    t2, sh_draft             # leaving the line being typed
+        mv    t1, s0
+2:      beq   t1, s1, 3f
+        lt    a0, 0(t1)
+        st    a0, 0(t2)
+        addi  t1, t1, 1
+        addi  t2, t2, 1
+        j     2b
+3:      st    zero, 0(t2)
+1:      addi  t0, t0, -1
+        sw    t0, sh_hpos
+        mv    a0, t0
+        call  slot
+        call  set_line
+        j     read
+k_down: lw    t0, sh_hpos
+        lw    t1, sh_nhist
+        bge   t0, t1, read             # nothing newer
+        addi  t0, t0, 1
+        sw    t0, sh_hpos
+        la    a0, sh_draft
+        beq   t0, t1, 1f
+        mv    a0, t0
+        call  slot
+1:      call  set_line
+        j     read
+
+# Tab completes the word before the cursor. The first word of a command
+# (at the start or after |) names a built-in or a program in the image
+# or in /bin; any other word, or one with a slash, names a path, whose
+# directory is read for the names that start with what follows its last
+# slash. One name: the rest of it is typed, then a space, or a slash for
+# a directory. Several: as much as they share; when that adds nothing, a
+# bell, and a second Tab lists them in columns and prints the line again.
+# Names starting with a dot are left out unless the word starts so too.
+k_tab:  mv    s8, t3                   # s8: 1 if a Tab just rang the bell
+        mv    s3, s2                   # s3: where the word starts
+1:      beq   s3, s0, 2f
+        lt    t0, -1(s3)
+        li    t1, ' '
+        beq   t0, t1, 2f
+        li    t1, '|'
+        beq   t0, t1, 2f
+        li    t1, '<'
+        beq   t0, t1, 2f
+        li    t1, '>'
+        beq   t0, t1, 2f
+        addi  s3, s3, -1
+        j     1b
+2:      li    s7, 0                    # s7: 1 if it names a command
+        mv    t0, s3
+3:      beq   t0, s0, 4f
+        lt    t1, -1(t0)
+        li    t2, ' '
+        bne   t1, t2, 5f
+        addi  t0, t0, -1
+        j     3b
+5:      li    t2, '|'
+        bne   t1, t2, 6f
+4:      li    s7, 1
+6:      mv    s4, s3                   # s4: past the word's last slash
+        mv    t0, s3
+        li    t2, '/'
+7:      beq   t0, s2, 8f
+        lt    t1, 0(t0)
+        addi  t0, t0, 1
+        bne   t1, t2, 7b
+        mv    s4, t0
+        li    s7, 0                    # a path, even first
+        j     7b
+8:      sub   s5, s2, s4               # s5: how much of the name is typed
+        la    t0, sh_cdir              # the directory, as typed, slash and
+        mv    t1, s3                   # all, or nothing for the current one
+1:      beq   t1, s4, 2f
+        lt    t2, 0(t1)
+        st    t2, 0(t0)
+        addi  t0, t0, 1
+        addi  t1, t1, 1
+        j     1b
+2:      st    zero, 0(t0)
+        sw    zero, sh_nmatch
+        sw    zero, sh_mlen
+        sw    zero, sh_mwide
+        sw    zero, sh_tmode
+        call  cands
+        lw    t0, sh_nmatch
+        beqz  t0, t_bell
+        mv    s6, s5                   # what the names share, past what is
+t_ins:  lw    t0, sh_mlen              # typed, is typed
+        bge   s6, t0, t_after
+        addi  t0, s0, LINE_MAX
+        bge   s1, t0, read             # the line is full
+        la    t0, sh_match
+        add   t0, t0, s6
+        lt    a0, 0(t0)
+        call  ins_ch
+        addi  s6, s6, 1
+        j     t_ins
+t_after:
+        lw    t0, sh_nmatch
+        li    t1, 1
+        bne   t0, t1, t_many
+        li    s6, ' '                  # one name: a space after it, or a
+        bnez  s7, 1f                   # slash after a directory's
+        la    a0, sh_match
+        call  isdir
+        beqz  a0, 1f
+        li    s6, '/'
+1:      addi  t0, s0, LINE_MAX
+        bge   s1, t0, read
+        mv    a0, s6
+        call  ins_ch
+        j     read
+t_many: lw    t0, sh_mlen
+        bgt   t0, s5, read             # it went further: that will do
+        li    t0, 1                    # else a Tab after this one lists them
+        sw    t0, sh_tabbed
+        bnez  s8, t_list
+t_bell: li    a1, BEL
+        call  putc
+        j     read
+t_list: li    a1, '\n'
+        call  putc
+        li    t0, 1
+        sw    t0, sh_tmode
+        sw    zero, sh_col
+        sw    zero, sh_pad
+        lw    t0, sh_mwide             # a column: the longest name, a
+        addi  t0, t0, 2                # slash after a directory's, and
+        bnez  s7, 1f                   # two spaces
+        addi  t0, t0, 1
+1:      sw    t0, sh_width
+        li    t1, SH_COLS
+        div   t1, t1, t0
+        bgtz  t1, 2f
+        li    t1, 1
+2:      sw    t1, sh_cols
+        call  cands
+        lw    t0, sh_col
+        beqz  t0, 3f
+        li    a1, '\n'
+        call  putc
+3:      call  redraw
+        j     read
+
+# cands: call cand with each name Tab may complete to: the built-ins,
+# the image's programs and /bin's files for a command (s7), else the
+# names in directory sh_cdir. Clobbers s6, and what cand does.
+cands:  addi  sp, sp, -3
+        sw    ra, 0(sp)
+        beqz  s7, 3f
+        la    s6, sh_builtins
+1:      lw    a0, 0(s6)
+        beqz  a0, 2f
+        call  cand
+        addi  s6, s6, 6
+        j     1b
+2:      la    s6, sh_programs
+5:      lw    a0, 0(s6)
+        beqz  a0, 6f
+        call  cand
+        addi  s6, s6, 6
+        j     5b
+6:      la    a0, sh_bindir
+        j     4f
+3:      la    t0, sh_path              # the directory to open: as typed,
+        la    t1, sh_cdir              # but for its last slash, or . if
+        call  strcpy                   # nothing was
+        la    a0, sh_dot
+        la    t1, sh_path
+        beq   t0, t1, 4f
+        la    a0, sh_path
+        addi  t1, t1, 1
+        beq   t0, t1, 4f               # /, which stays
+        st    zero, -1(t0)
+4:      mv    a3, a0
+        li    a0, SYS_CALL
+        lw    a1, sh_fs
+        li    a2, FS_OPEN
+        li    a4, O_RDONLY
+        sys
+        bltz  a0, 9f                   # nothing there: no names
+        mv    s6, a0                   # s6: its descriptor
+7:      li    a0, SYS_IOCALL
+        mv    a1, s6
+        li    a2, IO_READDIR
+        la    a3, sh_name
+        li    a4, 0
+        sys
+        blez  a0, 8f                   # the end, or it failed
+        lt    t1, sh_name
+        li    t2, '.'
+        bne   t1, t2, 1f
+        lt    t1, sh_name + 1          # . and .. never: they add nothing
+        beqz  t1, 7b
+        bne   t1, t2, 2f
+        lt    t1, sh_name + 2
+        beqz  t1, 7b
+2:      beqz  s5, 7b                   # the rest hidden, unless asked for
+        lt    t1, 0(s4)
+        bne   t1, t2, 7b
+1:      la    a0, sh_name
+        call  cand
+        j     7b
+8:      li    a0, SYS_CLOSE
+        mv    a1, s6
+        sys
+9:      lw    ra, 0(sp)
+        addi  sp, sp, 3
+        ret
+
+# cand: if the name at a0 starts with the s5 trytes at s4, count it in
+# sh_nmatch, keep in sh_match what all such share (sh_mlen long) and the
+# longest one's length in sh_mwide; or with sh_tmode, print it in its
+# column. Clobbers a0..a5, t0..t3.
+cand:   mv    t0, s4
+        mv    t1, a0
+        mv    t2, s5
+1:      beqz  t2, 2f
+        lt    a1, 0(t0)
+        lt    a2, 0(t1)
+        bne   a1, a2, 9f               # not one
+        addi  t0, t0, 1
+        addi  t1, t1, 1
+        addi  t2, t2, -1
+        j     1b
+2:      mv    t1, a0                   # t1: its length
+3:      lt    t2, 0(t1)
+        beqz  t2, 4f
+        addi  t1, t1, 1
+        j     3b
+4:      sub   t1, t1, a0
+        lw    t0, sh_tmode
+        bnez  t0, c_print
+        lw    t0, sh_mwide
+        bge   t0, t1, 5f
+        sw    t1, sh_mwide
+5:      lw    t0, sh_nmatch
+        addi  t0, t0, 1
+        sw    t0, sh_nmatch
+        li    t2, 1
+        bne   t0, t2, 6f
+        sw    t1, sh_mlen              # the first: all of it
+        la    t0, sh_match
+        mv    t1, a0
+        j     strcpy
+6:      la    t0, sh_match             # another: as much as it shares
+        mv    t1, a0
+        li    t2, 0
+        lw    a3, sh_mlen
+7:      beq   t2, a3, 8f
+        lt    a1, 0(t0)
+        lt    a2, 0(t1)
+        bne   a1, a2, 8f
+        addi  t0, t0, 1
+        addi  t1, t1, 1
+        addi  t2, t2, 1
+        j     7b
+8:      sw    t2, sh_mlen
+9:      ret
+c_print:
+        addi  sp, sp, -9
+        sw    ra, 0(sp)
+        sw    a0, 3(sp)                # the name
+        sw    t1, 6(sp)                # and its length
+        lw    a0, sh_pad               # the spaces after the last one in
+        li    a1, ' '                  # its row
+        call  rep
+        lw    a1, 3(sp)
+        call  puts
+        bnez  s7, 1f
+        lw    a0, 3(sp)
+        call  isdir
+        beqz  a0, 1f
+        li    a1, '/'
+        call  putc
+        lw    t1, 6(sp)
+        addi  t1, t1, 1
+        sw    t1, 6(sp)
+1:      lw    t0, sh_width
+        lw    t1, 6(sp)
+        sub   t0, t0, t1
+        sw    t0, sh_pad
+        lw    t0, sh_col
+        addi  t0, t0, 1
+        lw    t1, sh_cols
+        blt   t0, t1, 2f
+        li    a1, '\n'                 # the row is full
+        call  putc
+        li    t0, 0
+        sw    zero, sh_pad
+2:      sw    t0, sh_col
+        lw    ra, 0(sp)
+        addi  sp, sp, 9
+        ret
+
+# isdir: a0 = 1 if the name at a0, in directory sh_cdir, is a directory,
+# else 0. Clobbers a0..a5, t0..t2, sh_path.
+isdir:  mv    a5, ra
+        mv    t1, a0
+        la    t0, sh_path
+        mv    a4, t1
+        la    t1, sh_cdir
+        call  strcpy
+        mv    t1, a4
+        call  strcpy
+        mv    ra, a5
+        li    a0, SYS_CALL
+        lw    a1, sh_fs
+        li    a2, FS_STAT
+        la    a3, sh_path
+        la    a4, sh_stat
+        sys
+        bltz  a0, 1f
+        lw    t1, sh_stat + ST_TYPE
+        li    t2, T_DIR
+        bne   t1, t2, 1f
+        li    a0, 1
+        ret
+1:      li    a0, 0
+        ret
+
+# --- line editing helpers -------------------------------------------------------
+
+# ins_ch: put a0 in the line at the cursor, which moves past it. The
+# caller sees that there is room. Clobbers a0..a5, t0..t3.
+ins_ch: addi  sp, sp, -3
+        sw    ra, 0(sp)
+        mv    t1, s1                   # what follows moves up one
+1:      beq   t1, s2, 2f
+        lt    t0, -1(t1)
+        st    t0, 0(t1)
+        addi  t1, t1, -1
+        j     1b
+2:      st    a0, 0(s2)
+        addi  s1, s1, 1
+        mv    a0, s2                   # print it and what follows, and
+        call  show                     # come back to just past it
+        addi  s2, s2, 1
+        sub   a0, s1, s2
+        li    a1, BS
+        call  rep
+        lw    ra, 0(sp)
+        addi  sp, sp, 3
+        ret
+
+# del_back: erase the a0 trytes before the cursor. del_fwd: the a0 after
+# it. tail: print from the cursor to the end, then a0 spaces over what
+# was there, and come back. All clobber a0..a5, t0..t3.
+del_back:
+        addi  sp, sp, -6
+        sw    ra, 0(sp)
+        sw    a0, 3(sp)
+        li    a1, BS
+        call  rep
+        lw    a0, 3(sp)
+        sub   s2, s2, a0
+        lw    ra, 0(sp)
+        addi  sp, sp, 6
+del_fwd:
+        add   t0, s2, a0               # what follows closes up
+        mv    t1, s2
+1:      beq   t0, s1, 2f
+        lt    t2, 0(t0)
+        st    t2, 0(t1)
+        addi  t0, t0, 1
+        addi  t1, t1, 1
+        j     1b
+2:      sub   s1, s1, a0
+tail:   addi  sp, sp, -6
+        sw    ra, 0(sp)
+        sw    a0, 3(sp)
+        mv    a0, s2
+        call  show
+        lw    a0, 3(sp)
+        li    a1, ' '
+        call  rep
+        lw    a0, 3(sp)
+        add   a0, a0, s1
+        sub   a0, a0, s2
+        li    a1, BS
+        call  rep
+        lw    ra, 0(sp)
+        addi  sp, sp, 6
+        ret
+
+# set_line: make the line the string at a0, shown in place of the old
+# one, with the cursor at its end. Clobbers a0..a5, t0..t3.
+set_line:
+        addi  sp, sp, -9
+        sw    ra, 0(sp)
+        sw    a0, 3(sp)
+        sub   t0, s1, s0               # the old length
+        sw    t0, 6(sp)
+        sub   a0, s2, s0               # back to the start
+        li    a1, BS
+        call  rep
+        lw    t1, 3(sp)
+        mv    s1, s0
+1:      lt    t0, 0(t1)
+        beqz  t0, 2f
+        st    t0, 0(s1)
+        addi  s1, s1, 1
+        addi  t1, t1, 1
+        j     1b
+2:      mv    a0, s0
+        call  show
+        mv    s2, s1
+        lw    a0, 6(sp)                # blank what is left of the old one
+        sub   t0, s1, s0
+        sub   a0, a0, t0
+        sw    a0, 6(sp)
+        li    a1, ' '
+        call  rep
+        lw    a0, 6(sp)
+        li    a1, BS
+        call  rep
+        lw    ra, 0(sp)
+        addi  sp, sp, 9
+        ret
+
+# redraw: print the prompt and the line, and put the cursor back.
+# Clobbers a0..a5, t0..t3.
+redraw: addi  sp, sp, -3
+        sw    ra, 0(sp)
+        la    a1, sh_prompt
+        call  puts
+        mv    a0, s0
+        call  show
+        sub   a0, s1, s2
+        li    a1, BS
+        call  rep
+        lw    ra, 0(sp)
+        addi  sp, sp, 3
+        ret
+
+# show: print the line from a0 to its end, s1. Clobbers a0..a3.
+show:   sub   a3, s1, a0
+        blez  a3, 1f
+        mv    a2, a0
+        li    a0, SYS_WRITE
+        lw    a1, sh_outfd
+        sys
+1:      ret
+
+# rep: print a0 copies of a1, none if a0 is not positive. Clobbers
+# a0..a5, t0, t2, t3.
+rep:    addi  sp, sp, -3
+        sw    ra, 0(sp)
+        mv    t3, a0
+        mv    t2, a1
+1:      blez  t3, 2f
+        mv    a1, t2
+        call  putc
+        addi  t3, t3, -1
+        j     1b
+2:      lw    ra, 0(sp)
+        addi  sp, sp, 3
+        ret
+
+# slot: a0 = the address of history line a0. Clobbers t0.
+slot:   li    t0, LINE_MAX + 1
+        mul   a0, a0, t0
+        la    t0, sh_hist
+        add   a0, a0, t0
+        ret
+
+# hist_add: keep the line, now ended, as the newest in the history,
+# unless it is empty or the same as the newest; the oldest goes when
+# HIST_N are kept. Clobbers a0..a2, t0..t3.
+hist_add:
+        mv    a2, ra
+        beq   s1, s0, 9f
+        lw    t3, sh_nhist
+        beqz  t3, 2f
+        addi  a0, t3, -1
+        call  slot
+        mv    a1, a0
+        mv    a0, s0
+        call  streq
+        bnez  a0, 9f
+2:      li    t0, HIST_N
+        blt   t3, t0, 3f
+        la    t0, sh_hist              # full: each moves down one
+        addi  t1, t0, LINE_MAX + 1
+        li    t2, (HIST_N - 1) * (LINE_MAX + 1)
+4:      lt    a0, 0(t1)
+        st    a0, 0(t0)
+        addi  t0, t0, 1
+        addi  t1, t1, 1
+        addi  t2, t2, -1
+        bnez  t2, 4b
+        addi  t3, t3, -1
+3:      mv    a0, t3
+        call  slot
+        mv    t0, a0
+        mv    t1, s0
+        call  strcpy
+        addi  t3, t3, 1
+        sw    t3, sh_nhist
+9:      mv    ra, a2
+        ret
 
 cancel: la    a1, sh_cancel
         call  puts
@@ -209,9 +866,12 @@ eof:    li    a1, '\n'                # end the last prompt's line
         li    a1, 0
         sys
 
-enter:  li    a1, '\n'
+enter:  mv    a0, s2                   # the cursor to the end first
+        call  show
+        li    a1, '\n'
         call  putc
         st    zero, 0(s1)
+        call  hist_add
 
 # Quoting: undo it in place, before anything looks for words, | or
 # redirections. In '...' every character is itself; in "..." too, but
@@ -1169,6 +1829,18 @@ sh_pids:     .words SH_STAGES          # in order
 sh_outfd:    .word STDOUT              # where puts and putc print
 sh_state:    .word 0                   # SH_CR after a CR, SH_ESC/SH_SEQ in an escape
 sh_redir:    .word 0                   # 1 while a command has redirections
+sh_param:    .word 0                   # an escape sequence's number
+sh_tabbed:   .word 0                   # 1 if the last key was Tab, with several names
+sh_nhist:    .word 0                   # history lines kept,
+sh_hpos:     .word 0                   # and the one up and down are at
+sh_nmatch:   .word 0                   # names Tab found,
+sh_mlen:     .word 0                   # how much they share,
+sh_mwide:    .word 0                   # the longest one's length,
+sh_tmode:    .word 0                   # 1 while it lists them,
+sh_width:    .word 0                   # in columns this wide,
+sh_cols:     .word 0                   # this many to a row,
+sh_col:      .word 0                   # the one it is at,
+sh_pad:      .word 0                   # and the spaces before it
 sh_fsname:   .string "fs"
 sh_conname:  .string "console"
 sh_pipename: .string "pipe"
@@ -1184,7 +1856,8 @@ sh_rmdir:    .string "rmdir"
 sh_cd:       .string "cd"
 sh_pwd:      .string "pwd"
 sh_prompt:   .string "$ "
-sh_rubout:   .tryte BS, ' ', BS, 0     # back, blank, back: the assembler has no \b
+sh_clear:    .tryte ESC, '[', 'H', ESC, '[', '2', 'J', 0   # home, clear the screen
+sh_bindir:   .string "/bin"
 sh_unknown:  .string "sh: no such program: "
 sh_notprog:  .string "sh: not a program: "
 sh_nostart:  .string "sh: cannot start it: "
@@ -1222,6 +1895,10 @@ sh_path:     .zero LINE_MAX + NAME_MAX + 3   # a path the shell puts together
 sh_args:     .zero LINE_MAX + 1        # a program's arguments, each ended by 0
 sh_name:     .zero NAME_MAX + 1        # a name readdir gives
 sh_stat:     .words STAT / 3           # what stat says
+sh_hist:     .zero HIST_N * (LINE_MAX + 1)   # the lines typed, oldest first
+sh_draft:    .zero LINE_MAX + 1        # the line being typed, while up shows others
+sh_match:    .zero NAME_MAX + 1        # what Tab's names share
+sh_cdir:     .zero LINE_MAX + 1        # the directory Tab looks in, as typed
 sh_buf:      .zero BUF_MAX + 1         # what cat reads, and a 0 to end it
 sh_myname: .string "sh"
         .nocompress

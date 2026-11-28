@@ -21,19 +21,6 @@ def said(shell, typed: str, max_steps: int = 8_000_000) -> str:
     return re.sub(r"trylobite: [^\n]*\n", "", result.after_boot)
 
 
-def test_hello_from_rust(shell):
-    assert said(shell, "rhello\n") == (
-        "$ rhello\nhello from Rust on a balanced-ternary machine\n$ \n"
-    )
-
-
-def test_echo_in_rust_says_its_arguments(shell):
-    assert said(shell, "recho  one   two three \nrecho\nrecho a b | wc\n") == (
-        "$ recho  one   two three \none two three\n$ recho\n\n"
-        "$ recho a b | wc\n1 2 4\n$ \n"
-    )
-
-
 def test_factorials_in_rust_with_println(shell):
     out = said(shell, "rfact 5\nrfact\nrfact 35\n")
     assert out.startswith(

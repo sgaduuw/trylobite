@@ -136,43 +136,47 @@ pipe.
   `bin_disk(etc_init=...)` gives a `shell.s` test its own `/etc/init`.
 - **A new program goes in `bin/`, on the disk**, unless another program
   spawns it by number (ping, pong, the servers and sh) or the kernel
-  starts it (init). It may be assembly (`.s`) or Trice (`.tc`, detrytus
-  `docs/trice.md`), built with `detrytus link`: a Trice program imports
-  `include/layout.s` and then `lib/start.s`, which places it at `V_USER`
-  and calls `main(argc, argv)` (`bin/echo.tc` is the example), and
-  usually `lib/io.tc`, the helpers Trice programs share (and
-  `lib/ip.tc` for the network ones, `lib/dns.tc` for names). A
-  library's assembly helpers must be `.global` for a program to call
-  them, and a library may not share
-  its stem with the assembly it imports (`ip.tc` beside `ip.s` makes
-  the linker include itself). A disk
-  program is assembled on its own, including
-  `include/layout.s` and loading where it runs, at `V_USER`
-  (docs/filesystem.md, Program files); `include/layout.s` must
-  therefore assemble without `NPROG`. It starts with
-  `a0` = argc and `a1` = `V_ARGV`, a list of string addresses ended by
-  a 0 word, the command first (`spawnw`; `bin/echo.tc` is the smallest
-  example), and with descriptors 0, 1 and 2 inherited from its parent.
-  Make it behave as its Unix namesake, in a small way: operands as
-  arguments, standard input when a filter is given no file, complaints
-  on standard error as `NAME: what: why`, and exit 1 when anything
-  failed (`bin/cp.s` is a full example, `bin/wc.tc` one in Trice). An
-  assembly program repeats the few helpers it needs: there is no
-  library to link. A Trice program imports them from `lib/io.tc`, and
-  `tools/fs.py` links it with every `.tc` file it imports, each
-  compiled on its own, so it carries only the helpers it calls
-  (detrytus `docs/linker.md`). A program may also be Rust (`.rs`,
-  `no_std`, detrytus `docs/rust.md`), over **trystd**, the system
-  library in `lib/rust/trystd`: a crate every Rust program depends on,
-  with std's names for files (`fs`), standard I/O (`io`), arguments
-  (`env`), child processes (`process`) and sockets (`net`), the heap
-  for `Vec`, `String` and `Box`, and `println!`. A program says
-  `use trystd::prelude::*;` and `trystd::main!(run);` (`bin/tee.rs`
-  is a small one, `bin/httpd.rs` a larger); `tests/rstd.rs` tests the
-  library from inside. Userland is meant to become Rust alone, so
-  trystd sits on the kernel's calls with no C library under it; its
-  numbers come from `include/layout.s`, which its `build.rs` reads, so
-  none is repeated. `tools/fs.py` builds a program with cargo
+  starts it (init). Every program of `bin/` is Rust (`kill` is still
+  assembly) (`.rs`, `no_std`,
+  detrytus `docs/rust.md`), over **trystd**, the system library in
+  `lib/rust/trystd`: a crate every Rust program depends on, with std's
+  names for files (`fs`), standard I/O (`io`), arguments (`env`), child
+  processes (`process`), sockets and the IP server's setup (`net`), the
+  kernel's reports on the machine and its processes (`os`), threads
+  (`thread`, `sync`) and the time of day (`time`), the heap for `Vec`,
+  `String` and `Box`, and `println!`. A program says `use
+  trystd::prelude::*;` and `trystd::main!(run);` (`bin/echo.rs` is the
+  smallest, `bin/cp.rs` a full one, `bin/httpd.rs` a larger);
+  `tests/rstd.rs` tests the library from inside. Userland is meant to
+  be Rust alone, so trystd sits on the kernel's calls with no C library
+  under it; its numbers come from `include/layout.s`, which its
+  `build.rs` reads, so none is repeated. When a tool needs a call trystd
+  lacks, add it to trystd, typed, rather than calling `sys::call` in the
+  program. A disk program is built on its own, loading where it runs,
+  at `V_USER` (docs/filesystem.md, Program files); `include/layout.s`
+  must therefore assemble without `NPROG`. It finds its arguments with
+  `env::args()`, the command first (`spawnw`), and has descriptors 0, 1
+  and 2 from its parent. Make it behave as its Unix namesake, in a small
+  way: operands as arguments, standard input when a filter is given no
+  file, complaints on standard error as `NAME: what: why` (an
+  `io::Error` says the why), and exit 1 when anything failed. Watch its
+  size: a program's image shares its one page with its stack, so one
+  over about 9,800 trytes takes a fifth page, and a heap one more; the
+  81-page test machine then runs out in a pipeline of three. core::fmt
+  is 6,000 trytes, brought in by `println!`, `write!`, `format!` or a
+  `run` returning an `io::Result` (main! prints its error); a `&mut dyn
+  Read` brings every default method of the trait. So the small tools
+  write with `io::Line` (a line on the stack, numbers by hand, errors by
+  `Error::description`), return an exit code, take readers generically
+  and walk `env::args()` rather than collecting it: `wc` is 8,000
+  trytes, `echo` 3,000.
+  Assembly (`.s`) and Trice (`.tc`, detrytus `docs/trice.md`) still
+  build, for test programs: a Trice program imports `include/layout.s`,
+  then `lib/start.s`, which places it at `V_USER` and calls `main(argc,
+  argv)`, and `lib/io.tc` and `lib/ip.tc` for helpers (`tests/dnsd.tc`);
+  `tools/fs.py` links it with every `.tc` file it imports. A library's
+  assembly helpers must be `.global` for a program to call them, and a
+  library may not share its stem with the assembly it imports. `tools/fs.py` builds a program with cargo
   (`-Zbuild-std`, needing `rust-src` and the
   `riscv32imac-unknown-none-elf` target) and `detrytus ll`, with
   `lib/rust/start.s` as its start code and runtime (the system call
