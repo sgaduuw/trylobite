@@ -55,9 +55,9 @@ def test_init_says_each_server_it_starts_and_then_the_shell():
     after = result.console.partition("trylobite: starting init\n")[2]
     assert after.startswith(
         "init: started console, process 1\n"
-        "init: started pipe, process 2\n"
-        "init: started disk, process 3\n"
-        "init: started fs, process 4\n"
+        "init: started disk, process 2\n"
+        "init: started fs, process 3\n"
+        "init: started pipe, process 4\n"
         "init: started net, process 5\n"
         "init: started ip, process 6\n"
         "init: starting sh\n"

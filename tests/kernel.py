@@ -389,11 +389,16 @@ _BIN: dict[str, list[int]] = {}
 
 
 def bin_disk(
-    blocks: int = 56, programs: tuple[Path, ...] = (), **texts: str
+    blocks: int = 56,
+    programs: tuple[Path, ...] = (),
+    etc_init: str | None = None,
+    **texts: str,
 ) -> tuple[Path, int]:
     """A new disk holding a filesystem with every program of bin/ in /bin,
     as the shell expects, and these text files in /: (path, blocks). Each
-    source in programs is built and goes in /bin too."""
+    source in programs is built and goes in /bin too. etc_init, if given,
+    is /etc/init, what init starts (user/init.s); without it init starts
+    every server."""
     from tools.fs import Filesystem, assemble, program_file
 
     if not _BIN:
@@ -411,6 +416,9 @@ def bin_disk(
         made.write_trytes(f"bin/{source.stem}", program_file(assemble(source)))
     for name, text in texts.items():
         made.write(name, text)
+    if etc_init is not None:
+        made.mkdir("etc")
+        made.write("etc/init", etc_init)
     path = new_disk()
     made.save(path)
     return path, blocks
