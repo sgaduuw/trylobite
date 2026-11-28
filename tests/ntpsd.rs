@@ -41,7 +41,8 @@ fn run() -> io::Result<i32> {
         let mut out = [0u8; 48];
         out[0] = (got[0] & 0x38) | 4; // their version, mode 4 (server)
         out[1] = if kiss { 0 } else { 2 }; // stratum
-        out[12..16].copy_from_slice(if kiss { b"DENY" } else { b"TEST" });
+        // The reference: for stratum 2, its own server's address.
+        out[12..16].copy_from_slice(if kiss { b"DENY" } else { &[192, 0, 2, 1] });
         out[16..24].copy_from_slice(&stamp); // reference
         out[24..32].copy_from_slice(&got[40..48]); // originate: their transmit
         out[32..40].copy_from_slice(&stamp); // receive

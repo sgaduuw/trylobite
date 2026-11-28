@@ -223,6 +223,20 @@ sleep_until:
         beq   a0, t0, 1b
         ret
 
+# alarm_until(low, high): SYS_ALARM at that time, given as sleep_until's,
+# for a NOTE_ALARM notice from receive (ALARM_NOTICE, not a signal).
+alarm_until:
+        li    t0, I32_SIGN
+        bxor  a1, a1, t0
+        sub   a1, a1, t0
+        li    t0, 4294967296
+        mul   a1, a1, t0
+        add   a1, a1, a0
+        li    a2, ALARM_NOTICE
+        li    a0, SYS_ALARM
+        sys
+        ret
+
 # argc() and argv(): main's arguments, as start passed them.
 argc:   la    t0, rt$argc
         lw    a0, 0(t0)

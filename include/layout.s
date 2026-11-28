@@ -1056,6 +1056,14 @@
         .equ  NO_PARENT, -1               # PCB_PARENT of init and of orphans:
                                           # process numbers are never negative
 
+# Time (docs/kernel.md, The time of day): bin/ntpd registers as "ntp"
+# with protocol NTP_PROTOCOL once it runs, and bin/ntpctl asks it.
+        .equ  NTP_PROTOCOL, 1
+        .equ  NTP_STATUS, 0               # status(buffer, size): ntpd's state as
+                                          # text, lines of words (docs/kernel.md),
+                                          # at most size trytes of it copied to
+                                          # buffer: how many; E_FAULT
+
 # --- the filesystem (docs/filesystem.md) ----------------------------------------
 # Block 0 holds a header and the map of free blocks, block 1 the inodes;
 # every other block holds a file's or a directory's data. Offsets are in
