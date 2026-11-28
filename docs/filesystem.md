@@ -334,6 +334,8 @@ tools/fs.py cat disk.img docs/old
 tools/fs.py rm disk.img docs/old
 detrytus asm bin/hello.s -o hello.dti
 tools/fs.py put disk.img hello.dti               # a program: /bin/hello
+tools/fs.py mkdir disk.img etc
+tools/fs.py put disk.img etc/init etc/init       # what init starts (kernel.md)
 detrytus run shell.s --ram-pages 81 --disk disk.img
 ```
 

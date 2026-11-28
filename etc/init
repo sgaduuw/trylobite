@@ -1,0 +1,15 @@
+# /etc/init: what init starts once the console, disk and file servers,
+# which it needs to read this, are up (docs/kernel.md, The shell).
+#
+# A line names a server, by the name it registers: init starts it, and
+# what it needs, in its own order. Or it names a program file, by its
+# path, and its arguments: init starts it with the console as standard
+# output and error, starts it again if it faults or is killed, and lets
+# it be once it exits. The shell starts after them all.
+
+pipe
+net
+ip
+
+# A web server for the whole disk, on port 80:
+# /bin/httpd

@@ -70,9 +70,9 @@ def test_ps_lists_every_process_by_name(shell):
     assert table == {
         0: ("-", "receive", "init"),
         1: ("0", "receive", "consd"),
-        2: ("0", "receive", "piped"),
-        3: ("0", "receive", "diskd"),
-        4: ("0", "receive", "fsd"),
+        2: ("0", "receive", "diskd"),
+        3: ("0", "receive", "fsd"),
+        4: ("0", "receive", "piped"),
         5: ("0", "receive", "netd"),
         6: ("0", "receive", "ipd"),
         7: ("0", "wait", "sh"),
@@ -82,15 +82,15 @@ def test_ps_lists_every_process_by_name(shell):
 
 
 def test_kill_ends_a_server_and_init_starts_it_again(shell):
-    result = session(shell, "kill 0\nkill 99\nkill x\nkill 2\nps\n")
+    result = session(shell, "kill 0\nkill 99\nkill x\nkill 4\nps\n")
     out = re.sub(r"trylobite: [^\n]*\n", "", result.after_boot)
     assert out.startswith(
         "$ kill 0\nkill: 0: not allowed\nsh: exit 1\n"
         "$ kill 99\nkill: 99: no such process\nsh: exit 1\n"
         "$ kill x\nusage: kill PID...\nsh: exit 2\n"
-        "$ kill 2\n"
+        "$ kill 4\n"
     ), out
-    assert "process 2 killed" in result.console
+    assert "process 4 killed" in result.console
     assert "init: pipe ended, starting it again" in result.console
     assert re.search(r" 0 receive +4 +\d+ piped\n", out), out
 

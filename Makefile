@@ -1,7 +1,8 @@
 # Build a disk for the shell and boot it.
 #
-#   make           disk.img: a filesystem with every program of bin/ in /bin,
-#                  and kernel/trykern.s, the kernel's Rust part
+#   make           disk.img: a filesystem with every program of bin/ in /bin
+#                  and etc/init, what init starts, in /etc; and
+#                  kernel/trykern.s, the kernel's Rust part
 #   make kernel    kernel/trykern.s alone (tools/kernel.py)
 #   make run       boot shell.s with disk.img (NET=user by default)
 #   make benchmark time the emulator sorting 10,000 lines on disk.img
@@ -42,8 +43,10 @@ kernel: $(KERNEL_RUST)
 $(KERNEL_RUST): $(KERNEL_SOURCES) tools/kernel.py
 	tools/kernel.py -o $@
 
-$(DISK): $(PROGRAMS) $(SOURCES) tools/fs.py
+$(DISK): $(PROGRAMS) $(SOURCES) etc/init tools/fs.py
 	tools/fs.py new $@.tmp $(BLOCKS) $(PROGRAMS)
+	tools/fs.py mkdir $@.tmp etc
+	tools/fs.py put $@.tmp etc/init etc/init
 	mv $@.tmp $@
 
 run: $(DISK) $(KERNEL_RUST)

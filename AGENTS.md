@@ -109,14 +109,20 @@ pipe.
   assembled file such as `shell.s`).
 - **Program 0 is init.** The kernel starts it and nothing else. In
   `demo.s` it is `user/demo-init.s`; in `shell.s` it is `user/init.s`,
-  which starts the servers (console, pipe, disk, file, network, IP, in
-  that order, from its table `init_rows`), waiting for each to register,
-  then the shell, as process 7; it exits when the shell does, and starts
-  again a server that ends (with what needs it) or a shell that faults,
-  at most `INIT_RETRIES` (3) times each. The shell finds
+  which starts the servers from its table `init_rows`, waiting for each
+  to register: the console, disk and file servers always, then those
+  `/etc/init` names (pipe, network, IP in the repository's `etc/init`,
+  which `make` puts on the disk, and all of them when there is no such
+  file), then the programs it names, then the shell, as process 7 with
+  the default list; it exits when the shell does, and starts again a
+  server that ends (with what needs it), a program or a shell that
+  faults, at most `INIT_RETRIES` (3) times each (docs/kernel.md, The
+  shell). A server init must start is still a program of the image:
+  `/etc/init` only chooses among `init_rows`. The shell finds
   the servers with `lookup(LOOKUP_NOW)`; the programs it runs start at
   process 8. Tests build their own init with `run(init, ...)`, which
-  starts the servers they ask for first (`tests/kernel.py`, `SERVERS`).
+  starts the servers they ask for first (`tests/kernel.py`, `SERVERS`);
+  `bin_disk(etc_init=...)` gives a `shell.s` test its own `/etc/init`.
 - **A new program goes in `bin/`, on the disk**, unless another program
   spawns it by number (ping, pong, the servers and sh) or the kernel
   starts it (init). It may be assembly (`.s`) or Trice (`.tc`, detrytus

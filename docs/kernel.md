@@ -509,18 +509,52 @@ no write end is left; a write waits until all of it is in (a pipe holds
 ## The shell
 
 Program 0 of the `shell.s` build is `user/init.s`. It starts the
-console, pipe, disk and file servers in that order, waiting for each to
-register its name before the next, then the shell (`user/sh.s`), and
-then waits in `receive` for its children to end:
+console, disk and file servers in that order, waiting for each to
+register its name before the next, then reads **`/etc/init`**, which
+says what else to start, then starts that, then the shell
+(`user/sh.s`), and then waits in `receive` for its children to end.
+
+`/etc/init` is text, a line at a time; an empty line, or one that
+starts with `#`, says nothing. A line names either
+
+- one of init's other servers, `pipe`, `net` or `ip`, by the name it
+  registers: init starts it, and what it needs (`ip` needs `net`), in
+  init's order (pipe, net, ip) whatever the file's, waiting for each to
+  register; or
+- a program file, by a path that starts with `/`, and its arguments,
+  words split at spaces (no quoting): init has the file server start
+  it, after the servers and in the file's order, with the console as
+  its standard output and error and no standard input, and says
+  `init: started /bin/httpd, process 7`.
+
+Init reads at most 729 characters of it (`INIT_TAB`) and keeps at most
+9 programs (`INIT_PROGS`), and says on the kernel's log a line it
+cannot follow (`init: /etc/init: no server named www`, `init: cannot
+start /bin/nothing`). Without `/etc/init`, or without a file server to
+read it, init starts every server and no program, so a disk with no
+`/etc` boots as one with the `etc/init` that `make` puts on `disk.img`:
+
+```text
+pipe
+net
+ip
+```
+
+Then:
 
 - When the shell exits, init exits with its code, and the machine
   powers off once only servers asleep in `receive` are left. A shell
   that faults or is killed is started again.
+  Init ends the programs from `/etc/init` first, so that only servers
+  are left.
 - When a server ends, init ends what needs it (the file server needs the
-  disk server, and the shell needs them all, since it holds their
-  process numbers and handles), then starts them again, the server
-  first: `init: disk ended, starting it again`.
-- Each server and the shell is started again at most 3 times
+  disk server, and the programs and the shell need them all, since they
+  hold their process numbers and handles), then starts them again, the
+  server first: `init: disk ended, starting it again`.
+- A program from `/etc/init` that exits is done, and is not started
+  again: a one-off job. One that faults or is killed is, as a server
+  is: `init: /bin/httpd ended, starting it again`.
+- Each server, program and the shell is started again at most 3 times
   (`INIT_RETRIES`). Then init gives up on it (`init: disk ended too
   often, giving up on it`): a server stays down with what needs it, and
   the shell runs without them; giving up on the shell, init exits with
@@ -530,7 +564,7 @@ A server that cannot start, or registers another protocol version than
 init expects, is said on the kernel's log (`init: no server named
 disk`) and so is every server that needs it. As each server
 registers, init says so with its process number (`init: started disk,
-process 3`), and it says `init: starting sh` before each start of the
+process 2`), and it says `init: starting sh` before each start of the
 shell, which prints its prompt at once. Init waits for each name with
 `LOOKUP_WHILE`, so a server that ends before it registers ends the
 wait: it counts as a start, as if it had ended later, and init starts

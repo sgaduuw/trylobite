@@ -40,9 +40,9 @@ def test_init_starts_the_servers_before_the_shell_and_ends_after_it():
     said = [line for line in lines if line.startswith("init:")]
     assert said == [
         "init: started console, process 1",
-        "init: started pipe, process 2",
-        "init: started disk, process 3",
-        "init: started fs, process 4",
+        "init: started disk, process 2",
+        "init: started fs, process 3",
+        "init: started pipe, process 4",
         "init: started net, process 5",
         "init: started ip, process 6",
         "init: starting sh",
@@ -57,6 +57,7 @@ def test_a_server_that_cannot_start_takes_what_needs_it_down():
     console = result.console
     assert (
         "init: no server named disk\ninit: no server named fs\n"
+        "init: started pipe, process 2\n"
         "init: started net, process 3\ninit: started ip, process 4\n"
         "init: starting sh\n$ " in console
     )
@@ -149,8 +150,8 @@ def test_a_server_that_ends_is_started_again_until_init_gives_up():
 
 
 def test_what_needs_a_server_that_ends_is_started_again_with_it():
-    # The disk server ends at its first call: the file server (process 4),
-    # which needs it, and the shell (7) are ended and started again too.
+    # The disk server ends at its first call: the file server (process 3),
+    # which needs it, and the shell are ended and started again too.
     image = build_with(
         {"INIT_DISKD": 11, "INIT_SH": 12},
         failing_server("disk", "DISK_PROTOCOL"),
@@ -160,8 +161,9 @@ def test_what_needs_a_server_that_ends_is_started_again_with_it():
     assert result.exit_code == 0, result.console
     console = result.console
     assert console.count("init: disk ended, starting it again\n") == 3
-    assert "trylobite: process 4 killed\n" in console  # the file server
-    assert "trylobite: process 7 killed\n" in console  # the shell
+    assert "trylobite: process 3 killed\n" in console  # the file server
+    # The shell, each time: the first start, three more, and one without it.
+    assert console.count("init: starting sh\n") == 5
     # Given up on the disk server, init leaves the file server down too.
     assert trouble(console)[-2:] == [
         "init: disk ended too often, giving up on it",
@@ -191,14 +193,14 @@ def test_a_server_that_ends_before_it_registers_is_started_again():
 
 
 def test_a_server_that_ends_once_before_it_registers_comes_up():
-    # The pipe server's first start (process 2) exits before it registers;
-    # the second, process 3, registers, and the rest comes up after it.
+    # The pipe server's first start (process 4) exits before it registers;
+    # the second, process 5, registers, and the rest comes up after it.
     image = build_with(
         {"INIT_PIPED": 11},
         """
         li    a0, SYS_GETPID
         sys
-        li    t0, 2
+        li    t0, 4
         bne   a0, t0, 1f
         li    a0, SYS_EXIT
         li    a1, 3
@@ -218,10 +220,10 @@ def test_a_server_that_ends_once_before_it_registers_comes_up():
     said = [line for line in result.console.splitlines() if line.startswith("init:")]
     assert said == [
         "init: started console, process 1",
+        "init: started disk, process 2",
+        "init: started fs, process 3",
         "init: pipe ended, starting it again",
-        "init: started pipe, process 3",
-        "init: started disk, process 4",
-        "init: started fs, process 5",
+        "init: started pipe, process 5",
         "init: started net, process 6",
         "init: started ip, process 7",
         "init: starting sh",
@@ -237,3 +239,120 @@ def test_a_shell_that_faults_is_started_again_until_init_gives_up():
     assert console.count("init: sh ended, starting it again\n") == 3
     assert "init: sh ended too often, giving up on it\n" in console
     assert result.code_of(0) == 1  # INIT_LOST
+
+
+def boot(etc_init: str, input: str = "exit\n", **kwargs):
+    """shell.s on a disk whose /etc/init is etc_init."""
+    disk = bin_disk(etc_init=etc_init, **kwargs)
+    return run_image(assemble_file(ROOT / "shell.s"), input=input, disk=disk)
+
+
+def said(console: str) -> list[str]:
+    return [line for line in console.splitlines() if line.startswith("init:")]
+
+
+def test_etc_init_says_which_servers_start_after_the_bootstrap_ones():
+    # Comments, empty lines and spaces say nothing. Without net and ip the
+    # shell is process 5.
+    result = boot("# just pipes\n\n   pipe  \n", input="ls\nexit\n")
+    assert result.exit_code == 0, result.console
+    assert said(result.console) == [
+        "init: started console, process 1",
+        "init: started disk, process 2",
+        "init: started fs, process 3",
+        "init: started pipe, process 4",
+        "init: starting sh",
+    ]
+    assert "$ ls\nbin/\netc/\n" in result.console
+    assert "trylobite: process 5 exited with code 0" in result.console
+
+
+def test_a_server_in_etc_init_brings_what_it_needs():
+    # ip needs net; init's order holds, whatever the file's.
+    result = boot("ip\npipe\n")
+    assert said(result.console)[3:] == [
+        "init: started pipe, process 4",
+        "init: started net, process 5",
+        "init: started ip, process 6",
+        "init: starting sh",
+    ]
+
+
+def test_an_empty_etc_init_starts_only_the_bootstrap_servers():
+    result = boot("")
+    assert result.exit_code == 0, result.console
+    assert said(result.console)[3:] == ["init: starting sh"]
+
+
+def test_etc_init_names_no_such_server():
+    result = boot("pipe\nwhatever\n")
+    assert trouble(result.console) == ["init: /etc/init: no server named whatever"]
+    assert "init: started pipe, process 4" in result.console
+
+
+def test_a_program_in_etc_init_starts_with_its_arguments_before_the_shell():
+    # Once it has exited it is done, not started again. (Its words are
+    # split at spaces, however many.)
+    result = boot("/bin/touch   /from-init  /made-by-init\n", input="sleep 9\nls\n")
+    assert result.exit_code == 0, result.console
+    console = result.console
+    assert said(console) == [
+        "init: started console, process 1",
+        "init: started disk, process 2",
+        "init: started fs, process 3",
+        "init: started /bin/touch, process 4",
+        "init: starting sh",
+    ]
+    assert "trylobite: process 4 exited with code 0" in console
+    listed = console.partition("$ ls\n")[2].splitlines()
+    assert "0 from-init" in listed and "0 made-by-init" in listed  # empty
+
+
+def test_a_program_in_etc_init_that_faults_is_started_again_until_init_gives_up():
+    # The shell sleeps so as not to exit, and end init, before then.
+    result = boot(
+        "/bin/crash\n", "sleep 9\nexit\n", programs=(ROOT / "tests" / "crash.s",)
+    )
+    assert result.exit_code == 0, result.console
+    console = result.console
+    assert console.count(" faulted") == 4  # the first start and three more
+    # Counted, not listed: what the shell echoes may land inside a line.
+    assert console.count("init: /bin/crash ended, starting it again\n") == 3
+    assert console.count("init: /bin/crash ended too often, giving up on it\n") == 1
+
+
+def test_a_program_in_etc_init_that_cannot_start_is_said():
+    result = boot("/bin/nothing\npipe\n", input="ls\n")
+    assert trouble(result.console) == ["init: cannot start /bin/nothing"]
+    assert "$ ls\nbin/\netc/\n" in result.console
+
+
+def test_init_ends_the_programs_when_the_shell_exits():
+    # spin never ends by itself: init ends it, so the machine powers off.
+    result = boot("/bin/spin\n")
+    assert result.exit_code == 0, result.console
+    lines = result.console.splitlines()
+    assert "init: started /bin/spin, process 4" in lines
+    assert lines[-4:-1] == [
+        "trylobite: process 5 exited with code 0",  # the shell,
+        "trylobite: process 4 killed",  # spin,
+        "trylobite: process 0 exited with code 0",  # then init
+    ]
+
+
+def test_programs_start_again_with_a_server_that_ends():
+    # Killing the file server from the shell ends spin too, and both start
+    # again.
+    result = boot("/bin/spin\n", input="kill 3\nexit\n")
+    console = result.console
+    assert "init: fs ended, starting it again" in console
+    assert console.count("init: started /bin/spin, process ") == 2
+
+
+def test_a_long_etc_init_is_read_as_far_as_init_can():
+    result = boot("pipe\n" + "#" * 800 + "\nnet\n")
+    assert trouble(result.console) == [
+        "init: /etc/init: too long, reading the start of it"
+    ]
+    assert "init: started pipe, process 4" in result.console
+    assert "init: started net" not in result.console

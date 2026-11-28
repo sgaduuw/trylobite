@@ -2037,3 +2037,42 @@ gives the right answers. So there is no translation bug to find. The
 lesson is to read a step-limit failure as one: "no power-off after N
 steps" in the run, not a wrong result. Plain loops stay the rule on hot
 paths for speed.
+
+## init reads what to start from /etc/init (2026-11-28)
+
+init's list of servers was a table in `user/init.s`; which ones run,
+and any program to start at boot, is now a file on the disk.
+
+- **Bootstrap rows stay built in.** Reading a file needs the console
+  (to say what goes wrong), disk and file servers, so those three always
+  start, first. That moved the pipe server after them: the boot is now
+  console 1, disk 2, fs 3, pipe 4, net 5, ip 6, and the shell is still
+  process 7 with the default list.
+- **The file chooses among init's servers; it does not describe them.**
+  A server line is just a name, `pipe`, `net` or `ip`: the program
+  number, the protocol version to expect and what it needs stay in
+  `init_rows`, since the servers are programs of the image and their
+  protocol versions are `include/layout.s`'s numbers, which a text file
+  would repeat and fall out of step with. A named server brings what it
+  needs, and init's order holds whatever the file's order.
+- **Programs from the disk too**, the way a Unix rc or inittab starts
+  daemons: a line starting with `/` is a program file and its
+  arguments, started by the file server as init's child after the
+  servers. It gets the console as standard output and error and no
+  standard input, which stays the shell's. One that exits is done (a
+  one-off job); one that faults or is killed starts again, as a server
+  does, up to `INIT_RETRIES`; and since it may hold servers' handles, it
+  is ended and started again with any server that ends, as the shell
+  is. When the shell exits, init ends the programs before it exits, so
+  only servers asleep in `receive` are left and the machine still
+  powers off.
+- **No file is the old behaviour.** Without `/etc/init`, or without a
+  file server (a machine with no disk), init starts every server, so
+  test disks and old images boot as before. `make` puts the
+  repository's `etc/init` on `disk.img`.
+- Bounds: 729 characters read (`INIT_TAB`), 9 programs (`INIT_PROGS`),
+  and `init_say` now cuts a line short instead of trusting its length,
+  as names from the file can be any length. No quoting in arguments.
+- Still in assembly: init is a program of the image, which the Rust
+  toolchain does not build yet. Moving it to Rust over trystd fits the
+  Rust-only direction once image programs can be Rust.

@@ -134,9 +134,9 @@ trylobite: net0: network device, no link, at page -16
 trylobite: process table: 27 slots, 11 programs in the image
 trylobite: starting init
 init: started console, process 1
-init: started pipe, process 2
-init: started disk, process 3
-init: started fs, process 4
+init: started disk, process 2
+init: started fs, process 3
+init: started pipe, process 4
 init: started net, process 5
 init: started ip, process 6
 init: starting sh
@@ -207,9 +207,9 @@ trylobite: net0: network device, no link, at page -16
 trylobite: process table: 27 slots, 11 programs in the image
 trylobite: starting init
 init: started console, process 1
-init: started pipe, process 2
-init: started disk, process 3
-init: started fs, process 4
+init: started disk, process 2
+init: started fs, process 3
+init: started pipe, process 4
 init: started net, process 5
 init: started ip, process 6
 init: starting sh
@@ -354,12 +354,12 @@ while it runs, and the kernel reports each.
           └──▶ ipd (ARP, ping, UDP, TCP) ──▶ netd (frames) ──▶ network device
 
   every arrow is a call through the kernel: call / receive / reply
-  init, program 0, starts the servers and then sh
+  init, program 0, starts the servers, those /etc/init names, and then sh
 ```
 
 | Process | Name | Job |
 |---------|------|-----|
-| `user/init.s` | | program 0: starts the servers below in order, then the shell |
+| `user/init.s` | | program 0: starts the console, disk and file servers, then the servers and programs `/etc/init` names, then the shell |
 | `user/sh.s` | | the shell |
 | `user/fsd.s` | `fs` | the file server: paths, directories, open files, starting programs from the disk |
 | `user/diskd.s` | `disk` | drives the block device, moving blocks by DMA |
