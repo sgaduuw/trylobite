@@ -47,6 +47,11 @@ tests. The tests are Python but drive the binary as a subprocess
 `debug` script reads memory afterwards with `xp`. If something about
 the machine looks wrong, that is a detrytus change, made there.
 
+The Rust that builds the kernel's crate and the programs is pinned to
+an exact release in `rust-toolchain.toml`, so that a build, and `make
+benchmark`'s step count, is the same on every machine. Move it in its
+own commit, and give the benchmark's step count before and after.
+
 Judge each check by its exit status, run on its own, never through a
 pipe.
 
@@ -184,8 +189,9 @@ pipe.
   `tools/fs.py` links it with every `.tc` file it imports. A library's
   assembly helpers must be `.global` for a program to call them, and a
   library may not share its stem with the assembly it imports. `tools/fs.py` builds a program with cargo
-  (`-Zbuild-std`, needing `rust-src` and the
-  `riscv32imac-unknown-none-elf` target) and `detrytus ll`, with
+  (`-Zbuild-std`, with the Rust `rust-toolchain.toml` pins, its
+  `rust-src` and the `riscv32imac-unknown-none-elf` target, and paths
+  mapped away: `tools/toolchain.py`) and `detrytus ll`, with
   `lib/rust/start.s` as its start code and runtime (the system call
   entry `sys`, `brk`, `memcpy` and the rest). `bin_disk` in
   `tests/kernel.py` makes room for every program; a test that writes
