@@ -2277,7 +2277,97 @@ that redoes when pressed again, counts, `:w [FILE]`, `:q`, `:q!`,
 - **Later:** search (`/`), `cw`/`dw` and other operator-motion pairs,
   multi-level undo, asking the terminal its size in a live session.
 
-<<<<<<< HEAD
+### 2026-11-28 · Line editing and Tab completion in the assembly shell
+
+Eelco asked for a more usable console before more vi work, Tab
+completion first. The shell (`user/sh.s`) now has a line editor: cursor
+movement and editing in the middle, the Emacs-style Ctrl keys of bash's
+default mode, a 16-line history and Tab completion of commands and
+paths (docs/kernel.md, Line editing).
+
+- **Extended in assembly, not rewritten in Rust.** The direction is
+  Rust-only, but the shell is a program of the kernel image that init
+  starts before any disk program, and its parsing, quoting, pipelines,
+  redirections and built-ins are pinned down by its tests. A
+  Rust shell is a step of its own, worth taking with the rest of the
+  boot path; the editor is about 600 lines of assembly that would carry
+  over to it as a design.
+- **Only backspace and overprinting.** Moving left is a backspace and
+  moving right prints the character there again; a change prints the
+  line's tail again and backs up over it. No cursor-addressing
+  sequences, so the echo is plain text the tests can read.
+- **Tab is not a space any more.** It completes; a pasted tab rings
+  the bell. Completion reads directories with `IO_READDIR` and asks
+  `FS_STAT` only for the names it prints or completes, to put a slash
+  after a directory. It leaves `.` and `..` out always, and other dot
+  names unless the word starts with a dot; it does not look inside
+  quotes.
+- **Limits:** the line is still 60 characters; the list assumes 80
+  columns; no reverse search (Ctrl-R) and no history kept across boots.
+
+### 2026-11-28 · Every tool of bin/ in Rust
+
+Eelco asked for the tools that were not Rust yet to be ported. The
+assembly and Trice programs of `bin/` (`echo`, `upper`, `wc`, `head`,
+`grep`, `cp`, `mv`, `touch`, `ps`, `free`, `uptime`, `uname`, `dmesg`,
+`sleep`, `df`, `ping`, `ifconfig`, `host`, `nc`, and the test programs
+`hello`, `fail`, `spin`) are now Rust over trystd, with the same
+arguments, output and exit codes. `kill` stays assembly: the signals
+work rewrites it, with a new `SYS_KILL`.
+
+- **trystd grew what the tools needed, typed**, rather than tools
+  calling `sys::call` themselves: `os` (the kernel's reports: `info`,
+  `process`/`processes` with a `State` enum, `hart`, `read_log`/`log`),
+  and in `net` the IP server's own calls (`config`, `set_config`,
+  `set_nameserver`, `ping`). top keeps its own hand-tuned calls (its
+  step budget).
+- **Four pages, as before.** A process's image shares its page with its
+  stack, so an image past about 9,800 trytes takes a fifth page, and a
+  heap a sixth. Written the obvious way (`println!`, `Vec` of
+  arguments, `&mut dyn Read`), the tools were 12,000 to 17,000 trytes
+  and 5 or 6 pages against assembly's 4, and the 81-page test machine
+  ran out of memory in three-program pipelines (`xargs < words | wc`,
+  rstd's children). core::fmt alone is 6,000 trytes. trystd gained
+  `io::Line`, a line put together on the stack with numbers written by
+  hand and errors by `Error::description`, and the small tools use it,
+  return exit codes, take readers generically and walk their arguments:
+  `wc`, `head`, `grep` are about 8,000 trytes, `ps` 5,400, `echo` 3,000,
+  all in four pages, and faster for skipping core::fmt's ~1,000 steps a
+  number. Rejected: raising the test machine's RAM, which would have
+  hidden the cost on every machine. `ping`, `host` and `nc` resolve
+  names into a `Vec`, so they keep a heap and are 13,000 to 16,000.
+- **Errors say the error.** Where the old tools said "cannot open" or
+  "cannot make", the new ones say the `io::Error`, as Unix does: `wc:
+  nope: no such file or directory`. Messages that say more than the
+  error (`mv: d: cannot move there`, `ping`'s and `nc`'s network
+  failures) are kept. A DNS server that ARP cannot find is "the name
+  server did not answer", as lib/dns.tc said, not "timed out".
+- **ps names the thread states** (futex, join, dying) the assembly
+  showed as `?`.
+- **`recho` and `rhello` went**: `echo` and `hello` are Rust now.
+  `lib/dns.tc` went too, as trystd's `net::lookup_host` is the
+  resolver; `lib/io.tc`, `lib/ip.tc` and `lib/start.s` stay for Trice
+  test programs (`tests/dnsd.tc`).
+
+### 2026-11-28 · The console's size, as a descriptor call
+
+Eelco asked for the console to report its size. detrytus gained two
+console registers, rows and columns (0 when unknown), kept the host
+terminal's in a live session and set by `--console-size` in tests.
+
+- **`IO_WINSIZE`, a descriptor call,** not a `CN_` call: a program has
+  the console only as its descriptors, and Unix asks the same of a
+  descriptor (`ioctl(fd, TIOCGWINSZ)`). Every other server answers an
+  operation it does not know with `E_INVAL`, which makes it an
+  `isatty` too: `stty size < file` says the size is not known.
+- **Asked before each screen, no resize notice.** vi asks once a draw,
+  one call, and clears the screen when the size changed; nothing needs
+  a SIGWINCH yet.
+- **trystd's `io::terminal_size()`** gives `(columns, rows)`, as the
+  terminal_size crate does, so Rust code reads as it would elsewhere.
+- **`bin/stty` knows only `size`.** The console server cooks nothing,
+  so there are no modes to set.
+
 ## Signals (2026-11-28)
 
 Signals came before environment variables and shell scripts, at Eelco's

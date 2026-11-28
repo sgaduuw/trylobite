@@ -322,7 +322,12 @@
         .equ  IO_SHUTDOWN, -5             # shutdown(handle): no more writing; the
                                           # other end reads to its end, while this
                                           # one can still read (TCP connections): 0
-        .equ  IO_FIRST,  -5               # the lowest IO_ operation
+        .equ  IO_WINSIZE, -6              # winsize(handle): 0, then the rows and
+                                          # columns of the terminal behind it in
+                                          # the reply's next two words, 0 and 0
+                                          # if not known (the console); E_INVAL
+                                          # from servers of anything else
+        .equ  IO_FIRST,  -6               # the lowest IO_ operation
 
 # Messages for servers (docs/kernel.md, Messages for servers). A message is four words, a2 to
 # a5 as sent; a server answers each call with a reply of four words.
@@ -752,8 +757,9 @@
         .equ  CN_OPEN,    3               # open(): give the caller a descriptor
                                           # for the console: its lowest free one,
                                           # E_MFILE
-        .equ  CONSOLE_HANDLE, 0           # the console's one handle, for IO_READ
-                                          # and IO_WRITE (E_BADF for another)
+        .equ  CONSOLE_HANDLE, 0           # the console's one handle, for IO_READ,
+                                          # IO_WRITE and IO_WINSIZE (E_BADF for
+                                          # another)
 
 # Packets come from the IP server, which registers as "ip" with protocol
 # IP_PROTOCOL and reaches the wire through the network server. A call to

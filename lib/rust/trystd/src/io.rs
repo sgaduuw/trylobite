@@ -561,6 +561,24 @@ pub(crate) fn write_fd(fd: i32, buf: &[u8]) -> Result<usize> {
     sys::check(n).map(|n| n as usize)
 }
 
+/// The size of the terminal behind standard output, as `(columns, rows)`,
+/// as the terminal_size crate gives it; None when standard output is not
+/// the console (a file, a pipe) or the machine does not know the size.
+/// Ask again before each screen: the console follows the terminal as it
+/// is resized.
+pub fn terminal_size() -> Option<(usize, usize)> {
+    terminal_size_of(1)
+}
+
+/// The same for descriptor `fd` (IO_WINSIZE).
+pub fn terminal_size_of(fd: i32) -> Option<(usize, usize)> {
+    if sys::call(sys::SYS_IOCALL, &[fd, sys::IO_WINSIZE, 0, 0]) < 0 {
+        return None;
+    }
+    let (rows, columns) = (sys::more(0), sys::more(1));
+    (rows > 0 && columns > 0).then_some((columns as usize, rows as usize))
+}
+
 // --- standard input, output and error -------------------------------------------
 
 /// The buffers behind standard input and output: one each per program,

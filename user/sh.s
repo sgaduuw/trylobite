@@ -61,7 +61,8 @@
         .equ  CTRL_U, 21
         .equ  CTRL_W, 23
         .equ  HIST_N, 16               # lines up and down go through
-        .equ  SH_COLS, 80              # columns Tab's list fills
+        .equ  SH_COLS, 80              # columns Tab's list fills when the
+                                       # console does not know its width
         .equ  BUF_MAX, 243             # trytes cat reads at a time
         .equ  SH_NOFS, -1              # sh_fs with no file server: no process
                                        # has the number, so a call is E_NOPROC
@@ -386,7 +387,8 @@ k_down: lw    t0, sh_hpos
 # directory is read for the names that start with what follows its last
 # slash. One name: the rest of it is typed, then a space, or a slash for
 # a directory. Several: as much as they share; when that adds nothing, a
-# bell, and a second Tab lists them in columns and prints the line again.
+# bell, and a second Tab lists them in columns across the console's
+# width (IO_WINSIZE) and prints the line again.
 # Names starting with a dot are left out unless the word starts so too.
 k_tab:  mv    s8, t3                   # s8: 1 if a Tab just rang the bell
         mv    s3, s2                   # s3: where the word starts
@@ -485,11 +487,21 @@ t_list: li    a1, '\n'
         bnez  s7, 1f                   # two spaces
         addi  t0, t0, 1
 1:      sw    t0, sh_width
+        li    a0, SYS_IOCALL           # as many as the console is wide,
+        li    a1, STDOUT               # or SH_COLS when it does not know
+        li    a2, IO_WINSIZE
+        li    a3, 0
+        li    a4, 0
+        sys
         li    t1, SH_COLS
+        bltz  a0, 2f
+        blez  a2, 2f
+        mv    t1, a2
+2:      lw    t0, sh_width
         div   t1, t1, t0
-        bgtz  t1, 2f
+        bgtz  t1, 4f
         li    t1, 1
-2:      sw    t1, sh_cols
+4:      sw    t1, sh_cols
         call  cands
         lw    t0, sh_col
         beqz  t0, 3f

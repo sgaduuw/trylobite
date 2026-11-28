@@ -8,8 +8,8 @@
 #
 # A console call is a SYS_CALL with a CN_ operation in a2 and the
 # arguments in a3 and a4 (include/layout.s). It also answers descriptor
-# calls, IO_READ and IO_WRITE, on its one handle, CONSOLE_HANDLE, which
-# CN_OPEN gives the caller as a descriptor: the shell makes that its
+# calls, IO_READ, IO_WRITE and IO_WINSIZE, on its one handle,
+# CONSOLE_HANDLE, which CN_OPEN gives the caller as a descriptor: the shell makes that its
 # standard input, output and error, and programs it starts inherit them,
 # so they reach the console with SYS_READ and SYS_WRITE.
 #
@@ -35,6 +35,8 @@
         .gp   USER_GP
 
         .equ  CN_REGS, V_DEVICE + PAGE * (SRC_CONSOLE - 1)  # its registers
+        .equ  CN_ROWS, 6               # from CN_REGS: the terminal's rows,
+        .equ  CN_COLUMNS, 9            # and columns (detrytus' platform.md)
         .equ  CN_MAX, 81               # code points held for readers
         .equ  CN_CHUNK, 243            # trytes a write copies in, or a read
                                        # gives, at a time
@@ -77,6 +79,8 @@ cn_wait:
         beq   a1, t0, cn_ioread
         li    t0, IO_WRITE
         beq   a1, t0, cn_iowrite
+        li    t0, IO_WINSIZE
+        beq   a1, t0, cn_winsize
 cn_inval:
         li    a2, E_INVAL
 
@@ -146,6 +150,19 @@ cn_hold:
         add   t2, t2, t1
         sw    t0, 0(t2)
         j     cn_serve
+
+# A descriptor's winsize(handle): 0, and the rows and columns the console's
+# registers say, which the machine keeps the terminal's (0 if not known).
+cn_winsize:
+        bnez  a2, cn_badf
+        li    t0, CN_REGS
+        lw    a3, CN_ROWS(t0)
+        lw    a4, CN_COLUMNS(t0)
+        li    a0, SYS_REPLY
+        mv    a1, s0
+        li    a2, 0
+        sys
+        j     cn_wait
 
 # A descriptor's write(handle, buffer, n): as CN_WRITE.
 cn_iowrite:
