@@ -2486,7 +2486,100 @@ running a line, the built-ins), over trystd.
 - **Still 60 characters a line**, as the tests pin; a longer line is a
   constant now (`LINE_MAX`).
 
-## A B-tree filesystem with metadata (2026-11-28)
+### 2026-11-28 · One Rust for every machine: reproducible builds
+
+`make benchmark` counted different steps on Eelco's Mac (735M) and in
+the cloud (731M) for the same trylobite and detrytus: the programs and
+the kernel's Rust were built with whatever rustc each machine had, and
+a build also carried the machine's paths.
+
+- **The release is pinned.** `rust-toolchain.toml` names 1.100.1 (the
+  stable of the day), with `rust-src` and the target, which rustup
+  installs on first use. The kernel's crate is in the repository, so
+  rustup finds the file there; `tools/fs.py` builds each program in a
+  project of its own under the temporary directory, so it copies the
+  file in. A rustc that is not the pinned one (a Rust without rustup)
+  gets a warning, not an error. CI installs what the file names instead
+  of stable. Moving the pin changes the count (1.97.0 counted
+  836,498,963, 1.100.1 841,405,340), so it moves in its own commit.
+- **No paths of the machine.** rustc writes the source file of every
+  place a panic could start into the IR (`Location`), and those strings
+  land in the programs' data: `/home/…/trylobite/bin/cp.rs`, and with
+  `-Zbuild-std` `~/.rustup/toolchains/<name>/lib/rustlib/src/rust/…`,
+  whose toolchain name holds the host. Their lengths move the data, and
+  so addresses and relaxation. `tools/toolchain.py` maps the repository
+  to `/trylobite` and rust-src to `/rustc/COMMIT` (as rustc's own std
+  has it) with `--remap-path-prefix`, in `CARGO_ENCODED_RUSTFLAGS` so a
+  path with spaces stays whole. Crate hashes still differ between
+  checkouts (cargo hashes the path), but they are only in symbol names
+  and change nothing in the image: two checkouts, at different paths
+  (one with a space) and with different temporary directories, build
+  byte-identical disks.
+- **One target directory per release.** Builds picked the newest
+  `core-*.ll` by time, so going back to a toolchain whose core was built
+  earlier took the other one's core (an undefined symbol). Each rustc
+  release and commit builds in a directory of its own now.
+
+### 2026-11-28 · DHCP, telnet and a remote shell
+
+Eelco asked for networking extras: a telnet client, a simple remote
+shell, and DHCP.
+
+- **Broadcasts in ipd, UDP only.** DHCP needs a datagram to everyone
+  out (255.255.255.255, ff:ff:ff:ff:ff:ff, no route, no ARP) and in.
+  ipd takes UDP to 255.255.255.255 as if to its own address, checking
+  the checksum over the address the packet carried (`ip_pseudoat`).
+  Nothing else to everyone is taken, and the echo service never answers
+  a broadcast, so two machines cannot echo each other forever.
+- **The client asks from the address it has**, not 0.0.0.0 as RFC 2131
+  says. Changing to 0.0.0.0 first would cut off ntpd and everything else
+  for the length of the exchange, and with no server at all (loop and
+  udp links, CI) the machine would have to put 10.0.0.2 back. Servers
+  answer to everyone either way, and detrytus' does not look at the
+  source. `dhcp -d` runs from `/etc/init`, which makes the shell pid 9.
+- **telnetd connects the shell through pipes**, not by handing it the
+  connection directly. Telnet needs CR LF going out and IAC negotiation
+  coming in, and the shell should not have to know about either. A
+  relay thread each way also lets Ctrl-C reach the remote shell's
+  program as SIGINT (to the shell's children, found with `os::processes`),
+  while a shell with no child gets the key, which drops the line.
+  The shell only touches the console's foreground when its standard
+  input is the console, so a remote session does not take local Ctrl-C.
+- **Opt-in, since there is no login yet.** `/etc/init` has `/bin/telnetd`
+  commented out, and detrytus' `--forward` only listens on the host's
+  127.0.0.1. Users and permissions will give it a login.
+
+### 2026-11-28 · A monotonic clock, and trystd's Instant
+
+trystd had `SystemTime` but no `Instant`: the kernel's only steady
+clock was the time CSR, which counts steps, and how many a second
+depends on the emulator and on whether the machine is idle. The time of
+day is real time but jumps when ntpd steps it. detrytus gained a
+monotonic clock (platform.md, The monotonic clock: seconds and
+nanoseconds since the machine started, from the host's `Instant`), and
+`monotonic()`, call 53, reads it.
+
+- **A system call, not a server**, as `clock`: two loads from the power
+  page, with nothing to keep. The kernel adds no offset: nothing may
+  step it.
+- **Nanoseconds**, as std's `Instant` counts, and Rust's `Duration`
+  holds them as they come.
+- **`thread::sleep(Duration)` waits real time** by sleeping a tick a
+  microsecond, the live console's idle pace, and again for whatever the
+  monotonic clock says is left. A kernel sleep on the monotonic clock
+  would need a timer on it; the time CSR is the only timer there is.
+  Without a live console idle ticks take no time and the loop spins,
+  which is why ntpd's poll and top's period stay in ticks: they run in
+  every test, where a real-time wait would burn the host's time.
+- **`sleep TICKS` stays**; a unit (`2s`, `250ms`, `1.5s`, `us`) asks
+  for real time. `ping` reports milliseconds, `uptime` and `top` count
+  the uptime by the monotonic clock rather than `clock()` less
+  `SI_BOOTED`, and ntpd keeps when it heard from each source as an
+  `Instant` and measures round trips by it, so a step no longer needs
+  them adjusted. NTP_STATUS still carries Unix seconds, worked out when
+  asked.
+
+### 2026-11-28 · A B-tree filesystem with metadata
 
 Eelco asked for file times, modes and owners. Porting FFS or ext4 was
 weighed against a filesystem of our own after bcachefs (whose move from

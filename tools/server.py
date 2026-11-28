@@ -29,6 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from tools import toolchain
 from tools.kernel import RUST_TARGET, BuildError, run
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -59,25 +60,22 @@ def rust_ir() -> list[Path]:
     cargo = shutil.which("cargo")
     if cargo is None:
         raise BuildError("no cargo to build the file server's Rust with")
-    target = Path(tempfile.gettempdir()) / f"trylobite-fsd-{os.getuid()}"
-    env = {
-        **os.environ,
-        "RUSTC_BOOTSTRAP": "1",
-        "RUSTFLAGS": "--emit=llvm-ir,link -Zunstable-options -Cpanic=immediate-abort",
-        "CARGO_TARGET_DIR": str(target),
-    }
+    work = Path(tempfile.gettempdir()) / f"trylobite-fsd-{os.getuid()}"
+    env, target = toolchain.cargo_env(CRATE, work)
     args = ["--release", "--target", RUST_TARGET]
     # Cleaned first, so their IR is written afresh: a build cargo thinks
     # is up to date writes none.
     for crate in CRATES[:2]:
         run([cargo, "clean", "--quiet", "-p", crate, *args], cwd=CRATE, env=env)
     run([cargo, "build", "--quiet", "-Zbuild-std=core", *args], cwd=CRATE, env=env)
-    deps = target / RUST_TARGET / "release" / "deps"
+    # Where cargo leaves the IR moved in 1.100, so look under the whole
+    # release directory.
+    release = target / RUST_TARGET / "release"
     found = []
     for crate in CRATES:
-        ir = sorted(deps.glob(f"{crate}-*.ll"), key=lambda p: p.stat().st_mtime)
+        ir = sorted(release.rglob(f"{crate}-*.ll"), key=lambda p: p.stat().st_mtime)
         if not ir:
-            raise BuildError(f"cargo left no LLVM IR for {crate} in {deps}")
+            raise BuildError(f"cargo left no LLVM IR for {crate} in {release}")
         found.append(ir[-1])
     return found
 

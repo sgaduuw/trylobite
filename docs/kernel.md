@@ -180,6 +180,7 @@ is as it was, since the trap entry saves them all. Trice relies on this
 | 50 | `sigaction(sig, action, entry)` | what signal `sig` does to the caller's process from now: `SIG_DFL` (0) its default, `SIG_IGN` (1) nothing, `SIG_CATCH` (2) run `entry`, which becomes the process's signal entry (Signals): the action it had; −10 (`E_INVAL`) no such signal or action, or any but `SIG_DFL` for `SIGKILL` |
 | 51 | `sigmask(how, set)` | changes the calling thread's set of blocked signals, a bit 2^`sig` for each: `SIG_BLOCK` (0) adds `set`, `SIG_UNBLOCK` (1) takes it away, `SIG_SETMASK` (2) makes it `set`: the set it had; −10 another `how`, or `set` outside 0 to 2^`NSIG` − 1. `SIGKILL` is never blocked, and a signal it lets in is taken before the call returns |
 | 52 | `sigreturn(frame)` | goes back from a signal's handler to where the thread was, with the registers, coprocessor bank and mask the frame at `frame` keeps; does not return, but −12 if the frame is not all in the caller's memory |
+| 53 | `monotonic()` | the machine's monotonic clock, for intervals: `a0` whole seconds since the machine started, `a1` the nanoseconds past that second, 0 to 999,999,999; real time, steady, and never stepped; it cannot fail (The time of day) |
 
 Numbers 9, 11, 12 and 14 are free: console input, blocks and
 files are not system calls but calls to the console server, the disk
@@ -221,7 +222,8 @@ interrupts taken), `SI_PAGES` and `SI_FREE` (memory, in pages),
 `SI_NPROC` and `SI_PROCS` (the process table and the slots in use,
 zombies included), `SI_HARTS` (harts present) and the kernel's version
 as a string from `SI_RELEASE`: `uname -a` says `trylobite 0.1.0
-detrytus`, `uptime` `up 1171367 ticks, 9 processes, 1 hart`, and `free`
+detrytus`, `uptime` `up 00:00:01, 1171367 ticks, 9 processes, 1 hart`
+(the time by the monotonic clock, then the ticks), and `free`
 memory in pages and in trytes. It also gives `SI_BOOTED`, the real-time
 clock at boot in Unix seconds (so uptime in seconds is `clock()` less
 it), and the load averages `SI_LOAD1`, `SI_LOAD5` and `SI_LOAD15`:
@@ -231,8 +233,10 @@ in `LOAD_ONE` (19,683) parts of one process. `pick` samples them every
 microsecond a tick. A busy hart picks every quantum, so periods that
 passed with no pick were ones every hart idled through: they count as
 no load, and only the last as what is runnable at the late pick. The `time` CSR counts one tick per step
-(detrytus platform.md, Time), so times since boot (`uptime`, `ps`,
-`top`, `sleep`) are in ticks.
+(detrytus platform.md, Time), so the times `ps` and `top` give a
+process are in ticks, as is `sleep TICKS`; `sleep 2s`, `uptime`, top's
+uptime and `ping` measure real time with the monotonic clock (The
+time of day).
 
 **Harts.** `hartinfo(hart, buffer)` fills, for one of the middle nine
 harts, `HI_TIME` (the clock as it read the rest), `HI_STARTED` (when
@@ -254,9 +258,23 @@ maps anyway, with no state to keep and nothing to wait for. trystd's
 a date; `bin/date` prints it (`date`, `date +%F_%T`, `date -d
 @SECONDS`). The clock is the host's, unless detrytus runs with
 `--clock SECONDS` (as the tests do), which starts it at a fixed time
-and moves it a microsecond a tick. Ticks stay the clock for intervals:
-how fast ticks pass in real time depends on how the machine runs, and
-the time of day is not steady either.
+and moves it a microsecond a tick.
+
+`monotonic` is the clock for intervals: the machine's monotonic clock
+(detrytus platform.md, The monotonic clock), seconds and nanoseconds
+since the machine started, read as `clock` is. Nothing sets it, so
+`stepclock` does not move it, and the host's time being set does not
+either; with `--clock` it moves a microsecond a tick too. Ticks are
+steady but not seconds: how fast they pass in real time depends on how
+the machine runs. trystd's `time::Instant` calls it (`now`, `elapsed`,
+`duration_since`, adding and taking away a `Duration`), as do
+`time::uptime()` and `thread::sleep(Duration)`, which sleeps a tick a
+microsecond and again for what is left until the monotonic clock says
+the time has passed (without a live console idle ticks take no time,
+so it spins). `ping` times replies with it, `uptime` and `top` count
+the uptime with it, `sleep 1.5s` (or `ms`, `us`) waits with it, and
+`ntpd` measures round trips and remembers when it last heard from each
+source by it, so a step does not upset either.
 
 `stepclock` moves it. The machine's clock cannot be set, so the kernel
 keeps an offset from it, which `clock` adds, and a step changes the
@@ -339,7 +357,8 @@ Tasks:  10 total,   2 running,   0 ready,   8 waiting,   0 zombie
 Mem   :  59049 pages total,  58971 free,     78 used  (19,683 trytes a page)
 ```
 
-The time of day and the uptime are the real-time clock's (`SI_BOOTED`),
+The time of day is the real-time clock's, the uptime the monotonic
+clock's,
 the load averages the kernel's, and a `%Cpu` line gives each hart's
 shares of the ticks since the last screen in user mode, in the kernel
 and idle (`hartinfo`). It is in Rust, and writes each screen by hand
@@ -723,6 +742,41 @@ before `E_TIMEDOUT`; it gives up to as many addresses as asked for, or
 takes a.b.c.d as it stands and resolves anything else, which is how
 the tools take names.
 
+A datagram sent to 255.255.255.255 goes to every host on the wire
+(Ethernet address ff:ff:ff:ff:ff:ff), with no route and no ARP, and a
+datagram to 255.255.255.255 comes to its port as if to the machine's own
+address (its checksum taken over that address); nothing else to
+everyone is taken, and the echo service answers no broadcast. That is
+what DHCP needs: **`bin/dhcp`** broadcasts a DISCOVER from port 68, takes
+the first OFFER, REQUESTs it, and gives what the ACK says to the IP
+server (`IP_CONFIG` and `IP_NAMESERVER`): the address, the prefix length
+from the mask, the first router and the first name server. It asks from
+the address the machine has, not 0.0.0.0 as RFC 2131 says, so the
+machine works on while it asks; servers answer to everyone. `dhcp -n`
+asks and prints, setting nothing; `dhcp -d`, which `/etc/init` starts,
+keeps the lease, asking again (a REQUEST for the address it has) at half
+of it, and starts over after 60 s when nobody answers; with no answer
+at all the machine keeps 10.0.0.2. detrytus's `--net user` leases
+10.0.0.15/24.
+
+**`bin/telnetd [-p PORT] [-n COUNT]`** is a remote shell: it takes TCP
+connections on port 23 and gives each a `/bin/sh` whose standard input,
+output and error are the connection, through a pipe each way, speaking
+the Telnet protocol (RFC 854). It says it will ECHO and
+SUPPRESS-GO-AHEAD, so a client sends each key as typed and the shell's
+own echo and line editing work as at the console; CR LF and CR NUL
+from the client become CR, the shell's newlines go out as CR LF, and
+Ctrl-C (or Interrupt Process) is `SIGINT` to what the shell runs, or
+the key that drops the line at the prompt. A shell whose standard input
+is not the console leaves the console's foreground alone. There are no
+users or passwords, so nothing starts it unasked: `/etc/init` has a
+line for it to uncomment. On `--net user` only the host reaches it,
+through detrytus' `--forward 2323:23` (`telnet localhost 2323`).
+**`bin/telnet HOST [PORT]`** is the client: in character mode with a
+server that echoes (telnetd), where Ctrl-C goes to the server too, and
+otherwise in line mode, editing a line on the console and sending it at
+Enter, so it talks to any TCP service; Ctrl-] ends it.
+
 `bin/ping HOST [COUNT]`, `bin/ifconfig [ADDRESS/PREFIX [GATEWAY]]`
 (`ifconfig nameserver ADDRESS` sets the name server), `bin/host NAME
 [SERVER]` and `bin/nc` are its tools in the shell; a HOST is an address
@@ -742,8 +796,9 @@ another address with `ifconfig`, and run both with `--live` so that
 their clocks keep to real time. `--net user` reaches the host's
 network through a gateway detrytus plays at 10.0.0.1, the default
 gateway, which translates to the host's sockets and stands for the
-host itself, and answers names at 10.0.0.3 from the host's resolver
-(detrytus `docs/platform.md`). The tests start the servers with
+host itself, answers names at 10.0.0.3 from the host's resolver,
+leases addresses by DHCP, and forwards host ports into the machine
+with `--forward` (detrytus `docs/platform.md`). The tests start the servers with
 `run(..., net=True, link="loop")`, or `ip=True` for both.
 
 ## Files
@@ -802,13 +857,16 @@ cannot follow (`init: /etc/init: no server named www`, `init: cannot
 start /bin/nothing`). Without `/etc/init`, or without a file server to
 read it, init starts every server and no program, so a disk with no
 `/etc` starts the same servers as the `etc/init` that `make` puts on
-`disk.img`, which also starts `bin/ntpd`:
+`disk.img`, which also starts `bin/dhcp -d` and `bin/ntpd`, and has
+the remote shell `bin/telnetd` commented out:
 
 ```text
 pipe
 net
 ip
+/bin/dhcp -d
 /bin/ntpd
+# /bin/telnetd
 ```
 
 Then:

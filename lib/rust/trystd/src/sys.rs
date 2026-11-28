@@ -213,6 +213,7 @@ impl Server {
 pub static CONSOLE: Server = Server::new(b"console\0", CONSOLE_PROTOCOL);
 pub static FS: Server = Server::new(b"fs\0", FS_PROTOCOL);
 pub static IP: Server = Server::new(b"ip\0", IP_PROTOCOL);
+pub static NET: Server = Server::new(b"net\0", NET_PROTOCOL);
 pub static PIPE: Server = Server::new(b"pipe\0", PIPE_PROTOCOL);
 
 /// A path as the file server takes it: its bytes, then 0, in a buffer

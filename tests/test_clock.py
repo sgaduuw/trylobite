@@ -1,6 +1,7 @@
 """Wall-clock time: SYS_CLOCK reads the machine's real-time clock, trystd's
 time module turns it into SystemTime and a calendar, and bin/date prints
-it. detrytus --clock fixes the clock so that runs repeat exactly."""
+it. SYS_MONOTONIC reads the monotonic clock, for trystd's Instant.
+detrytus --clock fixes both so that runs repeat exactly."""
 
 import re
 import time
@@ -22,6 +23,22 @@ CLOCK_STEPS = (
     "        mv    a0, s0",
 )
 CLOCK = report(*CLOCK_STEPS)
+
+
+# monotonic() twice, then the time CSR: seconds and nanoseconds each.
+MONOTONIC = report(
+    """
+        li    a0, SYS_MONOTONIC
+        sys
+        mv    s0, a1""",
+    "        mv    a0, s0",
+    """
+        li    a0, SYS_MONOTONIC
+        sys
+        mv    s0, a1""",
+    "        mv    a0, s0",
+    "        csrr  a0, time",
+)
 
 
 @pytest.fixture(scope="module")
@@ -50,6 +67,22 @@ def test_without_a_fixed_clock_it_is_the_hosts():
     before = int(time.time())
     seconds, _ = said(run(CLOCK))
     assert before <= seconds <= time.time()
+
+
+def test_the_monotonic_clock_counts_from_the_start_and_never_back():
+    s1, n1, s2, n2, ticks = said(run(MONOTONIC, clock=NOW))
+    assert 0 <= n1 < 1_000_000_000 and 0 <= n2 < 1_000_000_000
+    # With a fixed clock it is the ticks, a microsecond each: not the
+    # time of day.
+    first, second = s1 * 10**9 + n1, s2 * 10**9 + n2
+    assert 0 < first < second <= ticks * 1000
+
+
+def test_without_a_fixed_clock_the_monotonic_clock_is_real_time():
+    started = time.monotonic()
+    s1, n1, s2, n2, _ = said(run(MONOTONIC))
+    assert (s1, n1) <= (s2, n2)
+    assert s2 <= time.monotonic() - started + 1
 
 
 # The clock moves a microsecond a tick, and booting the shell from the disk

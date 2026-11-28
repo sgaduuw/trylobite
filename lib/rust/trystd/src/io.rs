@@ -570,6 +570,12 @@ pub fn terminal_size() -> Option<(usize, usize)> {
     terminal_size_of(1)
 }
 
+/// Whether descriptor `fd` is the console, as Unix's isatty: only the
+/// console answers IO_WINSIZE.
+pub fn is_terminal(fd: i32) -> bool {
+    sys::call(sys::SYS_IOCALL, &[fd, sys::IO_WINSIZE, 0, 0]) >= 0
+}
+
 /// The same for descriptor `fd` (IO_WINSIZE).
 pub fn terminal_size_of(fd: i32) -> Option<(usize, usize)> {
     if sys::call(sys::SYS_IOCALL, &[fd, sys::IO_WINSIZE, 0, 0]) < 0 {
@@ -883,6 +889,22 @@ impl Line {
         }
         let k = k.min(digits.len().saturating_sub(width));
         self.bytes(&digits[k..])
+    }
+
+    /// `d` in milliseconds, to the microsecond: 12.345. Done in u32s
+    /// below about 71 minutes, as `num_right` divides.
+    pub fn millis(&mut self, d: crate::time::Duration) -> &mut Line {
+        let secs = d.as_secs();
+        let micros = d.subsec_nanos() / 1000;
+        if secs < 4000 {
+            let us = secs as u32 * 1_000_000 + micros;
+            self.num((us / 1000) as i64).byte(b'.');
+            let frac = us % 1000;
+            self.byte(b'0' + (frac / 100) as u8).byte(b'0' + (frac / 10 % 10) as u8);
+            self.byte(b'0' + (frac % 10) as u8)
+        } else {
+            self.num((secs * 1000 + (micros / 1000) as u64) as i64)
+        }
     }
 
     /// What `e` says went wrong.

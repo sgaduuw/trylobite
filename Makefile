@@ -29,8 +29,8 @@
 # network (user, loop, udp:LOCAL,PEER, or empty for none). RAM_PAGES
 # gives make run that many pages of RAM instead of detrytus' default
 # (59,049). Building the
-# Rust programs needs a Rust toolchain with rust-src and the
-# riscv32imac-unknown-none-elf target (docs/rust.md), and so does the
+# Rust programs needs rustup, which installs the Rust that
+# rust-toolchain.toml pins (tools/toolchain.py), and so does the
 # kernel: build kernel/trykern.s and user/fsd-rust.s before assembling
 # shell.s or demo.s. tools/fs.py builds tools/rust/tryfs, the host's disk
 # tool, with cargo.

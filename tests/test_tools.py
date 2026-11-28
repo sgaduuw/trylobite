@@ -14,8 +14,10 @@ def shell():
     return assemble_file(ROOT / "shell.s")
 
 
-def session(shell, typed: str, on=None, max_steps: int = 25_000_000):
-    result = run_image(shell, input=typed, disk=on or bin_disk(), max_steps=max_steps)
+def session(shell, typed: str, on=None, max_steps: int = 25_000_000, clock=None):
+    result = run_image(
+        shell, input=typed, disk=on or bin_disk(), max_steps=max_steps, clock=clock
+    )
     assert result.exit_code == 0, result.console
     return result
 
@@ -43,13 +45,13 @@ def test_uname_names_the_system_and_its_version(shell):
     )
 
 
-def test_uptime_says_ticks_processes_and_harts(shell):
+def test_uptime_says_time_ticks_processes_and_harts(shell):
     from tests import kernel
 
     out = said(shell, "uptime\n")
     harts = "1 hart" if kernel.HARTS == 1 else f"{kernel.HARTS} harts"
     assert re.fullmatch(
-        rf"\$ uptime\nup \d+ ticks, 9 processes, {harts}\n\$ \n", out
+        rf"\$ uptime\nup 00:00:\d\d, \d+ ticks, 9 processes, {harts}\n\$ \n", out
     ), out
 
 
@@ -98,9 +100,29 @@ def test_kill_ends_a_server_and_init_starts_it_again(shell):
 
 def test_sleep_waits_its_ticks(shell):
     out = said(shell, "uptime\nsleep 3000000\nuptime\nsleep\n")
-    ups = [int(n) for n in re.findall(r"up (\d+) ticks", out)]
+    ups = [int(n) for n in re.findall(r"(\d+) ticks", out)]
     assert ups[1] - ups[0] >= 3_000_000
-    assert out.endswith("$ sleep\nusage: sleep TICKS\nsh: exit 2\n$ \n")
+    assert out.endswith(
+        "$ sleep\nusage: sleep TICKS | sleep NUMBER{s|ms|us}\nsh: exit 2\n$ \n"
+    )
+
+
+def test_sleep_waits_real_time(shell):
+    # With a fixed clock the monotonic clock moves a microsecond a tick,
+    # so real time shows in ticks.
+    # so 1.5 s takes as long as 1,500,000 ticks, starting sleep and
+    # uptime included.
+    typed = (
+        "uptime\nsleep 1500000\nuptime\nsleep 1.5s\nuptime\n"
+        "sleep 1500ms\nuptime\nsleep 2x\nsleep .5s\n"
+    )
+    out = said(shell, typed, clock=1795829400, max_steps=30_000_000)
+    ups = [int(n) for n in re.findall(r"(\d+) ticks", out)]
+    ticks, seconds, millis = (ups[k + 1] - ups[k] for k in range(3))
+    assert seconds >= 1_500_000 and millis >= 1_500_000
+    assert abs(seconds - ticks) < 100_000 and abs(millis - ticks) < 100_000
+    usage = "usage: sleep TICKS | sleep NUMBER{s|ms|us}\nsh: exit 2\n"
+    assert out.endswith(f"$ sleep 2x\n{usage}$ sleep .5s\n{usage}$ \n"), out
 
 
 def test_top_shows_a_screen_each_period(shell):
