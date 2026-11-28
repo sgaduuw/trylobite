@@ -585,13 +585,6 @@ pub fn terminal_size_of(fd: i32) -> Option<(usize, usize)> {
     (rows > 0 && columns > 0).then_some((columns as usize, rows as usize))
 }
 
-/// Whether descriptor `fd` is the console, as std's `IsTerminal`: only
-/// the console answers IO_WINSIZE, even when it does not know its size.
-/// A pager asks it of standard input, to find where its keys come from.
-pub fn is_terminal(fd: i32) -> bool {
-    sys::call(sys::SYS_IOCALL, &[fd, sys::IO_WINSIZE, 0, 0]) >= 0
-}
-
 // --- standard input, output and error -------------------------------------------
 
 /// The buffers behind standard input and output: one each per program,

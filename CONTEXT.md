@@ -2559,8 +2559,8 @@ paths: six pages while it runs.
 
 - **less takes its keys from the console, not standard input,** when
   standard input is the text (`ps | less`), as Unix's opens /dev/tty: a
-  descriptor of its own from `console::open` (`CN_OPEN`). To tell, trystd
-  gained `io::is_terminal(fd)`, which asks IO_WINSIZE: only the console
+  descriptor of its own from `console::open` (`CN_OPEN`). To tell, it asks
+  `io::is_terminal(fd)`, which asks IO_WINSIZE: only the console
   answers it, even when it does not know its size, while the file and
   pipe servers say `E_INVAL`. It reads its whole input first, then draws
   each screen as vi does (alternate screen, a buffer written at once),
