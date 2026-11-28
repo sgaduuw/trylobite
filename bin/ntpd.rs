@@ -4,7 +4,9 @@
 //! at once, then asks again every POLL ticks (about 17 minutes on a live
 //! machine), stepping the clock by what it finds. It tells the console
 //! when it first sets the clock and when it has to step it by more than
-//! STEP_LOUD; failures it reports once, until an answer comes again.
+//! STEP_LOUD. A failure it reports once it has failed QUIET times in a
+//! row (a few minutes), and not again until an answer comes: a machine
+//! run without a network should not have it in the middle of a session.
 //!
 //! -q sets the clock once and exits, as ntpd -q does. -n asks once and
 //! prints how far off the clock is, setting nothing; any program may do
@@ -28,6 +30,7 @@ const POLL: u32 = 1_024_000_000; // ticks between questions: 1,024 s at a millio
 const RETRY: u32 = 64_000_000; // and after a failure, 64 s
 const WAIT: u32 = 1_000_000; // ticks to wait for each answer,
 const TRIES: usize = 3; // and how many times to ask
+const QUIET: u32 = 3; // failures in a row before one is reported
 const STEP_LOUD: i64 = 128_000; // µs: a step this large is worth a line on the console
 
 /// Seconds from 1900-01-01, where NTP counts from, to 1970-01-01.
@@ -98,26 +101,26 @@ fn source(server: &str, ip: Ipv4Addr) -> String {
 /// set, which asking again will not change.
 fn daemon(server: &str) -> Result<i32, Message> {
     let mut synced = false;
-    let mut failing = false;
+    let mut failures = 0;
     loop {
         let wait = match ask(server) {
             Ok(s) if !synced || s.offset.abs() >= STEP_LOUD => {
                 step(server, &s)?;
                 synced = true;
-                failing = false;
+                failures = 0;
                 POLL
             }
             Ok(s) => {
                 clock::step_clock(s.offset)
                     .map_err(|e| Message::new(format!("setting the clock: {e}")))?;
-                failing = false;
+                failures = 0;
                 POLL
             }
             Err(e) => {
-                if !failing {
+                failures += 1;
+                if failures == QUIET {
                     eprintln!("ntpd: {e}");
                 }
-                failing = true;
                 RETRY
             }
         };

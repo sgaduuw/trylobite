@@ -2161,10 +2161,11 @@ micros)`, and `bin/ntpd`, a Rust SNTP client, uses it.
   of death) and the server is synchronised, step by ((t2 − t1) +
   (t3 − t4)) / 2, and ask again every 1,024 s. Rejected for now: full
   NTP's filtering and several servers.
-- **Not started by default.** At 81 pages, ntpd's 6 left too little for
-  a three-program pipe in the README's session, and without a network
-  it only reports failures; the line is in `etc/init`, commented out,
-  for a machine with the network and room (`make run`).
+- **Started by default**, from the repository's `etc/init`, now that
+  machines have 59,049 pages (at 81, its 6 pages left too little for a
+  three-program pipe). Without a network it only fails, so it reports a
+  failure once three have come in a row, not in the middle of a
+  session at boot.
 - **Tests need no internet.** `tests/ntpsd.rs` answers on the
   machine's own address over a loop link with the machine's clock plus
   a fixed offset, and `--clock` fixes that clock.

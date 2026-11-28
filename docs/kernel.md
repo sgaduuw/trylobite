@@ -233,11 +233,12 @@ it. Only init's children may step it, the servers and the programs
 `/etc/init` names, which the person who wrote that file chose: what
 the shell runs may not (`E_PERM`), as on Unix only root may. `bin/ntpd`
 keeps the clock right over the network (SNTP, RFC 4330): started from
-`/etc/init` (the line is in the repository's, commented out), it asks
+`/etc/init` (the repository's starts it), it asks
 `pool.ntp.org`, or the server it is given, steps the clock by the
 offset it finds, says so on the console the first time and for a step
 of 128 ms or more, and asks again every 1,024,000,000 ticks (about 17
-minutes on a live machine; 64,000,000 after a failure). `ntpd -q SERVER`
+minutes on a live machine; 64,000,000 after a failure, which it reports
+once three have come in a row). `ntpd -q SERVER`
 steps the clock once and exits, and `ntpd -n SERVER`, which anyone may
 run, only prints the offset, the round trip and the server's stratum.
 It steps rather than slews: the clock jumps, and may go back. Files
@@ -576,12 +577,14 @@ Init reads at most 729 characters of it (`INIT_TAB`) and keeps at most
 cannot follow (`init: /etc/init: no server named www`, `init: cannot
 start /bin/nothing`). Without `/etc/init`, or without a file server to
 read it, init starts every server and no program, so a disk with no
-`/etc` boots as one with the `etc/init` that `make` puts on `disk.img`:
+`/etc` starts the same servers as the `etc/init` that `make` puts on
+`disk.img`, which also starts `bin/ntpd`:
 
 ```text
 pipe
 net
 ip
+/bin/ntpd
 ```
 
 Then:

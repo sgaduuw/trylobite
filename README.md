@@ -148,25 +148,27 @@ init: started fs, process 3
 init: started pipe, process 4
 init: started net, process 5
 init: started ip, process 6
+init: started /bin/ntpd, process 7
 init: starting sh
 $ ls
-34 notes.txt
 bin/
+etc/
+34 notes.txt
 $ cat notes.txt
 Ternary computers count in trits.
 $ fail
-trylobite: process 8 exited with code 3
+trylobite: process 9 exited with code 3
 sh: exit 3
 $ echo "one   arg" two
 one   arg two
-trylobite: process 9 exited with code 0
-$ hello | upper | wc
 trylobite: process 10 exited with code 0
+$ hello | upper | wc
 trylobite: process 11 exited with code 0
-1 5 38
 trylobite: process 12 exited with code 0
-$ cat notes.txt | upper > shout
+1 5 38
 trylobite: process 13 exited with code 0
+$ cat notes.txt | upper > shout
+trylobite: process 14 exited with code 0
 $ cat shout
 TERNARY COMPUTERS COUNT IN TRITS.
 $ mkdir docs
@@ -174,9 +176,10 @@ $ cd docs
 $ pwd
 /docs
 $ exit
-trylobite: process 7 exited with code 0
+trylobite: process 8 exited with code 0
+trylobite: process 7 killed
 trylobite: process 0 exited with code 0
-trylobite: all processes exited after 139 timer interrupts
+trylobite: all processes exited after 206 timer interrupts
 ```
 
 The lines starting `trylobite:` are the kernel's log. It opens with
@@ -221,18 +224,21 @@ init: started fs, process 3
 init: started pipe, process 4
 init: started net, process 5
 init: started ip, process 6
+init: started /bin/ntpd, process 7
 init: starting sh
 $ ls
-34 notes.txt
 bin/
+etc/
+34 notes.txt
 $ echo typed live
 typed live
-trylobite: process 8 exited with code 0
+trylobite: process 9 exited with code 0
 $ spin
-trylobite: process 9 killed
+trylobite: process 10 killed
 sh: killed
 $ exit
-trylobite: process 7 exited with code 0
+trylobite: process 8 exited with code 0
+trylobite: process 7 killed
 trylobite: process 0 exited with code 0
 trylobite: all processes exited after 4020 timer interrupts
 ```

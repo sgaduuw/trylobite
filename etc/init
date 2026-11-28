@@ -11,10 +11,8 @@ pipe
 net
 ip
 
-# The time of day from pool.ntp.org, kept right (bin/ntpd); it needs
-# the network (make run) and 6 pages, which a machine of 81 lacks for
-# a pipe of three programs beside it:
-# /bin/ntpd
+# The time of day from pool.ntp.org, kept right (bin/ntpd):
+/bin/ntpd
 
 # A web server for the whole disk, on port 80:
 # /bin/httpd
