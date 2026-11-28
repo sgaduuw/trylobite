@@ -1,7 +1,8 @@
 //! Sockets, from the IP server (docs/kernel.md, Packets), as std::net
 //! has them, for IPv4: `TcpStream`, `TcpListener`, `UdpSocket`, and a
 //! stub resolver, `lookup_host`, which asks the IP server's name server
-//! over UDP as lib/dns.tc does.
+//! over UDP, and the IP server's own calls: its setup (`config`,
+//! `set_config`, `set_nameserver`) and `ping`.
 //!
 //! The IP server gives each process one UDP port and one TCP port to
 //! listen on, so a second `UdpSocket` (or a lookup, which needs a UDP
@@ -383,8 +384,44 @@ impl UdpSocket {
 
 /// The machine's own address (IP_ADDRESS).
 pub fn local_address() -> io::Result<Ipv4Addr> {
+    Ok(config()?.address)
+}
+
+/// How the IP server is set up: what `ifconfig` says and sets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IpConfig {
+    /// The machine's address,
+    pub address: Ipv4Addr,
+    /// the length of its network's prefix, 0 to 32,
+    pub prefix: u8,
+    /// and where packets for other networks go, if anywhere.
+    pub gateway: Option<Ipv4Addr>,
+}
+
+/// The IP server's address, prefix length and gateway (IP_ADDRESS).
+pub fn config() -> io::Result<IpConfig> {
     IP.call(sys::IP_ADDRESS, &[])?;
-    Ok(Ipv4Addr(sys::more(0) as u32))
+    let gateway = Ipv4Addr(sys::more(2) as u32);
+    Ok(IpConfig {
+        address: Ipv4Addr(sys::more(0) as u32),
+        prefix: sys::more(1) as u8,
+        gateway: (!gateway.is_unspecified()).then_some(gateway),
+    })
+}
+
+/// Give the IP server a new address, prefix length and gateway
+/// (IP_CONFIG): InvalidInput for one it refuses.
+pub fn set_config(config: IpConfig) -> io::Result<()> {
+    let gateway = config.gateway.unwrap_or(Ipv4Addr::UNSPECIFIED);
+    let args = [config.address.0, config.prefix as u32, gateway.0];
+    IP.callu(sys::IP_CONFIG, &args).map(|_| ())
+}
+
+/// Send an ICMP echo request numbered `seq` to `to` and wait up to
+/// `wait` ticks for its reply (IP_PING): the ticks it took. TimedOut
+/// when none came, ResourceBusy while another ping is under way.
+pub fn ping(to: Ipv4Addr, seq: u16, wait: u32) -> io::Result<u32> {
+    IP.callu(sys::IP_PING, &[to.0, seq as u32, wait]).map(|t| t as u32)
 }
 
 // --- names ----------------------------------------------------------------------
@@ -425,6 +462,19 @@ pub fn nameserver() -> io::Result<Option<Ipv4Addr>> {
     Ok((r != 0).then_some(Ipv4Addr(r as u32)))
 }
 
+/// Make `server` the name server resolvers ask, or have none
+/// (IP_NAMESERVER).
+pub fn set_nameserver(server: Option<Ipv4Addr>) -> io::Result<()> {
+    let pid = IP.pid()?;
+    let to = server.unwrap_or(Ipv4Addr::UNSPECIFIED).0;
+    let r = sys::callu(sys::SYS_CALL, &[pid as u32, sys::IP_NAMESERVER as u32, to]);
+    // What comes back is the old address, which may look negative.
+    if (sys::E_RESET..0).contains(&r) {
+        return Err(io::Error::from_raw(r));
+    }
+    Ok(())
+}
+
 /// The IPv4 addresses of `name`, from the IP server's name server: at
 /// least one. NotFound if it has none.
 pub fn lookup_host(name: &str) -> io::Result<Vec<Ipv4Addr>> {
@@ -439,7 +489,12 @@ pub fn lookup_host_at(name: &str, server: Ipv4Addr) -> io::Result<Vec<Ipv4Addr>>
     socket.set_read_timeout_ticks(Some(DNS_WAIT))?;
     let mut got = [0u8; DNS_MAX];
     for _ in 0..DNS_TRIES {
-        socket.send_to(&query, (server, DNS_PORT))?;
+        match socket.send_to(&query, (server, DNS_PORT)) {
+            // No ARP answer for the server: it is not there to answer.
+            Err(e) if e.kind() == ErrorKind::TimedOut => return Err(NO_ANSWER),
+            Err(e) => return Err(e),
+            Ok(_) => {}
+        }
         loop {
             match socket.recv_from(&mut got) {
                 Ok((n, from)) if from == SocketAddrV4::new(server, DNS_PORT) => {

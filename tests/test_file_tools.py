@@ -35,7 +35,7 @@ def test_touch_makes_empty_files_and_leaves_others_alone(shell):
         "$ touch\nusage: touch FILE...\nsh: exit 1\n$ \n"
     )
     assert said(shell, "touch no/a bin\n", on) == (
-        "$ touch no/a bin\ntouch: no/a: cannot make\nsh: exit 1\n$ \n"
+        "$ touch no/a bin\ntouch: no/a: no such file or directory\nsh: exit 1\n$ \n"
     )
     Filesystem.load(on[0])  # whole
 
@@ -63,7 +63,8 @@ def _size(name: str) -> int:
 def test_head_heads_each_file_by_name_when_there_are_several(shell):
     assert said(shell, "head -n 1 notes nope notes\n") == (
         "$ head -n 1 notes nope notes\n==> notes <==\none apple\n"
-        "head: nope: cannot open\n\n==> notes <==\none apple\nsh: exit 1\n$ \n"
+        "head: nope: no such file or directory\n"
+        "\n==> notes <==\none apple\nsh: exit 1\n$ \n"
     )
     assert said(shell, "head -n x notes\nhead -c 1\n") == (
         "$ head -n x notes\nusage: head [-n N] [FILE]...\nsh: exit 1\n"
@@ -89,7 +90,8 @@ def test_grep_names_the_file_of_each_line_when_there_are_several(shell):
     on = bin_disk(notes=NOTES, more="pie crust\nno newline at the end pie")
     assert said(shell, "grep pie notes more nope\n", on) == (
         "$ grep pie notes more nope\nnotes:three apple pie\nmore:pie crust\n"
-        "more:no newline at the end pie\ngrep: nope: cannot open\nsh: exit 2\n$ \n"
+        "more:no newline at the end pie\n"
+        "grep: nope: no such file or directory\nsh: exit 2\n$ \n"
     )
     assert said(shell, "grep\ngrep -x a\n", on) == (
         "$ grep\nusage: grep [-v] TEXT [FILE]...\nsh: exit 2\n"
@@ -122,7 +124,7 @@ def test_what_cp_cannot_do_it_says(shell):
     typed = "cp notes\ncp nope x\ncp bin x\ncp notes /notes\ncp notes other x\n"
     assert said(shell, typed, on) == (
         "$ cp notes\nusage: cp FROM TO, or cp FROM... DIR\nsh: exit 1\n"
-        "$ cp nope x\ncp: nope: cannot open\nsh: exit 1\n"
+        "$ cp nope x\ncp: nope: no such file or directory\nsh: exit 1\n"
         "$ cp bin x\ncp: bin: is a directory\nsh: exit 1\n"
         "$ cp notes /notes\ncp: notes: is the same file\nsh: exit 1\n"
         "$ cp notes other x\ncp: x: not a directory\nsh: exit 1\n$ \n"
