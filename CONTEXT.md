@@ -2276,3 +2276,44 @@ that redoes when pressed again, counts, `:w [FILE]`, `:q`, `:q!`,
   once, numbers formatted by hand, not with core::fmt (top's lesson).
 - **Later:** search (`/`), `cw`/`dw` and other operator-motion pairs,
   multi-level undo, asking the terminal its size in a live session.
+
+## Signals (2026-11-28)
+
+Signals came before environment variables and shell scripts, at Eelco's
+asking, POSIX-shaped but small (docs/kernel.md, Signals). The choices:
+
+- **The kernel keeps one entry point, not a handler per signal.** A
+  process tells the kernel which signals it catches and where caught
+  signals start; trystd keeps the table of handlers and calls the right
+  one. That is three sets and a word per process rather than thirty
+  words, and the trampoline is the entry itself, which ends with
+  `sigreturn`. Delivery costs `resume` one load and a branch
+  (`PCB_SIGNOTE`); everything else is off the hot path.
+- **A signal goes to the process, a mask to each thread**, as POSIX has
+  it: pending signals live in the process's record, each thread's mask
+  in its own, and the first thread that lets a signal in takes it.
+  There is no signal to one thread alone (no `pthread_kill`).
+- **An interrupted call returns E_INTR, and trystd calls it again.**
+  Restarting in the kernel was tried on paper: running a woken call
+  again from its saved registers fails for `sleep`, which writes its
+  result before it sleeps, and for descriptor calls, which rewrite their
+  registers into a `SYS_CALL` that a user may not make. A cut-short call
+  had not happened yet, so the library's system-call entry repeating it
+  is always right, and gives `SA_RESTART` for every handler. A call a
+  server has received (`ST_REPLY`) is not cut short: the server may be
+  working on it, and a stale reply could land on the next call. The
+  console server ends its own held reads with `E_INTR` at Ctrl-C.
+- **kill gained the signal as a third argument** rather than a new call:
+  "kill sends signals" is the POSIX shape, and the existing callers were
+  few (init, the console server, bin/kill, tests). It answers
+  `KILL_CAUGHT` for a process that lives on, which the console server
+  needs: one that catches `SIGINT` keeps the console, where one that
+  ended gives it back.
+- **SIGPIPE is the pipe server's to send**, with the `E_PIPE` reply. The
+  shell catches it with an empty handler, since its built-ins write into
+  pipelines and a dead shell is worse than a failed write; catching, not
+  ignoring, so children start with the default.
+- **WAIT_KILLED carries the signal in a1** (was 0), as `WTERMSIG` does.
+- **No SIGSTOP/SIGCONT and no signals for faults.** Job control waits for
+  a shell that needs it, and a fault still ends the process as
+  `WAIT_FAULTED`.

@@ -14,7 +14,9 @@
 # then gives what there is, up to n; once every write end has closed it
 # gives 0, the end. A write waits until all n trytes have gone into the
 # buffer, so a writer never sees a partial count, and fails with E_PIPE
-# once every read end has closed: nobody would read it. The kernel says
+# once every read end has closed: nobody would read it. The writer is sent
+# SIGPIPE then too, as Unix sends it, which ends it unless it ignores or
+# catches the signal. The kernel says
 # when the last descriptor for an end goes (NOTE_CLOSED); a pipe whose
 # two ends are gone is free again.
 #
@@ -271,6 +273,11 @@ pp_serve:
         add   t0, t0, s2
         lw    t0, 0(t0)
         beqz  t0, 6f
+        li    a0, SYS_KILL             # and SIGPIPE, which ends it unless
+        mv    a1, s6                   # it ignores or catches it
+        li    a2, KILL_ANY
+        li    a3, SIGPIPE
+        sys
         li    a2, E_PIPE
         j     7f
 6:      li    t0, PP_SIZE              # or room for some of the rest

@@ -235,6 +235,15 @@ pipe.
   server that ends. A descriptor marked `FD_NOINHERIT` (`SYS_FDFLAGS`)
   is not copied to children: the shell marks the pipe ends it keeps, or
   a pipe's reader would never see the end.
+- **Signals go to a process, masks belong to threads**
+  (`kernel/rust/trykern/src/signal.rs`, docs/kernel.md, Signals).
+  `kill(pid, for, sig)` takes the signal in `a3` and `alarm(until, how)`
+  its kind in `a2`: a new caller sets both. A process that catches a
+  signal gets `E_INTR` from a call the signal cut short, and must call
+  again: trystd's `sys` does, so Rust never sees it; an assembly program
+  that catches must loop itself. A handler (trystd's or not) runs
+  between two instructions of the interrupted code: it sets an atomic
+  or ends the process, never takes a lock.
 - **Pipes are the pipe server's**, `user/piped.s` (labels `pp_`; tests
   pass `pipes=True` and write `CALL_PIPE`).
 - **A server asleep in `receive` runs it again when woken**

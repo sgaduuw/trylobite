@@ -1194,6 +1194,7 @@ ip_rearm:
         addi  t1, t1, -1
         bnez  t1, 7b
         li    a0, SYS_ALARM
+        li    a2, ALARM_NOTICE
         sys
         ret
 

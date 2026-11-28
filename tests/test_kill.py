@@ -18,6 +18,7 @@ from tests.test_wait import spawn_and_wait, spin
 E_NOCHILD = -2  # include/layout.s
 E_PERM = -21
 WAIT_KILLED = 2
+SIGINT, SIGKILL = 2, 9
 CTRL_C = "\x03"
 
 FOREVER = "1: j 1b"  # never makes a system call: only the timer stops it
@@ -34,7 +35,7 @@ READER = f"""
 
 def kill(register: str) -> str:
     return (
-        f"li a0, SYS_KILL\n        mv a1, {register}\n"
+        f"li a0, SYS_KILL\n        li a3, SIGKILL\n        mv a1, {register}\n"
         "        li a2, FOR_SELF\n        sys"
     )
 
@@ -47,7 +48,7 @@ def test_kill_ends_a_child_that_never_makes_a_system_call():
     )
     assert result.exit_code == 0, result.console
     assert "process 1 killed" in result.console
-    assert result.code_of(0) == 1000 * WAIT_KILLED + 0
+    assert result.code_of(0) == 1000 * WAIT_KILLED + SIGKILL
 
 
 def test_kill_ends_a_child_blocked_in_recv():
@@ -55,12 +56,13 @@ def test_kill_ends_a_child_blocked_in_recv():
     blocked = f"li a0, SYS_RECV\n        sys\n        {exit_with('a0')}"
     result = run(spawn_and_wait(before_wait=kill("s1")), blocked)
     assert result.exit_code == 0, result.console  # no deadlock
-    assert result.code_of(0) == 1000 * WAIT_KILLED
+    assert result.code_of(0) == 1000 * WAIT_KILLED + SIGKILL
 
 
 def test_kill_refuses_a_process_that_is_not_a_child():
     init = f"""
         li    a0, SYS_KILL
+        li    a3, SIGKILL
         li    a1, 0                    # itself
         li    a2, FOR_SELF
         sys
@@ -95,6 +97,7 @@ def test_only_a_driver_kills_on_another_process_behalf():
         sys
         mv    a1, a0
         li    a0, SYS_KILL
+        li    a3, SIGKILL
         li    a2, 0                    # for init
         sys
         {exit_with("a0")}
@@ -127,14 +130,14 @@ def foreground_and_wait() -> str:
 def test_ctrl_c_kills_the_foreground_process():
     result = run(foreground_and_wait(), FOREVER, input=CTRL_C, console=True)
     assert result.exit_code == 0, result.console
-    assert result.code_of(0) == 1000 * WAIT_KILLED
+    assert result.code_of(0) == 1000 * WAIT_KILLED + SIGINT
 
 
 def test_ctrl_c_kills_a_foreground_process_reading_the_console():
     # It would read "ab" and then exit with 5 at the end of input; Ctrl-C
     # ends it first, and takes the code points typed before it along.
     result = run(foreground_and_wait(), READER, input="ab" + CTRL_C, console=True)
-    assert result.code_of(0) == 1000 * WAIT_KILLED
+    assert result.code_of(0) == 1000 * WAIT_KILLED + SIGINT
 
 
 def test_without_a_foreground_ctrl_c_is_an_ordinary_code_point():

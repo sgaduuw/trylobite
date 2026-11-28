@@ -191,6 +191,7 @@ def test_a_client_killed_with_its_block_in_flight_leaves_the_server_usable():
         li    t1, ST_REPLY
         bne   t0, t1, 1b
         li    a0, SYS_KILL
+        li    a3, SIGKILL
         mv    a1, s1
         li    a2, FOR_SELF
         sys
@@ -253,7 +254,8 @@ def test_a_device_has_one_driver_until_it_ends():
         "li a0, SYS_LOOKUP\n        la a1, name\n        li a2, LOOKUP_WAIT\n"
         "        sys\n        mv s1, a0",
         drive(),
-        "li a0, SYS_KILL\n        mv a1, s1\n        li a2, FOR_SELF\n        sys",
+        "li a0, SYS_KILL\n        li a3, SIGKILL\n        mv a1, s1\n"
+        "        li a2, FOR_SELF\n        sys",
         wait_for("s1") + "\n        mv    a0, a1",
         drive(),
         data='name: .string "disk"\n',
@@ -262,7 +264,7 @@ def test_a_device_has_one_driver_until_it_ends():
         1,
         L["E_BUSY"],
         0,
-        0,
+        L["SIGKILL"],  # what ended it, as wait says
         0,
     ]
 

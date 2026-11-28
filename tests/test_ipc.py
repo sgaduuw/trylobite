@@ -353,6 +353,7 @@ def test_a_killed_caller_cannot_be_replied_to():
         li    a0, SYS_RECV
         sys
         li    a0, SYS_KILL
+        li    a3, SIGKILL
         mv    a1, s2
         li    a2, FOR_SELF
         sys
@@ -484,6 +485,7 @@ def test_notify_gives_one_notice_however_often_it_came():
         csrr  a1, time
         addi  a1, a1, 100
         li    a0, SYS_ALARM
+        li    a2, ALARM_NOTICE
         sys
         add   s1, s1, a0
         li    a0, SYS_RECEIVE
@@ -532,11 +534,13 @@ def test_an_alarm_wakes_receive_once_its_time_has_come():
         li    t0, 1000
         add   a1, s0, t0
         li    a0, SYS_ALARM            # replaced below
+        li    a2, ALARM_NOTICE
         sys
         li    t0, 50000
         add   s0, s0, t0               # s0: when it rings
         mv    a1, s0
         li    a0, SYS_ALARM
+        li    a2, ALARM_NOTICE
         sys
         li    a0, SYS_RECEIVE
         sys
@@ -551,8 +555,10 @@ def test_an_alarm_wakes_receive_once_its_time_has_come():
         csrr  a1, time
         addi  a1, a1, 100
         li    a0, SYS_ALARM
+        li    a2, ALARM_NOTICE
         sys
         li    a0, SYS_ALARM
+        li    a2, ALARM_NOTICE
         li    a1, NO_ALARM
         sys
         add   a1, s1, a0

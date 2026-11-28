@@ -8,8 +8,8 @@ use crate::layout::*;
 use crate::mem::{page_left, user_at};
 use crate::proc::Proc;
 use crate::kdata::{read, write};
-use crate::word::{Word, addr, load_at};
-use crate::{desc, devices, info, ipc, mm, names, procinfo, thread, wait};
+use crate::word::{Word, addr, load_at, load_small_at};
+use crate::{desc, devices, info, ipc, mm, names, procinfo, signal, thread, wait};
 
 /// The caller goes on (resume).
 pub const RESUME: i32 = 0;
@@ -35,12 +35,18 @@ pub extern "C" fn rk_syscall(p: *mut u8) -> i32 {
     if n < 0 || n >= CALLS.len() as Word {
         return nocall(p);
     }
-    CALLS[n as usize](p)
+    let next = CALLS[n as usize](p);
+    if next == SCHEDULE && load_small_at(p.0, PCB_SIGNOTE) != 0 {
+        // A signal came while it ran, and now it would sleep: cut the
+        // call short now, as post would have if it had slept already.
+        return signal::interrupt_sleeper(p);
+    }
+    next
 }
 
 /// Each call's routine, by its number (SYS_ in include/layout.s): one
 /// indirect call, where a chain of tests took 40 for the last.
-static CALLS: [fn(Proc) -> i32; SYS_HARTINFO as usize + 1] = [
+static CALLS: [fn(Proc) -> i32; SYS_SIGRETURN as usize + 1] = [
     sys_putc,           // 0
     sys_send,           // 1
     sys_recv,           // 2
@@ -91,6 +97,9 @@ static CALLS: [fn(Proc) -> i32; SYS_HARTINFO as usize + 1] = [
     thread::sys_futex,  // 47
     thread::sys_gettid, // 48
     sys_hartinfo,       // 49
+    signal::sys_sigaction, // 50
+    signal::sys_sigmask, // 51
+    signal::sys_sigreturn, // 52
 ];
 
 const _: () = assert!(
@@ -104,6 +113,8 @@ const _: () = assert!(
         && SYS_THREAD == 44
         && SYS_GETTID == 48
         && SYS_HARTINFO == 49
+        && SYS_SIGACTION == 50
+        && SYS_SIGRETURN == 52
 );
 
 /// A number that names no call.

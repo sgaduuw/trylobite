@@ -292,6 +292,7 @@ worker: j     worker
     kill = f"""
         {spin(20000, 6)}
         li    a0, SYS_KILL
+        li    a3, SIGKILL
         li    a1, 2
         li    a2, KILL_ANY
         sys
@@ -299,7 +300,7 @@ worker: j     worker
     image = build(spawn_and_wait(kill), prog)
     result = run_image(image)
     assert result.exit_code == 0, result.console
-    assert result.code_of(0) == 1000 * WAIT_KILLED
+    assert result.code_of(0) == 1000 * WAIT_KILLED + 9  # SIGKILL
     assert result.console.count("killed") == 1
     assert "process 1 killed" in result.console
     assert process_states(result, image) == [0] * image.symbols["NPROC"]

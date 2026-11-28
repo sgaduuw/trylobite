@@ -109,8 +109,12 @@ fn wake_sleepers() {
         if alarm != 0 {
             if alarm <= now {
                 q.set(PCB_ALARM, 0); // it rings
-                q.set(PCB_RANG, 1);
-                q.rouse();
+                if q.get(PCB_SIGALRM) == ALARM_SIGNAL {
+                    crate::signal::post(q.space(), SIGALRM);
+                } else {
+                    q.set(PCB_RANG, 1);
+                    q.rouse();
+                }
                 now = time();
             } else {
                 later(alarm, &mut any);
