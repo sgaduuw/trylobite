@@ -10,7 +10,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
-use crate::fs::{File, OwnedFd};
+use crate::fs::{File, OwnedFd, dup2, is_open};
 use crate::io::{self, Read, Write};
 use crate::sys::{self, CPath, FS, PIPE};
 
@@ -241,11 +241,6 @@ impl Command {
     }
 }
 
-/// Make descriptor `to` a copy of `fd`.
-fn dup2(fd: i32, to: i32) -> io::Result<()> {
-    sys::check(sys::call(sys::SYS_DUP2, &[fd, to])).map(|_| ())
-}
-
 /// A copy of descriptor `fd` in a free descriptor that children do not
 /// get, or None if `fd` is not open.
 fn keep_aside(fd: i32) -> io::Result<Option<OwnedFd>> {
@@ -263,10 +258,25 @@ fn keep_aside(fd: i32) -> io::Result<Option<OwnedFd>> {
     Err(io::Error::from_raw(sys::E_MFILE))
 }
 
-/// Whether descriptor `fd` names something: dup2 onto itself changes
-/// nothing (fdflags would clear its flags), and is E_BADF if it does not.
-fn is_open(fd: i32) -> bool {
-    sys::call(sys::SYS_DUP2, &[fd, fd]) >= 0
+/// Start the program file at `path` with this program's descriptors and
+/// the arguments `args`: each ended by 0, the command first, as FS_SPAWN
+/// takes them. `Command` without the heap, for a program that arranges
+/// descriptors itself (the shell).
+pub fn spawn_file(path: &[u8], args: &[u8]) -> io::Result<Child> {
+    let path = CPath::new(path)?;
+    let _ = io::stdout().flush();
+    let pid = FS.call(
+        sys::FS_SPAWN,
+        &[path.ptr(), args.as_ptr() as i32, args.len() as i32],
+    )?;
+    Ok(Child::of(pid))
+}
+
+/// Start program `number` of the kernel image (SYS_SPAWN), as the shell
+/// starts pingpong: no arguments, this program's descriptors.
+pub fn spawn_image(number: i32) -> io::Result<Child> {
+    let _ = io::stdout().flush();
+    sys::check(sys::call(sys::SYS_SPAWN, &[number])).map(Child::of)
 }
 
 /// A new pipe from the pipe server: its read end, then its write end.
@@ -295,6 +305,16 @@ pub struct Child {
 }
 
 impl Child {
+    fn of(pid: i32) -> Child {
+        Child {
+            pid,
+            status: None,
+            stdin: None,
+            stdout: None,
+            stderr: None,
+        }
+    }
+
     pub fn id(&self) -> u32 {
         self.pid as u32
     }

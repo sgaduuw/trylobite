@@ -1,8 +1,8 @@
 # Program 0 of shell.s: init, the one program the kernel starts. It
 # starts the servers, in the order of init_rows, waiting for each to
 # register its name before the next, then the programs /etc/init names,
-# then the shell, and looks after them: receive tells it of each of its
-# children that ends.
+# then the shell, /bin/sh, and looks after them: receive tells it of
+# each of its children that ends.
 #
 # Which servers start, and which programs, is /etc/init's to say. The
 # console, disk and file servers always start, first, since init needs
@@ -347,8 +347,11 @@ init_stopsh:
         sw    t0, init_sh
 9:      ret
 
-# init_startsh: start the shell. Init has nothing left to look after
-# without one: if it cannot start, init exits.
+# init_startsh: start the shell: /bin/sh, through the file server, with
+# no descriptors (it opens the console itself) and "sh" as its one
+# argument, so that ps names it; or with INIT_SH not 0, that program of
+# the image (tests' own shells). Init has nothing left to look after
+# without one: if it cannot start, init says so and exits.
 init_startsh:
         addi  sp, sp, -3
         sw    ra, 0(sp)
@@ -360,11 +363,24 @@ init_startsh:
         addi  sp, sp, 3
         li    a0, SYS_SPAWN
         li    a1, INIT_SH
-        sys
-        bltz  a0, 1f
+        bnez  a1, 1f
+        li    a0, E_NOPROC             # no file server to start it
+        lw    a1, init_fspid
+        bltz  a1, 2f
+        li    a0, SYS_CALL
+        li    a2, FS_SPAWN
+        la    a3, init_shfile
+        la    a4, init_shname
+        li    a5, 3                    # "sh" and its 0
+1:      sys
+2:      bltz  a0, 3f
         sw    a0, init_sh
         ret
-1:      li    a1, INIT_LOST
+3:      la    a1, init_nostart
+        la    a2, init_shfile
+        li    a3, 0
+        call  init_say
+        li    a1, INIT_LOST
         j     init_exit
 
 # init_readtab: read /etc/init, if the file server is up and the file
@@ -729,6 +745,7 @@ init_noserver: .string "no server named "
 init_again:    .string " ended, starting it again"
 init_giveup:   .string " ended too often, giving up on it"
 init_shname:   .string "sh"
+init_shfile:   .string "/bin/sh"
 init_con:      .string "console"
 init_pipe:     .string "pipe"
 init_disk:     .string "disk"

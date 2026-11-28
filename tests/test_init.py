@@ -51,18 +51,16 @@ def test_init_starts_the_servers_before_the_shell_and_ends_after_it():
 
 def test_a_server_that_cannot_start_takes_what_needs_it_down():
     # No program 27: the disk server cannot start, so neither does the file
-    # server, which needs it; the shell runs without files.
+    # server, which needs it, nor the shell, which is a file: init gives up.
     result = run_image(shell_build(INIT_DISKD=27), input="ls\nhello\n", disk=bin_disk())
     assert result.exit_code == 0, result.console
-    console = result.console
     assert (
         "init: no server named disk\ninit: no server named fs\n"
         "init: started pipe, process 2\n"
         "init: started net, process 3\ninit: started ip, process 4\n"
-        "init: starting sh\n$ " in console
+        "init: starting sh\ninit: cannot start /bin/sh\n"
+        "trylobite: process 0 exited with code 1\n" in result.console
     )
-    assert "$ ls\nsh: .: no filesystem on the disk\n" in console
-    assert "$ hello\nsh: no such program: hello\n" in console
 
 
 def test_a_server_init_does_not_need_can_be_missing():
@@ -76,13 +74,13 @@ def test_a_server_init_does_not_need_can_be_missing():
 
 def build_with(numbers: dict[str, int], *programs: str):
     """shell.s with some of init's program numbers changed, and more
-    programs, numbered 11 on."""
+    programs, numbered 10 on."""
     source = (ROOT / "shell.s").read_text()
     for name, number in numbers.items():
         line = next(s for s in source.splitlines() if f".equ  {name}," in s)
         source = source.replace(line, f"        .equ  {name}, {number}")
-    source = source.replace(".equ  NPROG, 11", f".equ  NPROG, {11 + len(programs)}")
-    for number, body in enumerate(programs, 11):
+    source = source.replace(".equ  NPROG, 10", f".equ  NPROG, {10 + len(programs)}")
+    for number, body in enumerate(programs, 10):
         source += f"""
         .section prog{number}, (P_PROG0 + {number}) * PAGE, V_USER
         .gp   USER_GP
@@ -136,7 +134,7 @@ def test_a_server_that_ends_is_started_again_until_init_gives_up():
     # shell, which needs it, three times, then gives up on it; the shell
     # then finds no pipe server and exits, and init with it.
     image = build_with(
-        {"INIT_PIPED": 11, "INIT_SH": 12},
+        {"INIT_PIPED": 10, "INIT_SH": 11},
         failing_server("pipe", "PIPE_PROTOCOL"),
         calling_shell("pipe"),
     )
@@ -153,7 +151,7 @@ def test_what_needs_a_server_that_ends_is_started_again_with_it():
     # The disk server ends at its first call: the file server (process 3),
     # which needs it, and the shell are ended and started again too.
     image = build_with(
-        {"INIT_DISKD": 11, "INIT_SH": 12},
+        {"INIT_DISKD": 10, "INIT_SH": 11},
         failing_server("disk", "DISK_PROTOCOL"),
         calling_shell("disk"),
     )
@@ -174,9 +172,10 @@ def test_what_needs_a_server_that_ends_is_started_again_with_it():
 def test_a_server_that_ends_before_it_registers_is_started_again():
     # The disk server exits before it registers: init does not wait for
     # the name forever but starts it again, three times, then gives up on
-    # it and on the file server, which needs it, and starts the shell.
+    # it and on the file server, which needs it; with no file server
+    # there is no /bin/sh to start, so init gives up (INIT_LOST).
     image = build_with(
-        {"INIT_DISKD": 11},
+        {"INIT_DISKD": 10},
         "li    a0, SYS_EXIT\n        li    a1, 3\n        sys",
     )
     result = run_image(image, input="ls\n", disk=bin_disk())
@@ -188,15 +187,16 @@ def test_a_server_that_ends_before_it_registers_is_started_again():
     assert trouble(console) == ["init: disk ended, starting it again"] * 3 + [
         "init: disk ended too often, giving up on it",
         "init: no server named fs",
+        "init: cannot start /bin/sh",
     ]
-    assert "$ ls\nsh: .: no filesystem on the disk\n" in console
+    assert result.code_of(0) == 1
 
 
 def test_a_server_that_ends_once_before_it_registers_comes_up():
     # The pipe server's first start (process 4) exits before it registers;
     # the second, process 5, registers, and the rest comes up after it.
     image = build_with(
-        {"INIT_PIPED": 11},
+        {"INIT_PIPED": 10},
         """
         li    a0, SYS_GETPID
         sys
@@ -232,7 +232,7 @@ def test_a_server_that_ends_once_before_it_registers_comes_up():
 
 
 def test_a_shell_that_faults_is_started_again_until_init_gives_up():
-    image = build_with({"INIT_SH": 11}, "lw    t0, 0(zero)  # nothing is there")
+    image = build_with({"INIT_SH": 10}, "lw    t0, 0(zero)  # nothing is there")
     result = run_image(image, disk=bin_disk())
     console = result.console
     assert console.count(" faulted") == 4  # the first start and three more

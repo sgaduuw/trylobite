@@ -98,7 +98,7 @@ the hart's bank is still that process's (`fpu_owner`).
 | 1 | kernel data and stack |
 | 2, 3, 4 | kernel code (`NKCODE` pages from `P_KCODE`); the firmware in the last `FW_ROOM` trytes of page 4, from `FW_BOOT` |
 | 5, 6, 7 | the boot address space; the kernel's shared leaf table |
-| 8 .. 7 + `NPROG` | program images 0 to `NPROG` − 1, at most 27 (`NPROG_MAX`; the demo has 3, the shell build 11) |
+| 8 .. 7 + `NPROG` | program images 0 to `NPROG` − 1, at most 27 (`NPROG_MAX`; the demo has 3, the shell build 10) |
 | 8 + `NPROG` .. the machine's last | free pages, handed out by the allocator |
 
 No kernel structure grows with memory. Free pages are those never yet
@@ -280,7 +280,8 @@ user mode: the kernel adds the time from `resume` to the next trap) and
 its name, 8 code points and a 0 from `PI_NAME`. A process's name is the
 last part of the first argument `spawnw` gave it (`/bin/ps` is `ps`), or
 for a program of the kernel image what it gave `name` as it started:
-`init`, `consd`, `piped`, `diskd`, `fsd`, `sh`.
+`init`, `consd`, `piped`, `diskd`, `fsd`. Init starts the shell from
+the disk with `sh` as its first argument, so it is `sh`.
 
 ```text
 $ ps
@@ -290,7 +291,7 @@ $ ps
     2     0 receive     4        253 piped
     3     0 receive     5       5840 diskd
     4     0 receive     9       2785 fsd
-    5     0 wait        4       1939 sh
+    5     0 wait        5       1939 sh
     6     5 run         4       3502 ps
 ```
 
@@ -744,8 +745,9 @@ no write end is left; a write waits until all of it is in (a pipe holds
 Program 0 of the `shell.s` build is `user/init.s`. It starts the
 console, disk and file servers in that order, waiting for each to
 register its name before the next, then reads **`/etc/init`**, which
-says what else to start, then starts that, then the shell
-(`user/sh.s`), and then waits in `receive` for its children to end.
+says what else to start, then starts that, then the shell, `/bin/sh`
+(`bin/sh.rs`), through the file server as it starts the programs of
+`/etc/init`, and then waits in `receive` for its children to end.
 
 `/etc/init` is text, a line at a time; an empty line, or one that
 starts with `#`, says nothing. A line names either
@@ -793,7 +795,9 @@ Then:
   (`INIT_RETRIES`). Then init gives up on it (`init: disk ended too
   often, giving up on it`): a server stays down with what needs it, and
   the shell runs without them; giving up on the shell, init exits with
-  code 1.
+  code 1. Init exits with code 1 too when it cannot start the shell at
+  all, with no file server or no `/bin/sh` (`init: cannot start
+  /bin/sh`): without a filesystem there is nothing to run.
 
 A server that cannot start, or registers another protocol version than
 init expects, is said on the kernel's log (`init: no server named
@@ -805,9 +809,14 @@ shell, which prints its prompt at once. Init waits for each name with
 wait: it counts as a start, as if it had ended later, and init starts
 it again until it gives up on it.
 
-The shell finds the console, pipe and file servers by name, does
-without any that is missing, opens the console as descriptor 0 and
-copies it to 1 and 2, then reads a line at a time.
+The shell is a Rust program of `bin/` like the tools, over trystd
+(`bin/sh.rs`, with its parts in `bin/sh/`: the line editor, the lexer,
+running a line, the built-ins). It uses no heap, so it takes five pages
+(an image of some 20,000 trytes). Started with no standard input, as
+init starts it, it opens the console as descriptor 0 and copies it to 1
+and 2; started from another shell (`sh`), it keeps the descriptors it
+was given. It finds the pipe and file servers by name, does without
+the pipe server when it is missing, then reads a line at a time.
 
 **Line editing.** The shell echoes what is typed and edits the line
 (up to 60 characters) as a Unix shell's line editor does, telling the
@@ -868,11 +877,14 @@ a small way, and say what fails on standard error as `NAME: why`:
 - `hello`, `fail` (exits with 3) and `spin` (never ends) are for
   tests.
 
-**Redirection.** After the command, `> PATH` sends standard output to a
-file, made empty or new, `>> PATH` to its end, and `< PATH` takes
-standard input from one, for that command alone, built-in or program:
-`hello > out`, `ls >>list`, `cat < notes`. The shell's own complaints go
-to standard error, the console, whatever is redirected.
+**Redirection.** Among a command's words, `> PATH` sends standard
+output to a file, made empty or new, `>> PATH` to its end, and `< PATH`
+takes standard input from one, for that command alone, built-in or
+program: `hello > out`, `ls >>list`, `cat < notes`. `|`, `<` and `>`
+end a word wherever they stand unquoted, so `hello>out` redirects too.
+A command of redirections alone (`> empty`) makes its files. The
+shell's own complaints go to standard error, the console, whatever is
+redirected.
 
 **Quoting** works as in a Unix shell: `echo "hello   world"` and
 `echo 'a | b'` give one argument each, keeping the spaces and the `|`,

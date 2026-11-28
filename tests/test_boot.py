@@ -73,7 +73,7 @@ def boot_from(disk: tuple, session: str, harts: int) -> tuple[int, str]:
     done = detrytus(
         "run",
         "--ram-pages",
-        "81",
+        "84",
         "--harts",
         str(harts),
         *input_options(session),

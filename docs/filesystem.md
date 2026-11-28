@@ -253,8 +253,8 @@ seen in its windows.
 
 ## The shell
 
-`sh` (`user/sh.s`) starts the disk server and the file server first,
-then has eight file
+`sh` (`bin/sh.rs`), which init starts from `/bin/sh` once the disk
+and file servers are up, has eight file
 built-ins. `ls [DIR]` lists a directory,
 the current one when none is given, leaving out names that start with a dot: a
 file's size and name, a directory's name and a slash. `cat PATH` prints

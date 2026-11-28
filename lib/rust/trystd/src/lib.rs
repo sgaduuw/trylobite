@@ -4,7 +4,8 @@
 //! and directories (`fs`), standard I/O and the I/O traits (`io`), the
 //! program's arguments and current directory (`env`), child processes
 //! (`process`), signals (`signal`), sockets (`net`), the time of day
-//! (`time`) and threads (`thread`, `sync`), and the kernel's reports on
+//! (`time`) and threads (`thread`, `sync`), the console's foreground
+//! (`console`), and the kernel's reports on
 //! the machine and its processes (`os`), each a thin, safe layer over the kernel's calls
 //! and its servers (docs/kernel.md), with `alloc`'s
 //! `Vec`, `String` and `Box` over the heap (`heap`). It is written in
@@ -44,6 +45,7 @@ extern crate alloc;
 
 mod heap;
 
+pub mod console;
 pub mod env;
 pub mod fs;
 pub mod io;

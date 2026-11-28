@@ -19,7 +19,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
 RAM_PAGES = 40  # RAM of a machine build() makes, unless a test says
-SHELL_RAM_PAGES = 81  # ... and of one an assembled file (shell.s) runs on
+SHELL_RAM_PAGES = 84  # ... and of one an assembled file (shell.s) runs on
 # Harts the machine has when a test does not say: the suite runs once
 # with each of these (tests/conftest.py sets it).
 HARTS = 1
@@ -388,8 +388,26 @@ def new_disk() -> Path:
 _BIN: dict[str, list[int]] = {}
 
 
+_SH: list[list[int]] = []
+
+
+def shell_filesystem(blocks: int):
+    """A new filesystem of `blocks` blocks holding only /bin/sh, the shell
+    init starts (bin/sh.rs), for a shell test that wants its disk bare;
+    and how many blocks /bin and the shell take past an empty one's."""
+    from tools.fs import Filesystem, assemble, program_file
+
+    if not _SH:
+        _SH.append(_BIN.get("sh") or program_file(assemble(ROOT / "bin" / "sh.rs")))
+    made = Filesystem.new(blocks)
+    free = len(made.free_blocks())
+    made.mkdir("bin")
+    made.write_trytes("bin/sh", _SH[0])
+    return made, free - len(made.free_blocks())
+
+
 def bin_disk(
-    blocks: int = 56,
+    blocks: int = 60,
     programs: tuple[Path, ...] = (),
     etc_init: str | None = None,
     **texts: str,
