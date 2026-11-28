@@ -2276,3 +2276,31 @@ that redoes when pressed again, counts, `:w [FILE]`, `:q`, `:q!`,
   once, numbers formatted by hand, not with core::fmt (top's lesson).
 - **Later:** search (`/`), `cw`/`dw` and other operator-motion pairs,
   multi-level undo, asking the terminal its size in a live session.
+
+### 2026-11-28 · Line editing and Tab completion in the assembly shell
+
+Eelco asked for a more usable console before more vi work, Tab
+completion first. The shell (`user/sh.s`) now has a line editor: cursor
+movement and editing in the middle, the Emacs-style Ctrl keys of bash's
+default mode, a 16-line history and Tab completion of commands and
+paths (docs/kernel.md, Line editing).
+
+- **Extended in assembly, not rewritten in Rust.** The direction is
+  Rust-only, but the shell is a program of the kernel image that init
+  starts before any disk program, and its parsing, quoting, pipelines,
+  redirections and built-ins are pinned down by its tests. A
+  Rust shell is a step of its own, worth taking with the rest of the
+  boot path; the editor is about 600 lines of assembly that would carry
+  over to it as a design.
+- **Only backspace and overprinting.** Moving left is a backspace and
+  moving right prints the character there again; a change prints the
+  line's tail again and backs up over it. No cursor-addressing
+  sequences, so the echo is plain text the tests can read.
+- **Tab is not a space any more.** It completes; a pasted tab rings
+  the bell. Completion reads directories with `IO_READDIR` and asks
+  `FS_STAT` only for the names it prints or completes, to put a slash
+  after a directory. It leaves `.` and `..` out always, and other dot
+  names unless the word starts with a dot; it does not look inside
+  quotes.
+- **Limits:** the line is still 60 characters; the list assumes 80
+  columns; no reverse search (Ctrl-R) and no history kept across boots.
