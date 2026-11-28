@@ -448,7 +448,7 @@ def bin_disk(
 def run_image(
     image: Image,
     ram_pages: int | None = None,
-    max_steps: int = 10_000_000,  # the shell build boots in about 1,650,000
+    max_steps: int = 10_000_000,  # the shell build boots in about 1,430,000
     harts: int | None = None,
     plug: list[tuple[int, int]] = (),
     unplug: list[tuple[int, int]] = (),

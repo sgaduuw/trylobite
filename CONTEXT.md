@@ -2790,7 +2790,7 @@ B-tree of every record, in Rust (docs/filesystem.md). The choices:
   stack check in the build (`tools/server.py`), since an inlined call
   chain overflowed the stack below `V_USER` silently at first. It is
   slower per call than the assembly was, and that shows: a process
-  busy for long is interrupted every `QUANTUM` (500) ticks at several
+  busy for long is interrupted every `QUANTUM` (500 ticks then) at several
   hundred steps each, so a slow server pays twice. Caching the last
   inodes and extents, u32 division, fewer key copies, node sums and the
   leaf search in assembly (through hooks on the crate's `Store` trait,
@@ -2800,10 +2800,12 @@ B-tree of every record, in Rust (docs/filesystem.md). The choices:
   243-tryte write from 240,000 to about 140,000, a stat from 145,000 to
   54,000, and the server's share of booting the shell from 1.56 million
   to well under 675,000.
-  Booting the shell build still takes about 1.65 million steps against
-  main's 840,000, so the tests' step budgets grew, and CI's shell
-  session, which lists /bin, needs more than detrytus' default 10
-  million. A longer `QUANTUM` is the next thing to try.
+  With the longer timer slices (`QUANTUM` 10,000), booting the shell
+  build takes about 1.43 million steps against 1.17 million with the
+  assembly server, but `ls bin`, a readdir and a stat for each of some
+  fifty programs, takes 5.5 million against 2.4: a stat is still
+  slow. The tests' step budgets grew, and CI's shell session, which
+  lists /bin, needs more than detrytus' default 10 million.
 - **Relatime.** Reading moves the access time only when it is no later
   than the last change, as Linux does, so reads do not write the disk.
 - **No permission checks yet.** Mode, uid and gid are stored, shown and
