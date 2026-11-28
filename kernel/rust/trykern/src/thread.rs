@@ -61,6 +61,7 @@ pub fn sys_thread(p: Proc) -> i32 {
     t.set(PCB_A0, p.get(PCB_A3));
     t.set(PCB_TP, p.get(PCB_A4));
     t.set(PCB_GP, p.get(PCB_GP));
+    crate::signal::inherit_thread(t, p);
     sp.set(PCB_THREADS, sp.get(PCB_THREADS) + 1);
     t.ready(); // a hart waiting for work can run it
     done(p, t.pid())
@@ -209,7 +210,7 @@ pub extern "C" fn rk_on_kill(p: *mut u8) {
     let p = Proc(p);
     p.set(PCB_KILLED, 0);
     let sp = p.space();
-    end(sp, WAIT_KILLED, 0); // ending already, as kill marks it
+    end(sp, WAIT_KILLED, SIGKILL); // ending already, as kill marks it
     if p == sp && sp.get(PCB_HOW) == WAIT_KILLED {
         puts(unsafe { &raw const msg_proc });
         putn(sp.pid() as i32);

@@ -46,6 +46,7 @@ pub enum ErrorKind {
     FileTooLarge,
     ResourceBusy,
     BrokenPipe,
+    Interrupted,
     ConnectionRefused,
     ConnectionReset,
     HostUnreachable,
@@ -105,6 +106,7 @@ impl Error {
             sys::E_RESET => ConnectionReset,
             sys::E_NOMEM => OutOfMemory,
             sys::E_NOEXEC => InvalidData,
+            sys::E_INTR => Interrupted,
             _ => Other,
         }
     }
@@ -139,6 +141,7 @@ impl Error {
             sys::E_NOROOM => "buffer too small",
             sys::E_PERM => "not allowed",
             sys::E_PIPE => "broken pipe",
+            sys::E_INTR => "interrupted",
             sys::E_TIMEDOUT => "timed out",
             sys::E_NOROUTE => "no route to host",
             sys::E_REFUSED => "connection refused",

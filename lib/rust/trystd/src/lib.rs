@@ -3,9 +3,9 @@
 //! What std is to a Rust program on Unix, this is on trylobite: files
 //! and directories (`fs`), standard I/O and the I/O traits (`io`), the
 //! program's arguments and current directory (`env`), child processes
-//! (`process`), sockets (`net`), the time of day (`time`) and threads
-//! (`thread`, `sync`), and the kernel's reports on the machine and
-//! its processes (`os`), each a thin, safe layer over the kernel's calls
+//! (`process`), signals (`signal`), sockets (`net`), the time of day
+//! (`time`) and threads (`thread`, `sync`), and the kernel's reports on
+//! the machine and its processes (`os`), each a thin, safe layer over the kernel's calls
 //! and its servers (docs/kernel.md), with `alloc`'s
 //! `Vec`, `String` and `Box` over the heap (`heap`). It is written in
 //! Rust alone: no C library sits under it. The names follow std's, so
@@ -50,6 +50,7 @@ pub mod io;
 pub mod net;
 pub mod os;
 pub mod process;
+pub mod signal;
 pub mod sync;
 pub mod sys;
 pub mod thread;
@@ -60,7 +61,7 @@ pub use alloc::{boxed, format, string, vec};
 /// What most programs use, brought in with `use trystd::prelude::*`.
 pub mod prelude {
     pub use crate::io::{self, BufRead, Line, Read, Seek, Write};
-    pub use crate::{env, fs, net, process, sync, thread, time};
+    pub use crate::{env, fs, net, process, signal, sync, thread, time};
     pub use crate::{eprint, eprintln, print, println};
     pub use alloc::borrow::ToOwned;
     pub use alloc::boxed::Box;

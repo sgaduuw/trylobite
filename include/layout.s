@@ -238,14 +238,19 @@
         .equ  SYS_WAIT,  10               # wait for child a1 to end: a0 = how it
                                           # ended, a1 = its exit code or trap cause
         # 11 and 12 were bread and bwrite: the disk is the disk server's now
-        .equ  SYS_KILL,  13               # kill(pid, for): end process a1, a child
-                                          # of the caller (a2 = FOR_SELF) or, for a
-                                          # driver, of process a2: 0 done (it ends
-                                          # before it runs again), KILL_ENDED (it
-                                          # had ended already), E_NOCHILD, E_PERM
-                                          # (a2 not FOR_SELF from a non-driver);
-                                          # or with a2 = KILL_ANY, any process
+        .equ  SYS_KILL,  13               # kill(pid, for, sig): send signal a3
+                                          # (SIG_ below; 0 only checks) to process
+                                          # a1, a child of the caller (a2 =
+                                          # FOR_SELF) or, for a driver, of process
+                                          # a2: 0 sent, and it ends (before it runs
+                                          # again), KILL_CAUGHT (it goes on),
+                                          # KILL_ENDED (it had ended already),
+                                          # E_NOCHILD, E_INVAL (a3), E_PERM (a2 not
+                                          # FOR_SELF from a non-driver); or with
+                                          # a2 = KILL_ANY, any process
         .equ  KILL_ENDED, 1               # kill: nothing to end, only to wait for
+        .equ  KILL_CAUGHT, 2              # kill: sent, and caught, ignored or
+                                          # blocked: the process goes on
         # 14 was foreground: the console server keeps the foreground now
         .equ  SYS_SPAWNW, 15              # start the program file whose first
                                           # block is in block window a1 (see
@@ -485,12 +490,16 @@
                                           # NOTE_SIGNAL notice naming the caller,
                                           # once however often it was notified
                                           # since: 0, E_NOPROC, E_SELF
-        .equ  SYS_ALARM, 40               # alarm(until): when the time CSR reaches
-                                          # a1, the caller's receive gives a
-                                          # NOTE_ALARM notice; a later alarm
+        .equ  SYS_ALARM, 40               # alarm(until, how): when the time CSR
+                                          # reaches a1, the caller's receive gives
+                                          # a NOTE_ALARM notice (a2 =
+                                          # ALARM_NOTICE), or its process gets
+                                          # SIGALRM (ALARM_SIGNAL); a later alarm
                                           # replaces an earlier one, and
                                           # NO_ALARM cancels it: 0
         .equ  NO_ALARM, -1
+        .equ  ALARM_NOTICE, 0             # alarm's a2: a NOTE_ALARM notice,
+        .equ  ALARM_SIGNAL, 1             # or SIGALRM for the caller's process
         .equ  SYS_BRK,   41               # brk(end): make the caller's heap reach
                                           # end, in whole pages from HEAP_START;
                                           # it never shrinks, and end BRK_QUERY
@@ -569,6 +578,59 @@
         .equ  SYS_GETTID, 48              # a0 = the calling thread's number; a
                                           # process's first thread's is the
                                           # process's
+
+# Signals (docs/kernel.md, Signals), numbered as Linux numbers them. A
+# process has one set of pending signals and one action for each: its
+# default (SIG_DFL: end the process, or for SIGCHLD nothing), SIG_IGN,
+# or SIG_CATCH, which runs the process's signal entry with a0 = the
+# signal and a1 = a SIGFRAME on the stack below sp, in whichever of its
+# threads does not block it; the entry ends with sigreturn(frame). Each
+# thread has its own mask of blocked signals. A thread blocked in a
+# system call (not a server's held call) when a caught signal comes
+# gets E_INTR from it, after the handler; trystd calls it again.
+# SIGKILL cannot be caught, ignored or blocked.
+        .equ  SIGHUP,   1
+        .equ  SIGINT,   2                 # Ctrl-C, from the console server
+        .equ  SIGQUIT,  3
+        .equ  SIGKILL,  9
+        .equ  SIGUSR1, 10
+        .equ  SIGUSR2, 12
+        .equ  SIGPIPE, 13                 # a write to a pipe nobody reads
+        .equ  SIGALRM, 14                 # an alarm set with ALARM_SIGNAL
+        .equ  SIGTERM, 15                 # bin/kill's default
+        .equ  SIGCHLD, 17                 # a child ended; ignored by default
+        .equ  NSIG,    31                 # signals are 1 to NSIG - 1: a set of
+                                          # them is a word with bit 2^sig for each
+        .equ  SYS_SIGACTION, 50           # sigaction(sig, action, entry): what
+                                          # signal a1 does from now: SIG_DFL,
+                                          # SIG_IGN or SIG_CATCH, which makes a3
+                                          # the process's signal entry: the
+                                          # action it had; E_INVAL (a1, a2, or
+                                          # any but SIG_DFL for SIGKILL)
+        .equ  SIG_DFL,   0
+        .equ  SIG_IGN,   1
+        .equ  SIG_CATCH, 2
+        .equ  SYS_SIGMASK, 51             # sigmask(how, set): change the calling
+                                          # thread's blocked set: SIG_BLOCK adds
+                                          # a2, SIG_UNBLOCK takes it away,
+                                          # SIG_SETMASK makes it a2: the set it
+                                          # had; E_INVAL. SIGKILL stays unblocked
+        .equ  SIG_BLOCK,   0
+        .equ  SIG_UNBLOCK, 1
+        .equ  SIG_SETMASK, 2
+        .equ  SYS_SIGRETURN, 52           # sigreturn(frame): back from a signal's
+                                          # entry to where the thread was, with
+                                          # its registers and mask as the frame
+                                          # at a1 keeps them; E_FAULT if it is not
+                                          # all in the caller's memory
+        # A signal frame, words from its address up: the registers as the
+        # record keeps them (PCB_SP to PCB_T6, word k at PCB_ offset 3k),
+        # then these.
+        .equ  SF_PC,    81                # where the thread was
+        .equ  SF_FPU,   84                # its coprocessor bank, FPU_REGS words
+        .equ  SF_MASK,  SF_FPU + 3 * FPU_REGS   # its blocked set
+        .equ  SF_SIG,   SF_MASK + 3       # the signal
+        .equ  SIGFRAME, SF_SIG + 3        # trytes in a frame
 
 # Files (docs/filesystem.md) come from the file server, which registers
 # as "fs" with protocol FS_PROTOCOL; a program looks it up once, and
@@ -820,6 +882,7 @@
         .equ  E_REFUSED, -25              # connect: nothing listens on that port
         .equ  E_RESET,  -26               # a connection: the other end reset it
         .equ  E_AGAIN,  -27               # futex: the word is not what was given
+        .equ  E_INTR,   -28               # a call a caught signal interrupted
 
         .equ  O_RDONLY, 0                 # open: the access mode is the flags mod
         .equ  O_WRONLY, 1                 # 3. Add any of O_CREAT (make a file not
@@ -847,7 +910,7 @@
 # tells failure, exit and fault apart.
         .equ  WAIT_EXITED,  0             # a1 = the code it gave exit
         .equ  WAIT_FAULTED, 1             # a1 = the trap cause that ended it
-        .equ  WAIT_KILLED,  2             # a1 = 0: kill or Ctrl-C ended it
+        .equ  WAIT_KILLED,  2             # a1 = the signal that ended it
 
 # --- the process table ---------------------------------------------------------
 # One record per process, in words. Register r is saved at 3 * (r + 13), so
@@ -952,7 +1015,16 @@
                                           # NWIN words, 0 for none; so the page
                                           # at V_USER + PAGE * k is word k - 1 of
                                           # PCB_XPAGES for k = 1 to NXPAGE + NWIN
-        .equ  PCB_SIZE,   PCB_WINS + 3 * NWIN
+        .equ  PCB_SIGMASK, PCB_WINS + 3 * NWIN   # the signals it blocks
+        .equ  PCB_SIGNOTE, PCB_SIGMASK + 3   # 1 when a signal may be there for
+                                          # it to take: resume looks (signal.rs)
+        .equ  PCB_SIGALRM, PCB_SIGNOTE + 3   # its alarm's how (ALARM_SIGNAL)
+        # A process's own, in its first thread's record:
+        .equ  PCB_SIGPEND, PCB_SIGALRM + 3   # the signals sent and not yet taken
+        .equ  PCB_SIGCATCH, PCB_SIGPEND + 3  # those it catches (SIG_CATCH)
+        .equ  PCB_SIGIGN, PCB_SIGCATCH + 3   # those it ignores (SIG_IGN)
+        .equ  PCB_SIGENTRY, PCB_SIGIGN + 3   # where caught signals run
+        .equ  PCB_SIZE,   PCB_SIGENTRY + 3
         .assert PCB_SIZE % 3 == 0, "PCB_SIZE is not whole words"
         .assert PCB_NOTES + NPROC <= PCB_TURN - 1, "PCB_NOTES runs into PCB_TURN's trytes"
         .assert (PCB_SIGNALS + 1) % 3 == 0, "receive reads PCB_SIGNALS a word at a time"

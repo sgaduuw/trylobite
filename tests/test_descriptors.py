@@ -227,7 +227,7 @@ def test_a_server_that_ends_takes_its_handles_with_it():
         sys("SYS_SPAWN", 1),
         call_giver(0),
         call_giver(7),
-        sys("SYS_KILL", 1, "FOR_SELF"),
+        sys("SYS_KILL", 1, "FOR_SELF", "SIGKILL"),
         "li s1, 1\n" + wait_for("s1"),
         write(0, "buf", 1),  # not E_NOPROC: the descriptor is gone
         sys("SYS_CLOSE", 0),

@@ -116,6 +116,7 @@ fn spawn(caller: Proc, parent: Word, image: i32, above: i32) -> Word {
     s.set(PCB_PARENT, parent);
     s.set(PCB_FILE, (image == 0) as Word); // a program file may not drive a device
     desc::rk_desc_inherit(s.0, parent as i32); // its parent's descriptors
+    crate::signal::inherit(s, parent); // and what it ignores and blocks
 
     let root = alloc_page();
     s.set(PCB_ROOTPG, root);

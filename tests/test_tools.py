@@ -87,7 +87,7 @@ def test_kill_ends_a_server_and_init_starts_it_again(shell):
     assert out.startswith(
         "$ kill 0\nkill: 0: not allowed\nsh: exit 1\n"
         "$ kill 99\nkill: 99: no such process\nsh: exit 1\n"
-        "$ kill x\nusage: kill PID...\nsh: exit 2\n"
+        "$ kill x\nusage: kill [-SIGNAL] PID... | kill -l\nsh: exit 2\n"
         "$ kill 4\n"
     ), out
     assert "process 4 killed" in result.console

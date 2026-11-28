@@ -582,6 +582,7 @@ def test_a_killed_reader_leaves_the_server_usable():
         sys
         mv    s1, a0
         li    a0, SYS_KILL
+        li    a3, SIGKILL
         mv    a1, s1
         li    a2, FOR_SELF
         sys

@@ -74,8 +74,10 @@ read:   li    t0, SYS_READ
 1:      mv    a3, a2
         mv    a2, a1
         mv    a1, a0
-        mv    a0, t0
+2:      mv    a0, t0                   # again after a signal's E_INTR (sysu)
         sys
+        li    t1, E_INTR
+        beq   a0, t1, 2b
         li    t0, I32_MASK
         band  a0, a0, t0
         ret
@@ -108,8 +110,13 @@ sys:    li    t0, I32_SIGN
         sub   a4, a4, t0
         bxor  a5, a5, t0
         sub   a5, a5, t0
-sysu:   sys
-        sw    a1, 0(tp)
+sysu:   mv    t1, a0
+1:      sys
+        li    t2, E_INTR               # a caught signal cut it short: its
+        bne   a0, t2, 2f               # handler has run, and the call had
+        mv    a0, t1                   # not happened, so it goes again, as
+        j     1b                       # with SA_RESTART
+2:      sw    a1, 0(tp)
         sw    a2, 3(tp)
         sw    a3, 6(tp)
         li    t0, I32_MASK
@@ -139,7 +146,19 @@ clock:  li    a0, SYS_CLOCK
 sleep_ticks:
         csrr  a1, time
         add   a1, a1, a0
-        li    a0, SYS_SLEEP
+1:      li    a0, SYS_SLEEP            # until then, a signal or not
+        sys
+        li    t0, E_INTR
+        beq   a0, t0, 1b
+        ret
+
+# alarm_ticks(n, how): SYS_ALARM n ticks from now, n a u32: the time
+# to ring at is a word, made here as sleep_ticks makes its own.
+alarm_ticks:
+        mv    a2, a1
+        csrr  a1, time
+        add   a1, a1, a0
+        li    a0, SYS_ALARM
         sys
         ret
 
@@ -192,20 +211,29 @@ ticks:  csrr  a0, time
 # sleep_until(low, high): SYS_SLEEP until the time high * 2^32 + low,
 # low a u32 and high an i32: a time of ticks past what an i32 holds.
 sleep_until:
-        li    t1, SYS_SLEEP
-        j     1f
-# alarm_until(low, high): SYS_ALARM at that time in the same way, for a
-# NOTE_ALARM notice from receive (a2 = 0, a notice rather than a signal).
-alarm_until:
-        li    t1, SYS_ALARM
-        li    a2, 0
-1:      li    t0, I32_SIGN
+        li    t0, I32_SIGN
         bxor  a1, a1, t0
         sub   a1, a1, t0
         li    t0, 4294967296
         mul   a1, a1, t0
         add   a1, a1, a0
-        mv    a0, t1
+1:      li    a0, SYS_SLEEP            # until then, a signal or not
+        sys
+        li    t0, E_INTR
+        beq   a0, t0, 1b
+        ret
+
+# alarm_until(low, high): SYS_ALARM at that time, given as sleep_until's,
+# for a NOTE_ALARM notice from receive (ALARM_NOTICE, not a signal).
+alarm_until:
+        li    t0, I32_SIGN
+        bxor  a1, a1, t0
+        sub   a1, a1, t0
+        li    t0, 4294967296
+        mul   a1, a1, t0
+        add   a1, a1, a0
+        li    a2, ALARM_NOTICE
+        li    a0, SYS_ALARM
         sys
         ret
 
