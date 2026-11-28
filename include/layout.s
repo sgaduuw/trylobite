@@ -11,11 +11,19 @@
         .equ  ROOT_PAGES, 43046721        # ... and its pages (3^16)
 
 # --- physical memory -----------------------------------------------------------
-# Page 0 is the boot page; positive pages are RAM; negative ones devices.
+# Page 0 is the boot page: a jump to the firmware when the image is loaded
+# as a program file, detrytus' boot ROM when it boots from a disk.
+# Positive pages are RAM; negative ones devices.
 
         .equ  P_KDATA,    1               # kernel data and stack
         .equ  P_KCODE,    2               # kernel code, NKCODE pages from here
         .equ  NKCODE,     3               # (include/kernel.s checks it fits)
+        .equ  FW_ROOM,    243             # the firmware (firmware/boot.s): the
+                                          # last trytes of the last code page,
+        .equ  FW_BOOT, (P_KCODE + NKCODE - 1) * PAGE + 9840 - FW_ROOM + 3
+                                          # from here, physical and untranslated:
+                                          # where every hart starts, and a disk's
+                                          # boot record's entry
         .equ  P_BOOTROOT, P_KCODE + NKCODE   # the boot address space's root table
         .equ  P_BOOTMID,  P_BOOTROOT + 1  # ... and its mid table
         .equ  P_KLEAF,    P_BOOTROOT + 2  # the kernel's leaf table, shared by all
@@ -873,6 +881,16 @@
         .equ  FS_HEAD_VERSION, BLOCK_W0 + 3   # word 1: FS_VERSION
         .equ  FS_HEAD_BLOCKS, BLOCK_W0 + 6    # word 2: blocks in the filesystem
         .equ  FS_MAGIC, 20261121          # any word but 0: a blank disk is not one
+        # Words 3 to 8: detrytus' boot record (its docs/platform.md, Booting
+        # from a disk): the blocks holding the kernel's image, which the
+        # boot ROM loads into RAM pages from BOOT_PAGE and starts at
+        # BOOT_ENTRY. A disk without BOOT_MAGIC does not boot.
+        .equ  FS_HEAD_BOOT, BLOCK_W0 + 9  # word 3: BOOT_MAGIC
+        .equ  BOOT_MAGIC, 20261128
+        .equ  BOOT_FIRST, BLOCK_W0 + 12   # word 4: the image's first block
+        .equ  BOOT_COUNT, BLOCK_W0 + 15   # word 5: how many blocks it has
+        .equ  BOOT_PAGE, BLOCK_W0 + 18    # word 6: the page its first goes to
+        .equ  BOOT_ENTRY, BLOCK_W0 + 21   # word 7: where it starts: FW_BOOT
         .equ  FS_VERSION, 2
         .equ  FS_MAP, BLOCK_T0 + 27       # after 9 words: one tryte per block,
         .equ  MAP_FREE, 0                 # free or used, to the end of block 0

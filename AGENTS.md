@@ -30,8 +30,8 @@ uv run pytest    # builds kernel/trykern.s itself first
 uv run ruff check tests tools
 uv run ruff format --check tests tools
 detrytus run demo.s --ram-pages 40
-make BLOCKS=64   # disk.img: every program of bin/ (Makefile)
-printf 'hello\nls bin\necho a b | upper\nexit\n' | detrytus run shell.s --ram-pages 81 --input - --disk disk.img
+make BLOCKS=84   # disk.img: the kernel in its boot blocks, every program of bin/ (Makefile)
+printf 'hello\nls bin\necho a b | upper\nexit\n' | detrytus run --ram-pages 81 --input - --disk disk.img
 make run         # the shell on 6,561 pages with that disk and the network
 make benchmark   # time the emulator: 3 Rust programs sorting 10,000 lines
 ```

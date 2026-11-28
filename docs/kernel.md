@@ -9,6 +9,18 @@ number named here.
 
 ## Booting
 
+A build's image is everything in pages 1 and up, and a jump to the
+firmware at address 0. detrytus either loads the image as a file
+(`detrytus run shell.s`) and starts at the jump, or boots it from a
+disk: `make` (`tools/fs.py new --boot shell.s`) puts the image's pages
+in consecutive blocks named by the boot record in block 0
+([`docs/filesystem.md`](filesystem.md)), and `detrytus run --disk
+disk.img` with no program runs detrytus' boot ROM, which loads them into
+pages 1 and up and jumps to `FW_BOOT`. The boot page is the ROM's then,
+so the firmware lives in RAM, in the last `FW_ROOM` (243) trytes of
+the kernel's last code page, labelled at its physical addresses, and
+the image is the same either way.
+
 The firmware enters the kernel on hart 0, which sets up its page
 allocator and then says what it found, on its log, before it starts
 init (`kernel/rust/trykern/src/boot.rs`). This is the boot of the `shell.s` build, with
@@ -82,11 +94,11 @@ the hart's bank is still that process's (`fpu_owner`).
 
 | Physical page | Contents |
 |---------------|----------|
-| 0 | firmware |
+| 0 | the boot page: a jump to the firmware, or detrytus' boot ROM when the kernel boots from a disk |
 | 1 | kernel data and stack |
-| 2, 3, 4 | kernel code (`NKCODE` pages from `P_KCODE`) |
+| 2, 3, 4 | kernel code (`NKCODE` pages from `P_KCODE`); the firmware in the last `FW_ROOM` trytes of page 4, from `FW_BOOT` |
 | 5, 6, 7 | the boot address space; the kernel's shared leaf table |
-| 8 .. 7 + `NPROG` | program images 0 to `NPROG` − 1, at most 27 (`NPROG_MAX`; the demo has 3, the shell build 8) |
+| 8 .. 7 + `NPROG` | program images 0 to `NPROG` − 1, at most 27 (`NPROG_MAX`; the demo has 3, the shell build 11) |
 | 8 + `NPROG` .. the machine's last | free pages, handed out by the allocator |
 
 No kernel structure grows with memory. Free pages are those never yet

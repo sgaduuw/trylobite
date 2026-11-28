@@ -111,17 +111,26 @@ trylobite: process 1 exited with code 0
 trylobite: all processes exited after 9 timer interrupts
 ```
 
-The shell build needs a disk. `make` builds `disk.img`, 100 blocks
-with every program of `bin/` (assembly, Trice and Rust) in `/bin`;
-add a note to it and give the shell a session to read:
+The shell build boots from a disk. `make` builds `disk.img`, 100
+blocks with the kernel in its boot blocks and every program of `bin/`
+(assembly, Trice and Rust) in `/bin`; add a note to it and give the
+shell a session to read:
 
 ```bash
 make
 printf 'Ternary computers count in trits.\n' > notes.txt
 tools/fs.py put disk.img notes.txt
 printf 'ls\ncat notes.txt\nfail\necho "one   arg" two\nhello | upper | wc\ncat notes.txt | upper > shout\ncat shout\nmkdir docs\ncd docs\npwd\nexit\n' > session.txt
-detrytus run shell.s --ram-pages 81 --input session.txt --disk disk.img
+detrytus run --ram-pages 81 --input session.txt --disk disk.img
 ```
+
+Given a disk and no program, detrytus' boot ROM reads the boot record
+in block 0, loads the kernel's pages from the blocks it names and starts
+the firmware (docs/filesystem.md, Block 0; detrytus platform.md, Booting
+from a disk). `tools/fs.py boot disk.img shell.s` puts a rebuilt kernel
+on a disk without touching its files. Naming the build instead,
+`detrytus run shell.s --ram-pages 81 --disk disk.img`, loads the same
+kernel as a file and runs the same disk.
 
 ```text
 trylobite: version 0.1.0, a microkernel for detrytus, the balanced-ternary machine
@@ -185,7 +194,7 @@ Leave out `--input` and run it at a terminal, and the shell stays up
 for you to type at:
 
 ```bash
-detrytus run shell.s --ram-pages 81 --disk disk.img
+detrytus run --ram-pages 81 --disk disk.img
 ```
 
 (`make run` does the same with `--net user`, the network below,
@@ -403,7 +412,7 @@ emulator, so trylobite has never run on hardware.
 |------|----------|
 | `include/layout.s` | every shared constant: memory map, system calls, error numbers, server protocols, the process record |
 | `include/kernel.s` | firmware and kernel together, without programs: included by a build such as `demo.s` |
-| `firmware/boot.s` | ring +1: delegate exceptions, enter the kernel |
+| `firmware/boot.s` | ring +1, at the end of the kernel's last code page: delegate exceptions, enter the kernel; and the boot page's jump to it |
 | `kernel/entry.s` | kernel start: traps, process table, timer |
 | `kernel/trap.s` | trap entry and exit, faults, kills, panics |
 | `kernel/syscall.s` | the system-call trap: the Rust picks the routine (`syscall.rs`), then resume, schedule or release |
@@ -420,7 +429,7 @@ emulator, so trylobite has never run on hardware.
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
 | `shell.s` | an 81-page machine starting the shell and its servers |
 | `docs/` | the kernel and the filesystem, described |
-| `Makefile` | `make` builds `disk.img` with the programs of `bin/`, and the kernel's Rust part; `make run` boots the shell with it; `make benchmark` times the emulator |
+| `Makefile` | `make` builds `disk.img` with the kernel in its boot blocks and the programs of `bin/`, and the kernel's Rust part; `make run` boots it; `make benchmark` times the emulator |
 | `tools/fs.py` | makes and reads filesystem images on the host |
 | `tools/kernel.py` | builds the kernel's Rust part (`make kernel`) |
 | `tools/install-detrytus` | installs the pinned `detrytus` command |

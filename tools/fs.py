@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Build and read trylobite filesystem images (docs/filesystem.md).
 
-    tools/fs.py new IMAGE BLOCKS [FILE ...]   a new filesystem, with files
+    tools/fs.py new IMAGE BLOCKS [FILE ...] [--boot KERNEL]
+                                              a new filesystem, with files,
+                                              and a kernel to boot
+    tools/fs.py boot IMAGE KERNEL             put in a kernel to boot, or
+                                              replace it
     tools/fs.py ls IMAGE [PATH]               a directory's files and sizes
     tools/fs.py cat IMAGE PATH                a file's text, to stdout
     tools/fs.py put IMAGE FILE [PATH]         add a file, or replace it
@@ -15,7 +19,13 @@ given a .s file assembles it first, or a Trice .tc file builds it
 first, linked with the .tc files it imports, or a Rust .rs file builds
 it with cargo and `detrytus ll` (docs/rust.md) (with $DETRYTUS, or
 detrytus on the PATH). Paths start at the
-root, with or without a leading slash. The image is a detrytus disk
+root, with or without a leading slash.
+
+A kernel to boot is a build such as shell.s, assembled here, or its
+.dti image: its RAM pages, from page 1 to its last, go in consecutive
+blocks, and block 0's boot record names them, so that detrytus' boot
+ROM loads them and starts the firmware at FW_BOOT (`detrytus run --disk
+IMAGE` with no program). The image is a detrytus disk
 file, two bytes per tryte, so `detrytus run --disk IMAGE` attaches it.
 The format's numbers are read from
 include/layout.s, which the kernel and programs share.
@@ -182,6 +192,24 @@ def program_file(data: bytes) -> list[int]:
     return split_word(L["EXEC_MAGIC"]) + split_word(len(image)) + image
 
 
+def boot_image(data: bytes) -> list[Block]:
+    """An assembled kernel's RAM pages, from page 1 to its last, as the
+    blocks that hold them: what the boot ROM loads into pages 1 and up.
+    Page 0 is the boot ROM's, so the image's own boot page stays out."""
+    pages: dict[int, Block] = {}
+    for start, trytes in read_dti(data):
+        for address, tryte in enumerate(trytes, start):
+            page = (address + HALF) // PAGE
+            if page < 0:
+                raise FsError(f"a kernel to boot fills device page {page}")
+            if page > 0:
+                block = pages.setdefault(page, Block.blank())
+                block.trytes[address - page * PAGE + HALF] = tryte
+    if not pages:
+        raise FsError("a kernel to boot has nothing in RAM pages")
+    return [pages.get(p, Block.blank()) for p in range(1, max(pages) + 1)]
+
+
 def is_program(trytes: list[int]) -> bool:
     return len(trytes) >= L["EXEC_HEAD"] and join_word(trytes[:3]) == L["EXEC_MAGIC"]
 
@@ -332,6 +360,44 @@ class Filesystem:
         self.set_used(free[0], True)
         self.blocks[free[0]] = Block.blank()
         return free[0]
+
+    # --- the kernel to boot
+
+    def boot_blocks(self) -> range:
+        """The blocks block 0's boot record names, if it has one."""
+        head = self.head
+        if head.word(L["FS_HEAD_BOOT"]) != L["BOOT_MAGIC"]:
+            return range(0)
+        first, count = head.word(L["BOOT_FIRST"]), head.word(L["BOOT_COUNT"])
+        if count < 1 or first < 1 or first + count > self.count:
+            raise FsError(
+                f"the boot record names blocks {first} to {first + count - 1}"
+            )
+        return range(first, first + count)
+
+    def set_boot(self, image: list[Block]) -> None:
+        """Put a kernel's pages (boot_image) in the first run of free
+        blocks that holds them, freeing the one there was, and point the
+        boot record at them."""
+        for block in self.boot_blocks():
+            self.set_used(block, False)
+        n, run = len(image), 0
+        for block in range(self.count):
+            run = run + 1 if not self.used(block) else 0
+            if run == n:
+                break
+        else:
+            raise FsError(f"no {n} free blocks in a row for the kernel")
+        first = block - n + 1
+        for i, page in enumerate(image):
+            self.blocks[first + i] = Block(list(page.trytes))
+            self.set_used(first + i, True)
+        head = self.head
+        head.set_word(L["FS_HEAD_BOOT"], L["BOOT_MAGIC"])
+        head.set_word(L["BOOT_FIRST"], first)
+        head.set_word(L["BOOT_COUNT"], n)
+        head.set_word(L["BOOT_PAGE"], 1)
+        head.set_word(L["BOOT_ENTRY"], L["FW_BOOT"])
 
     # --- inodes
 
@@ -641,7 +707,7 @@ class Filesystem:
                 raise FsError(f"block {block} is marked free")
         if self.inode(L["ROOT_INO"]).type != L["T_DIR"]:
             raise FsError("the root is not a directory")
-        owner = {0: "the header", L["FS_INODE_BLOCK"]: "the inodes"}
+        owner = self._fixed_owners()
         links = self._walk(owner)
         for number in range(1, L["FS_INODES"]):
             node = self.inode(number)
@@ -657,6 +723,14 @@ class Filesystem:
             if self.used(block) != (block in owner):
                 state = "used" if self.used(block) else "free"
                 raise FsError(f"block {block} is marked {state}")
+
+    def _fixed_owners(self) -> dict[int, str]:
+        """The blocks that are not files': the header, the inodes and the
+        kernel to boot."""
+        owner = {0: "the header", L["FS_INODE_BLOCK"]: "the inodes"}
+        for block in self.boot_blocks():
+            self._own(block, "the boot image", owner)
+        return owner
 
     def _walk(self, owner: dict[int, str]) -> dict[int, int]:
         """Every inode the tree reaches, with the links it should have;
@@ -852,6 +926,12 @@ def assemble(source: Path) -> bytes:
         return out.read_bytes()
 
 
+def kernel(file: Path) -> bytes:
+    """A kernel to boot, as an image: a .dti file, or a build such as
+    shell.s assembled."""
+    return assemble(file) if file.suffix == ".s" else file.read_bytes()
+
+
 def put(fs: Filesystem, file: Path, path: str | None = None) -> str:
     """Add a host file: an assembled image, or a .s, .tc or .rs file built
     here, as a program, anything else as text. A program is named after its
@@ -874,6 +954,20 @@ def put(fs: Filesystem, file: Path, path: str | None = None) -> str:
     return path
 
 
+def change(args: argparse.Namespace) -> None:
+    """put, boot, mkdir or rm: load the image, change it, save it."""
+    fs = Filesystem.load(args.image)
+    if args.command == "put":
+        put(fs, args.file, args.path)
+    elif args.command == "boot":
+        fs.set_boot(boot_image(kernel(args.kernel)))
+    elif args.command == "mkdir":
+        fs.mkdir(args.path)
+    else:
+        fs.remove(args.path)
+    fs.save(args.image)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -881,6 +975,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("image", type=Path)
     p.add_argument("blocks", type=int)
     p.add_argument("files", type=Path, nargs="*")
+    p.add_argument("--boot", type=Path, metavar="KERNEL", help="a kernel to boot")
+    p = sub.add_parser("boot", help="put in a kernel to boot")
+    p.add_argument("image", type=Path)
+    p.add_argument("kernel", type=Path)
     p = sub.add_parser("ls", help="list a directory")
     p.add_argument("image", type=Path)
     p.add_argument("path", nargs="?", default="/")
@@ -902,6 +1000,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "new":
             fs = Filesystem.new(args.blocks)
+            if args.boot:
+                fs.set_boot(boot_image(kernel(args.boot)))
             for file in args.files:
                 put(fs, file)
             fs.save(args.image)
@@ -914,14 +1014,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "cat":
             sys.stdout.write(Filesystem.load(args.image).read(args.path))
         else:
-            fs = Filesystem.load(args.image)
-            if args.command == "put":
-                put(fs, args.file, args.path)
-            elif args.command == "mkdir":
-                fs.mkdir(args.path)
-            else:
-                fs.remove(args.path)
-            fs.save(args.image)
+            change(args)
     except (FsError, OSError) as e:
         print(f"fs: {e}", file=sys.stderr)
         return 1

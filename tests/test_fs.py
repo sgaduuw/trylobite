@@ -219,3 +219,113 @@ def test_the_command_line(tmp_path, capsys):
     assert "no such file: note" in capsys.readouterr().err
     assert fs.main(["rm", str(image), "docs"]) == 1
     assert "not empty" in capsys.readouterr().err
+
+
+# --- the kernel to boot (block 0's boot record) ------------------------------
+
+
+def pages(*numbers: int) -> list[fs.Block]:
+    """Blocks standing for kernel pages, each filled with its number."""
+    return [fs.Block([n] * PAGE) for n in numbers]
+
+
+def test_a_kernel_goes_in_free_blocks_that_the_boot_record_names(tmp_path):
+    made = Filesystem.new(12)
+    made.write("a", "x")  # block 3: the root has 2
+    made.set_boot(pages(1, 2, 3))
+    assert made.boot_blocks() == range(4, 7)
+    head = made.head
+    assert head.word(L["FS_HEAD_BOOT"]) == L["BOOT_MAGIC"]
+    assert [head.word(L[k]) for k in ("BOOT_PAGE", "BOOT_ENTRY")] == [1, L["FW_BOOT"]]
+    assert [made.blocks[b].trytes[0] for b in range(4, 7)] == [1, 2, 3]
+    made.write("b", "y")  # files go around it
+    assert made.inode(made.lookup("b")).direct[0] == 7
+    image = tmp_path / "disk.img"
+    made.save(image)
+    assert Filesystem.load(image).boot_blocks() == range(4, 7)  # and check() passes
+
+
+def test_the_record_sits_between_the_header_and_the_map():
+    words = [L[k] for k in ("FS_HEAD_BOOT", "BOOT_FIRST", "BOOT_COUNT", "BOOT_PAGE")]
+    words.append(L["BOOT_ENTRY"])
+    # detrytus docs/platform.md, Booting from a disk: words 3 to 7 of block 0
+    assert words == [L["BLOCK_W0"] + 3 * w for w in range(3, 8)]
+    assert L["FS_HEAD_BLOCKS"] < L["FS_HEAD_BOOT"]
+    assert L["BOOT_ENTRY"] + 1 < L["FS_MAP"]
+
+
+def test_a_new_kernel_replaces_the_old_one():
+    made = Filesystem.new(12)
+    made.set_boot(pages(1, 2))
+    assert made.boot_blocks() == range(3, 5)
+    made.set_boot(pages(1, 2, 3, 4))
+    assert made.boot_blocks() == range(3, 7)  # the old blocks were free again
+    assert made.free_blocks() == list(range(7, 12))
+    made.set_boot(pages(1))
+    assert made.free_blocks() == list(range(4, 12))
+
+
+def test_a_kernel_needs_a_free_run_of_blocks():
+    made = Filesystem.new(8)
+    made.write("a", "x")  # block 3
+    made.write("b", "x")  # block 4
+    made.remove("a")
+    with pytest.raises(FsError, match="no 4 free blocks in a row"):
+        made.set_boot(pages(1, 2, 3, 4))
+    made.set_boot(pages(1, 2, 3))
+    assert made.boot_blocks() == range(5, 8)
+
+
+def test_a_damaged_boot_record_is_noticed():
+    made = Filesystem.new(8)
+    made.set_boot(pages(1, 2))
+    made.head.set_word(L["BOOT_COUNT"], 9)
+    with pytest.raises(FsError, match="boot record names blocks 3 to 11"):
+        Filesystem(made.blocks)
+    made.head.set_word(L["BOOT_COUNT"], 2)
+    made.set_used(4, False)
+    with pytest.raises(FsError, match="block 4 is marked free"):
+        Filesystem(made.blocks)
+
+
+def test_a_kernel_image_is_its_ram_pages_from_page_1():
+    image = build("li a1, 0\n        li a0, SYS_EXIT\n        sys")
+    blocks = fs.boot_image(image.path.read_bytes())
+    last = max((a + PAGE // 2) // PAGE for a in image.trytes)
+    assert len(blocks) == last
+    filled = {a for a in image.trytes if a > PAGE // 2}  # the boot page stays out
+    in_blocks = {
+        p * PAGE + i - PAGE // 2
+        for p, block in enumerate(blocks, 1)
+        for i, t in enumerate(block.trytes)
+        if t
+    }
+    assert in_blocks <= filled
+    # A device page is refused.
+    with pytest.raises(FsError, match="device page -1"):
+        fs.boot_image(fake_dti(-PAGE, [5]))
+
+
+def fake_dti(start: int, trytes: list[int]) -> bytes:
+    """A .dti image of one segment, with empty metadata."""
+    import struct
+
+    trits = []
+    for t in trytes:
+        for _ in range(9):
+            r = (t + 1) % 3 - 1
+            trits.append(r)
+            t = (t - r) // 3
+    trits += [0] * (-len(trits) % 5)
+    data = bytes(
+        sum((trits[i + k] + 1) * 3**k for k in range(5))
+        for i in range(0, len(trits), 5)
+    )
+    return (
+        fs.DTI_MAGIC
+        + struct.pack("<I", 2)
+        + b"{}"
+        + struct.pack("<I", 1)
+        + struct.pack("<qI", start, len(trytes))
+        + data
+    )

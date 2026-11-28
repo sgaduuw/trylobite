@@ -63,3 +63,58 @@ def test_init_says_each_server_it_starts_and_then_the_shell():
         "init: starting sh\n"
         "$ "
     ), after
+
+
+def boot_from(disk: tuple, session: str, harts: int) -> tuple[int, str]:
+    """`detrytus run --disk` with no program: detrytus' boot ROM loads the
+    kernel from the disk's boot blocks. The exit status and the console."""
+    from tests.kernel import detrytus, disk_options, input_options
+
+    done = detrytus(
+        "run",
+        "--ram-pages",
+        "81",
+        "--harts",
+        str(harts),
+        *input_options(session),
+        *disk_options(disk),
+    )
+    return done.returncode, done.stdout
+
+
+def bootable_disk(**texts: str) -> tuple:
+    """bin_disk with shell.s, the kernel, in its boot blocks (tools/fs.py
+    new --boot, as make builds disk.img)."""
+    from tools.fs import Filesystem, boot_image
+
+    path, blocks = bin_disk(blocks=80, **texts)
+    made = Filesystem.load(path)
+    made.set_boot(boot_image(assemble_file(ROOT / "shell.s").path.read_bytes()))
+    made.save(path)
+    return path, blocks
+
+
+def test_the_kernel_boots_from_the_disk(harts):
+    disk = bootable_disk(notes="kept on the disk\n")
+    status, console = boot_from(disk, "hello\ncat notes\nexit\n", harts)
+    assert status == 0, console
+    assert report(console)[0].startswith("trylobite: version")
+    assert f"trylobite: harts: {harts}" in console
+    shell = console.partition("init: starting sh\n")[2]
+    assert "hello from a balanced-ternary machine\n" in shell
+    assert "kept on the disk\n" in shell
+    assert "trylobite: all processes exited" in shell
+
+
+def test_the_same_disk_runs_with_the_kernel_loaded_as_a_file():
+    disk = bootable_disk()
+    result = run_image(
+        assemble_file(ROOT / "shell.s"), input="hello\nexit\n", disk=disk
+    )
+    assert result.exit_code == 0, result.console
+    assert "hello from a balanced-ternary machine\n" in result.after_boot
+
+
+def test_a_disk_without_a_kernel_does_not_boot():
+    status, console = boot_from(bin_disk(), "", 1)
+    assert (status, console) == (1, "boot: no boot record in block 0\n")
