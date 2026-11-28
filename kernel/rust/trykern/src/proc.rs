@@ -45,6 +45,19 @@ impl Proc {
         ((self.0 as isize - kdata::procs_base() as isize) as i32 / PCB_SIZE as i32) as Word
     }
 
+    /// The process whose address space, descriptors and children it
+    /// has (PCB_SPACE): itself, or for a thread the process that
+    /// started it.
+    #[inline(always)]
+    pub fn space(self) -> Proc {
+        Proc::of(load_small_at(self.0, PCB_SPACE) as Word)
+    }
+
+    /// Whether it is a thread: a slot running in another's space.
+    pub fn is_thread(self) -> bool {
+        self.space() != self
+    }
+
     /// The record's address as a word, as the assembly keeps records
     /// in tables (such as drivers).
     pub fn addr_word(self) -> Word {

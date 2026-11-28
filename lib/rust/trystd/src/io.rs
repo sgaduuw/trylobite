@@ -11,6 +11,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
+use crate::sync::LibLock;
 use crate::sys;
 
 /// What went wrong: the kernel's error (a negative E_ number), or one
@@ -553,7 +554,8 @@ pub(crate) fn write_fd(fd: i32, buf: &[u8]) -> Result<usize> {
 
 // --- standard input, output and error -------------------------------------------
 
-/// The buffers behind standard input and output: one each per program.
+/// The buffers behind standard input and output: one each per program,
+/// shared by its threads, each part held by its lock while in use.
 struct Std {
     inbuf: [u8; CHUNK],
     inpos: usize,
@@ -570,12 +572,20 @@ static mut STD: Std = Std {
     outlen: 0,
 };
 
+/// Held while a thread uses inbuf, inpos and inlen.
+static IN: LibLock = LibLock::new();
+/// Held while a thread uses outbuf and outlen: for a whole print!, so
+/// that threads printing at once do not mix their lines.
+static OUT: LibLock = LibLock::new();
+
 fn std() -> &'static mut Std {
-    // One thread of control, and no reference is kept past a call.
+    // Only under IN or OUT, as the fields go, and no reference is kept
+    // past a call.
     unsafe { &mut *core::ptr::addr_of_mut!(STD) }
 }
 
-/// Standard input, buffered: `stdin().lines()`, `read_line`.
+/// Standard input, buffered: `stdin().lines()`, `read_line`. Its threads
+/// share one buffer: read it from one thread at a time.
 pub struct Stdin {
     _private: (),
 }
@@ -602,40 +612,58 @@ impl Stdin {
 
 impl Read for Stdin {
     fn read(&mut self, out: &mut [u8]) -> Result<usize> {
+        IN.lock();
         let s = std();
-        if s.inpos == s.inlen {
-            return read_fd(sys::STDIN, out);
-        }
-        let n = (s.inlen - s.inpos).min(out.len());
-        out[..n].copy_from_slice(&s.inbuf[s.inpos..s.inpos + n]);
-        s.inpos += n;
-        Ok(n)
+        let r = if s.inpos == s.inlen {
+            read_fd(sys::STDIN, out)
+        } else {
+            let n = (s.inlen - s.inpos).min(out.len());
+            out[..n].copy_from_slice(&s.inbuf[s.inpos..s.inpos + n]);
+            s.inpos += n;
+            Ok(n)
+        };
+        IN.unlock();
+        r
     }
 }
 
 impl BufRead for Stdin {
     fn fill_buf(&mut self) -> Result<&[u8]> {
+        IN.lock();
         let s = std();
         if s.inpos == s.inlen {
-            s.inlen = read_fd(sys::STDIN, &mut s.inbuf)?;
-            s.inpos = 0;
+            match read_fd(sys::STDIN, &mut s.inbuf) {
+                Ok(n) => {
+                    s.inlen = n;
+                    s.inpos = 0;
+                }
+                Err(e) => {
+                    IN.unlock();
+                    return Err(e);
+                }
+            }
         }
+        IN.unlock();
         Ok(&s.inbuf[s.inpos..s.inlen])
     }
 
     fn consume(&mut self, n: usize) {
+        IN.lock();
         let s = std();
         s.inpos = (s.inpos + n).min(s.inlen);
+        IN.unlock();
     }
 }
 
 /// Standard output, line buffered.
 pub struct Stdout {
-    _private: (),
+    /// Whether the thread holds OUT already (_print), so that a call
+    /// does not take it again.
+    held: bool,
 }
 
 pub fn stdout() -> Stdout {
-    Stdout { _private: () }
+    Stdout { held: false }
 }
 
 impl Stdout {
@@ -645,6 +673,31 @@ impl Stdout {
 }
 
 impl Write for Stdout {
+    fn write(&mut self, buf: &[u8]) -> Result<usize> {
+        if self.held {
+            return Held.write(buf);
+        }
+        OUT.lock();
+        let r = Held.write(buf);
+        OUT.unlock();
+        r
+    }
+
+    fn flush(&mut self) -> Result<()> {
+        if self.held {
+            return Held.flush();
+        }
+        OUT.lock();
+        let r = Held.flush();
+        OUT.unlock();
+        r
+    }
+}
+
+/// Standard output for a thread that holds OUT.
+struct Held;
+
+impl Write for Held {
     fn write(&mut self, buf: &[u8]) -> Result<usize> {
         let s = std();
         if s.outlen == 0 && buf.len() >= CHUNK {
@@ -697,11 +750,15 @@ impl Write for Stderr {
 
 #[doc(hidden)]
 pub fn _print(args: fmt::Arguments<'_>) {
-    let _ = stdout().write_fmt(args);
+    OUT.lock();
+    let _ = Stdout { held: true }.write_fmt(args);
+    OUT.unlock();
 }
 
 #[doc(hidden)]
 pub fn _eprint(args: fmt::Arguments<'_>) {
-    let _ = stdout().flush();
+    OUT.lock(); // standard output first, and no print! between
+    let _ = Held.flush();
     let _ = stderr().write_fmt(args);
+    OUT.unlock();
 }

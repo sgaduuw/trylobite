@@ -14,7 +14,8 @@
 
         .section program, V_USER, V_USER
         .gp   USER_GP                  # set by spawnw
-_start: mv    s1, a0
+_start: la    tp, rt$more              # the first thread's own words (sys)
+        mv    s1, a0
         mv    s2, a1
         li    t0, 4                    # room for argc pointers, in words
         mul   t1, a0, t0
@@ -92,7 +93,10 @@ brk:    mv    a1, a0
 # i32 taken signed (so -1 is FOR_SELF, not 2^32 - 1), and an address
 # below 2^31 as it is: a0 as an i32. sysu(n, a, b, c, d, e) is the same
 # with a to e taken unsigned, for an IPv4 address of 2^31 or more. What
-# the call leaves in a1 to a3 is kept for sys_more(k) (lib/rust/trystd).
+# the call leaves in a1 to a3 is kept for sys_more(k) (lib/rust/trystd),
+# in three words at tp: each thread's own, so that threads calling at
+# once do not take each other's (rt$more for the first, which _start
+# points tp at; trystd's thread::spawn gives each other its own).
 sys:    li    t0, I32_SIGN
         bxor  a1, a1, t0
         sub   a1, a1, t0
@@ -105,10 +109,9 @@ sys:    li    t0, I32_SIGN
         bxor  a5, a5, t0
         sub   a5, a5, t0
 sysu:   sys
-        la    t0, rt$more
-        sw    a1, 0(t0)
-        sw    a2, 3(t0)
-        sw    a3, 6(t0)
+        sw    a1, 0(tp)
+        sw    a2, 3(tp)
+        sw    a3, 6(tp)
         li    t0, I32_MASK
         band  a0, a0, t0
         ret
@@ -145,8 +148,7 @@ sleep_ticks:
 sys_more:
         li    t0, 3
         mul   a0, a0, t0
-        la    t0, rt$more
-        add   t0, t0, a0
+        add   t0, tp, a0
         lw    a0, 0(t0)
         li    t0, I32_MASK
         band  a0, a0, t0
@@ -169,7 +171,7 @@ argv:   la    t0, rt$argc
         ret
 
         .align 1
-rt$more: .word 0                        # a1, a2 and a3
+rt$more: .word 0                        # a1, a2 and a3 (sys), the first thread's
         .word 0
         .word 0
 rt$argc: .word 0                        # argc, then argv
