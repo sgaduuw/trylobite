@@ -130,6 +130,16 @@ clock:  li    a0, SYS_CLOCK
         mv    a0, t1
         ret
 
+# sleep_ticks(n): wait n ticks of the time CSR. SYS_SLEEP takes the
+# time to wake at, a word, which outgrows an i32 after 35 minutes, so
+# the sum is made here.
+sleep_ticks:
+        csrr  a1, time
+        add   a1, a1, a0
+        li    a0, SYS_SLEEP
+        sys
+        ret
+
 # sys_more(k): a1 (k = 0), a2 or a3 as the last sys or sysu left it,
 # as an i32.
 sys_more:

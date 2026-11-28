@@ -486,6 +486,15 @@
                                           # time CSR (SI_TIME, SYS_SLEEP) stays
                                           # the clock for intervals: ticks since
                                           # boot, which the time of day is not
+        .equ  SYS_STEPCLOCK, 43           # stepclock(seconds, micros): move the
+                                          # time of day (SYS_CLOCK) by a1 seconds
+                                          # and a2 microseconds, -999,999 to
+                                          # 999,999, of the same sign as a1 (or
+                                          # either when a1 is 0): 0; E_INVAL,
+                                          # E_PERM (not a child of init: only the
+                                          # servers and /etc/init's programs may).
+                                          # The machine's clock stays as it is;
+                                          # the kernel keeps the offset (bin/ntpd)
 
 # Files (docs/filesystem.md) come from the file server, which registers
 # as "fs" with protocol FS_PROTOCOL; a program looks it up once, and

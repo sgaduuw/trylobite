@@ -3,7 +3,8 @@
 //! What std is to a Rust program on Unix, this is on trylobite: files
 //! and directories (`fs`), standard I/O and the I/O traits (`io`), the
 //! program's arguments and current directory (`env`), child processes
-//! (`process`), sockets (`net`) and the time of day (`time`), each a
+//! (`process`), sockets (`net`), the time of day (`time`) and waiting
+//! (`thread`), each a
 //! thin, safe layer over the kernel's calls and its servers
 //! (docs/kernel.md), with `alloc`'s
 //! `Vec`, `String` and `Box` over the heap (`heap`). It is written in
@@ -49,6 +50,7 @@ pub mod io;
 pub mod net;
 pub mod process;
 pub mod sys;
+pub mod thread;
 pub mod time;
 
 pub use alloc::{boxed, format, string, vec};

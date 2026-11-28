@@ -2131,3 +2131,40 @@ and the kernel passes it on with one call, `clock()`: seconds since
 - **Later:** setting the clock (an offset the kernel keeps, for a
   `date -s`), file modification times in the filesystem, and time zones.
 
+### 2026-11-28 · Setting the clock: a kernel offset, and ntpd
+
+Eelco asked for an NTP service. The kernel gained `stepclock(seconds,
+micros)`, and `bin/ntpd`, a Rust SNTP client, uses it.
+
+- **The offset is the kernel's.** detrytus' clock is read-only and
+  follows the host's (platform.md: setting it is the operating system's
+  business), so the kernel keeps seconds and microseconds to add, two
+  words in `kernel/data.s`. Rejected: a writable clock in detrytus,
+  which would only move the same offset into the emulator and need a
+  pin bump, with nothing to keep it over power off either.
+- **A step by, not a time to set.** ntpd measures an offset; handing the
+  kernel that offset leaves no gap between reading the clock and
+  setting it. A `date -s` takes the difference itself.
+- **Init's children only.** trylobite has no users, so the line is
+  drawn where the person configuring the machine draws it: the servers
+  and the programs `/etc/init` names may step the clock, anything the
+  shell runs may not (`E_PERM`). Rejected: anyone (any program could
+  move every timestamp), and programs of the kernel image only, as
+  `drive` (ntpd is Rust, so a disk program).
+- **Steps, no slewing.** Unix's adjtime slews small offsets so time
+  never goes back; that needs the kernel to stretch ticks against the
+  clock. A step is enough until something depends on monotonic wall
+  time (files keep no times yet), and ticks remain the clock for
+  intervals.
+- **SNTP, one server, plain polling** (RFC 4330): ask, check that the
+  answer echoes the transmit time, the stratum is 1 to 15 (0 is a kiss
+  of death) and the server is synchronised, step by ((t2 − t1) +
+  (t3 − t4)) / 2, and ask again every 1,024 s. Rejected for now: full
+  NTP's filtering and several servers.
+- **Not started by default.** At 81 pages, ntpd's 6 left too little for
+  a three-program pipe in the README's session, and without a network
+  it only reports failures; the line is in `etc/init`, commented out,
+  for a machine with the network and room (`make run`).
+- **Tests need no internet.** `tests/ntpsd.rs` answers on the
+  machine's own address over a loop link with the machine's clock plus
+  a fixed offset, and `--clock` fixes that clock.
