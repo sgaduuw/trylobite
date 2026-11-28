@@ -9,7 +9,7 @@ use crate::kdata;
 use crate::layout::*;
 use crate::proc::Proc;
 use crate::word::{Word, load_at};
-use crate::{desc, devices, ipc, names};
+use crate::{desc, devices, ipc, names, thread};
 
 /// Process `pid` if it is a child of process `parent`, ended or not;
 /// else E_NOCHILD.
@@ -31,7 +31,7 @@ fn child(pid: Word, parent: Word) -> Result<Proc, Word> {
 #[unsafe(no_mangle)]
 pub extern "C" fn rk_sys_wait(p: *mut u8) -> i32 {
     let p = Proc(p);
-    match child(p.get(PCB_A1), p.pid()) {
+    match child(p.get(PCB_A1), p.space().pid()) {
         Err(e) => {
             p.set(PCB_A0, e);
             0
@@ -72,17 +72,17 @@ fn kill(p: Proc) -> Word {
     let pid = p.get(PCB_A1);
     let on_behalf = p.get(PCB_A2);
     if on_behalf == KILL_ANY {
-        if Proc::alive(pid).is_none() {
+        let Some(q) = Proc::alive(pid) else {
             return E_NOPROC;
-        }
-        if pid == 0 {
-            return E_PERM; // init, which the rest needs
+        };
+        if q.space().pid() == 0 {
+            return E_PERM; // init, which the rest needs, or a thread of it
         }
         kill_pid(pid);
         return 0;
     }
     let parent = if on_behalf == FOR_SELF {
-        p.pid()
+        p.space().pid() // a thread's children are its process's
     } else {
         if !drives_any(p) {
             return E_PERM;
@@ -105,23 +105,21 @@ pub fn drives_any(p: Proc) -> bool {
     (0..NSRC).any(|k| load_at(kdata::drivers_base(), 3 * k) == me)
 }
 
-/// Mark process `pid` killed, if it has not ended; on_kill ends it the
-/// next time the kernel would run it (ktrap, resume). One blocked in any
-/// system call (recv, wait, call, receive, lookup) is made ready for
-/// that, since nothing else would wake it.
+/// End process `pid`, every thread of it, if it has not ended; each
+/// goes the next time the kernel would run it (ktrap, resume), and one
+/// blocked in any system call (recv, wait, call, receive, lookup) is
+/// made ready for that, since nothing else would wake it. A thread's
+/// number ends its whole process.
 fn kill_pid(pid: Word) {
     let q = Proc::of(pid);
     if q.is(ST_EXITED) || q.is(ST_ZOMBIE) {
         return; // already gone
     }
-    q.set(PCB_KILLED, 1);
-    // Ready or running, it goes when next run; blocked, it is made ready.
-    if q.state() < 0 {
-        q.ready();
-    }
+    thread::end(q.space(), WAIT_KILLED, 0);
 }
 
-/// Process `p` has ended and its pages are free (release, mm.rs).
+/// Process `p` has ended, after every thread of it, and its pages are
+/// free (release, mm.rs).
 /// Servers, devices, names and descriptors hear of it first. Then orphan
 /// its children, freeing those already ended, since nobody can wait for
 /// them now; hand how it ended to its parent if the parent waits for it,
@@ -129,6 +127,9 @@ fn kill_pid(pid: Word) {
 /// parent simply goes.
 pub fn bury(p: Proc) {
     let pid = p.pid();
+    // How it ended, as rk_release recorded it when it began to end.
+    p.set(PCB_A0, p.get(PCB_HOW));
+    p.set(PCB_A1, p.get(PCB_CODE));
     ipc::rk_ipc_ended(p.0, pid as i32); // servers learn of it
     devices::rk_drv_ended(p.0); // its devices go
     names::rk_srv_ended(pid as i32); // and its names
@@ -139,6 +140,8 @@ pub fn bury(p: Proc) {
             if q.is(ST_ZOMBIE) {
                 q.set(PCB_STATE, ST_EXITED);
             }
+        } else if q.is(ST_ZOMBIE) && q != p && q.get(PCB_SPACE) == pid {
+            q.set(PCB_STATE, ST_EXITED); // a thread nobody joined
         }
     }
     let parent = p.get(PCB_PARENT);

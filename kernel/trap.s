@@ -230,18 +230,11 @@ on_fault:
         sw    t0, PCB_A1(s0)
         j     release
 
-# The process in s0 was killed (kill_pid): end it, as wait reports.
+# The process or thread in s0 was killed (kill_pid, or its process
+# ending): end it, as wait reports (thread.rs says so and sets a0, a1).
 on_kill:
-        sw    zero, PCB_KILLED(s0)
-        la    a0, msg_proc
-        call  kputs
-        call  current_pid
-        call  kputn
-        la    a0, msg_killed
-        call  kputs
-        li    t0, WAIT_KILLED
-        sw    t0, PCB_A0(s0)
-        sw    zero, PCB_A1(s0)
+        mv    a0, s0
+        call  rk_on_kill
         j     release
 
 # A trap inside the kernel: nothing to save, nowhere to return to.

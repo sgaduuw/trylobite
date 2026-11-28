@@ -8,10 +8,13 @@
 //! and leaves what is left over on the list, and a block given back is
 //! merged with the free blocks either side of it. Sizes and addresses
 //! are multiples of UNIT, so a free block always has room for its two
-//! fields.
+//! fields. Threads share the heap, so once there are any each call
+//! holds LOCK.
 
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::null_mut;
+
+use crate::sync::LibLock;
 
 unsafe extern "C" {
     fn brk(end: usize) -> isize;
@@ -31,6 +34,8 @@ static mut LIST: *mut Free = null_mut();
 /// The break, rounded up to a unit: where the heap ends; 0 before the
 /// first allocation asks the kernel.
 static mut TOP: usize = 0;
+/// Held by the thread in an allocator call: LIST and TOP are its.
+static LOCK: LibLock = LibLock::new();
 
 fn round(n: usize, to: usize) -> usize {
     (n + to - 1) / to * to
@@ -115,49 +120,69 @@ unsafe fn grow(more: usize) -> bool {
 
 unsafe impl GlobalAlloc for Heap {
     unsafe fn alloc(&self, l: Layout) -> *mut u8 {
-        let size = round(l.size().max(1), UNIT);
-        let align = l.align().max(UNIT);
-        unsafe {
-            let p = take(size, align);
-            if !p.is_null() || !grow(size + align) {
-                return p;
-            }
-            take(size, align)
-        }
+        LOCK.lock();
+        let p = unsafe { alloc(l) };
+        LOCK.unlock();
+        p
     }
 
     unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
-        unsafe { give(p as usize, round(l.size().max(1), UNIT)) }
+        LOCK.lock();
+        unsafe { dealloc(p, l) };
+        LOCK.unlock();
     }
 
-    /// In place when it can be: shrinking gives the tail back, and
-    /// growing takes what follows the block if that is free, or more
-    /// from the kernel if the block ends the heap, so that a Vec growing
-    /// at the top of the heap is never copied. Else as GlobalAlloc's own.
     unsafe fn realloc(&self, p: *mut u8, l: Layout, new: usize) -> *mut u8 {
-        let at = p as usize;
-        let old = round(l.size().max(1), UNIT);
-        let want = round(new.max(1), UNIT);
-        unsafe {
-            if want <= old {
-                if want < old {
-                    give(at + want, old - want);
-                }
-                return p;
-            }
-            if at + old == TOP && grow(want - old) {
-                // The new pages are on the list now, next to the block.
-            }
-            if take_at(at + old, want - old) {
-                return p;
-            }
-            let q = self.alloc(Layout::from_size_align_unchecked(new, l.align()));
-            if !q.is_null() {
-                core::ptr::copy_nonoverlapping(p, q, l.size());
-                self.dealloc(p, l);
-            }
-            q
+        LOCK.lock();
+        let q = unsafe { realloc(p, l, new) };
+        LOCK.unlock();
+        q
+    }
+}
+
+unsafe fn alloc(l: Layout) -> *mut u8 {
+    let size = round(l.size().max(1), UNIT);
+    let align = l.align().max(UNIT);
+    unsafe {
+        let p = take(size, align);
+        if !p.is_null() || !grow(size + align) {
+            return p;
         }
+        take(size, align)
+    }
+}
+
+unsafe fn dealloc(p: *mut u8, l: Layout) {
+    unsafe { give(p as usize, round(l.size().max(1), UNIT)) }
+}
+
+/// In place when it can be: shrinking gives the tail back, and growing
+/// takes what follows the block if that is free, or more from the
+/// kernel if the block ends the heap, so that a Vec growing at the top
+/// of the heap is never copied. Else as GlobalAlloc's own.
+unsafe fn realloc(p: *mut u8, l: Layout, new: usize) -> *mut u8 {
+    let at = p as usize;
+    let old = round(l.size().max(1), UNIT);
+    let want = round(new.max(1), UNIT);
+    unsafe {
+        if want <= old {
+            if want < old {
+                give(at + want, old - want);
+            }
+            return p;
+        }
+        if at + old == TOP && grow(want - old) {
+            // The new pages are on the list now, next to the block.
+        }
+        if take_at(at + old, want - old) {
+            return p;
+        }
+        let q = alloc(Layout::from_size_align_unchecked(new, l.align()));
+        if !q.is_null() {
+            core::ptr::copy_nonoverlapping(p, q, l.size());
+            dealloc(p, l);
+        }
+        q
     }
 }
 

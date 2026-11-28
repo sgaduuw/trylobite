@@ -14,10 +14,11 @@ pub fn uva(p: Proc, a: Word) -> Option<(*mut u8, Word)> {
     (!at.is_null()).then(|| (at, page_left(a)))
 }
 
-/// uva's address alone, or null: an Option of two values comes back
+/// uva's address alone, or null, for process or thread `p`: an Option of two values comes back
 /// through memory, and copies between processes ask this for every page
 /// they touch.
 pub fn user_at(p: Proc, a: Word) -> *mut u8 {
+    let p = p.space(); // a thread's memory is its process's
     let none = core::ptr::null_mut();
     let from = a - (V_USER - 9841); // trytes from its own page's first
     if from < 0 || from > i32::MAX as Word {
