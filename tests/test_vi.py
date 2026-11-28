@@ -63,16 +63,82 @@ def test_normal_mode_changes(shell):
 
 
 def test_counts_words_and_undo(shell):
-    # 2dd takes two lines; u brings them back, and u again takes them
-    # once more. G goes to the last line, w to its next word, and D cuts
-    # the rest of the line.
+    # 2dd takes two lines and x the f of "first"; u twice brings them
+    # back, a third u has nothing left, and Ctrl-R makes the 2dd again.
+    # G goes to the last line, w to its next word, and D cuts the rest
+    # of the line.
     out, fs = edit(
         shell,
-        "vi text\r2dduuGwD:x\r",
+        "vi text\r2ddxuuu\x12GwD:x\r",
         text="a b\nc d\nfirst second third\n",
     )
+    assert "Already at oldest change" in out
     assert vi_exit(out) == 0
     assert fs.read("text") == "first \n"
+
+
+def test_undoing_every_change_leaves_nothing_to_write(shell):
+    out, fs = edit(shell, f"vi notes\rddxiz{ESC}uuu:q\r", notes=NOTES)
+    assert "No write since" not in out
+    assert vi_exit(out) == 0
+    assert fs.read("notes") == NOTES
+
+
+def test_operators_with_motions(shell):
+    # dw takes a word; cw changes one, not the blank after it; d$ cuts to
+    # the line's end; 2dw two words; de to a word's end; cc a whole line.
+    out, fs = edit(
+        shell,
+        f"vi t\rdwcwB{ESC}wd$j02dwjdejcc7{ESC}:wq\r",
+        t="alpha beta gamma delta\none two three\nfour five six\nseven\n",
+    )
+    assert vi_exit(out) == 0
+    assert fs.read("t") == "B \nthree\n five six\n7\n"
+
+
+def test_yank_put_and_repeat(shell):
+    # yw copies a word and P puts it before the cursor; dw and . take
+    # two words; xp swaps two characters.
+    out, fs = edit(
+        shell,
+        "vi t\rywjPk0dw.Gxp:wq\r",
+        t="one two three\nx\nab\n",
+    )
+    assert vi_exit(out) == 0
+    assert fs.read("t") == "three\none x\nba\n"
+
+
+def test_repeat_an_insert(shell):
+    out, fs = edit(shell, f"vi notes\rA!{ESC}j.j.gg~:wq\r", notes=NOTES)
+    assert vi_exit(out) == 0
+    assert fs.read("notes") == "One!\ntwo!\nthree!\n"
+
+
+def test_finding_characters_and_brackets(shell):
+    # % goes to the bracket that matches; f and F find a character, ;
+    # finds it again and , the other way; ct changes up to one.
+    out, fs = edit(
+        shell,
+        f"vi t\rf(%xj0f,;Dj0f-;,xj0ctoX{ESC}:wq\r",
+        t="call(a, (b), c) end\na,b,c,d\nx-y-z\none two\n",
+    )
+    assert vi_exit(out) == 0
+    assert fs.read("t") == "call(a, (b), c end\na,b\nxy-z\nXo\n"
+
+
+def test_search(shell):
+    # /ban finds the next banana and n the one after, then round to the
+    # first again; ? searches backwards; d/split deletes up to a match;
+    # a pattern ending in $ matches only at a line's end.
+    out, fs = edit(
+        shell,
+        "vi t\r/ban\rnnx?err\rD/zzz\rd/split\rgg/a$\rx:wq\r",
+        t="apple\nbanana\ncherry\nbanana split\n",
+    )
+    assert "search hit BOTTOM, continuing at TOP" in out
+    assert "Pattern not found: zzz" in out
+    assert vi_exit(out) == 0
+    assert fs.read("t") == "apple\nanan\ncsplit\n"
 
 
 def test_quit_refuses_to_lose_changes(shell):
