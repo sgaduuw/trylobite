@@ -439,7 +439,7 @@ emulator, so trylobite has never run on hardware.
 | `kernel/data.s` | the process table, buffers, messages |
 | `kernel/pagetables.s` | the boot address space and the kernel's shared leaf table |
 | `user/` | programs built into the kernel image: `demo-init`, `ping` and `pong` for the demo; `init`, `sh`, `pingpong` and the servers `fsd`, `diskd`, `consd`, `piped`, `netd` and `ipd` for the shell |
-| `bin/` | programs for the disk, in Rust over trystd (`kill` still assembly), each built on its own: `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `cp`, `mv`, `touch`, the system tools `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`, `date`, `ntpd`, `ping`, `ifconfig`, `host` and `nc` for the network, and `rfact`, `rmandel`, `rsqrt`, `rsort`, `tee`, `xargs`, `fetch`, `httpd` and `vi` |
+| `bin/` | programs for the disk, in Rust over trystd (`kill` still assembly), each built on its own: `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `cp`, `mv`, `touch`, the system tools `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`, `date`, `ntpd`, `ping`, `ifconfig`, `host` and `nc` for the network, and `rfact`, `rmandel`, `rsqrt`, `rsort`, `tee`, `xargs`, `fetch`, `httpd`, `vi` and `stty` |
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
 | `shell.s` | an 81-page machine starting the shell and its servers |
 | `docs/` | the kernel and the filesystem, described |
