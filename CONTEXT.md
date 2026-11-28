@@ -2486,6 +2486,40 @@ running a line, the built-ins), over trystd.
 - **Still 60 characters a line**, as the tests pin; a longer line is a
   constant now (`LINE_MAX`).
 
+### 2026-11-28 · One Rust for every machine: reproducible builds
+
+`make benchmark` counted different steps on Eelco's Mac (735M) and in
+the cloud (731M) for the same trylobite and detrytus: the programs and
+the kernel's Rust were built with whatever rustc each machine had, and
+a build also carried the machine's paths.
+
+- **The release is pinned.** `rust-toolchain.toml` names 1.100.1 (the
+  stable of the day), with `rust-src` and the target, which rustup
+  installs on first use. The kernel's crate is in the repository, so
+  rustup finds the file there; `tools/fs.py` builds each program in a
+  project of its own under the temporary directory, so it copies the
+  file in. A rustc that is not the pinned one (a Rust without rustup)
+  gets a warning, not an error. CI installs what the file names instead
+  of stable. Moving the pin changes the count (1.97.0 counted
+  836,498,963, 1.100.1 841,405,340), so it moves in its own commit.
+- **No paths of the machine.** rustc writes the source file of every
+  place a panic could start into the IR (`Location`), and those strings
+  land in the programs' data: `/home/…/trylobite/bin/cp.rs`, and with
+  `-Zbuild-std` `~/.rustup/toolchains/<name>/lib/rustlib/src/rust/…`,
+  whose toolchain name holds the host. Their lengths move the data, and
+  so addresses and relaxation. `tools/toolchain.py` maps the repository
+  to `/trylobite` and rust-src to `/rustc/COMMIT` (as rustc's own std
+  has it) with `--remap-path-prefix`, in `CARGO_ENCODED_RUSTFLAGS` so a
+  path with spaces stays whole. Crate hashes still differ between
+  checkouts (cargo hashes the path), but they are only in symbol names
+  and change nothing in the image: two checkouts, at different paths
+  (one with a space) and with different temporary directories, build
+  byte-identical disks.
+- **One target directory per release.** Builds picked the newest
+  `core-*.ll` by time, so going back to a toolchain whose core was built
+  earlier took the other one's core (an undefined symbol). Each rustc
+  release and commit builds in a directory of its own now.
+
 ### 2026-11-28 · DHCP, telnet and a remote shell
 
 Eelco asked for networking extras: a telnet client, a simple remote

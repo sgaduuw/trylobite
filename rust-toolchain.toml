@@ -1,0 +1,10 @@
+# The exact Rust every machine builds trylobite's Rust with (the kernel's
+# crate, the programs of bin/, trystd), so that they come out the same
+# everywhere and `make benchmark` counts the same steps (tools/toolchain.py).
+# rustup installs it on first use. Moving it to a newer release changes
+# the programs, and so the benchmark's step count: say so in the commit.
+[toolchain]
+channel = "1.100.1"
+profile = "minimal"
+components = ["rust-src"]
+targets = ["riscv32imac-unknown-none-elf"]
