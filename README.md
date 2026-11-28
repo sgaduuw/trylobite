@@ -328,7 +328,7 @@ The programs on the disk are `hello`, `fail` (exits with 3), `spin`
 (loops for ever, for Ctrl-C), `echo`, `upper` (standard input to output
 in capitals) and `wc` (lines, words and code points), system tools
 as on Unix: `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`,
-`sleep` and `df` (docs/kernel.md, System tools), and `ping`,
+`sleep`, `df` and `date` (docs/kernel.md, System tools), and `ping`,
 `ifconfig`, `host` and `nc` for the network. `rhello`, `recho`,
 `rfact` (a table of factorials up to 34!, with `println!` and 128-bit
 integers), `rmandel` (the Mandelbrot set in characters, in `f32`
@@ -336,11 +336,11 @@ floating point on detrytus's binary coprocessor), `rsqrt` (square
 roots printed with `{}`, a program of two blocks for core's float
 formatting) and `rsort` (standard input's lines sorted, as Unix's
 `sort`, in `Vec`s and `String`s on the heap) are written in Rust, and
-so are `tee`, `xargs`, and `fetch` and `httpd`, an HTTP/1.0 client and
+so are `date`, `tee`, `xargs`, and `fetch` and `httpd`, an HTTP/1.0 client and
 server (`httpd -n 1 notes | fetch -` serves a file to itself). They
 are translated from rustc's LLVM IR by `detrytus ll` (detrytus
 docs/rust.md) and built on trystd (`lib/rust/trystd`), the system
-library: files, standard I/O, processes and sockets with std's names,
+library: files, standard I/O, processes, sockets and the time of day with std's names,
 over the kernel's calls, in Rust alone. Building them needs `rustup component add
 rust-src` and `rustup target add riscv32imac-unknown-none-elf`.
 
@@ -425,7 +425,7 @@ emulator, so trylobite has never run on hardware.
 | `kernel/data.s` | the process table, buffers, messages |
 | `kernel/pagetables.s` | the boot address space and the kernel's shared leaf table |
 | `user/` | programs built into the kernel image: `demo-init`, `ping` and `pong` for the demo; `init`, `sh`, `pingpong` and the servers `fsd`, `diskd`, `consd`, `piped`, `netd` and `ipd` for the shell |
-| `bin/` | programs for the disk, each assembled on its own: `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `cp`, `mv`, `touch`, the system tools `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`, and `ping`, `ifconfig`, `host` and `nc` for the network; and in Rust, `rhello`, `recho`, `rfact`, `rmandel`, `rsqrt`, `rsort`, `tee`, `xargs`, `fetch` and `httpd` |
+| `bin/` | programs for the disk, each assembled on its own: `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `cp`, `mv`, `touch`, the system tools `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`, and `ping`, `ifconfig`, `host` and `nc` for the network; and in Rust, `rhello`, `recho`, `rfact`, `rmandel`, `rsqrt`, `rsort`, `date`, `tee`, `xargs`, `fetch` and `httpd` |
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
 | `shell.s` | an 81-page machine starting the shell and its servers |
 | `docs/` | the kernel and the filesystem, described |

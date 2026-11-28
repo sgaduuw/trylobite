@@ -434,10 +434,13 @@ def run_image(
     input: str | None = None,
     disk: tuple[Path, int] | None = None,
     link: str | None = None,
+    clock: int | None = None,
 ) -> Run:
     """Run an image; input, if given, is what the console has to read,
     disk, if given, is (file, blocks) for its block device, and link, if
-    given, is the network device's link, as detrytus --net takes it. The
+    given, is the network device's link, as detrytus --net takes it;
+    clock, if given, fixes the real-time clock to start that many seconds
+    after 1970 (detrytus --clock), else it is the host's. The
     machine has the RAM image.ram_pages names unless ram_pages says otherwise."""
     harts = HARTS if harts is None else harts
     ram_pages = image.ram_pages if ram_pages is None else ram_pages
@@ -457,6 +460,7 @@ def run_image(
         *inputs,
         *disks,
         *(["--net", link] if link else []),
+        *(["--clock", str(clock)] if clock is not None else []),
         str(image.path),
     )
     code: int | None = None
@@ -490,10 +494,11 @@ def run(
     net: bool = False,
     ip: bool = False,
     link: str | None = None,
+    clock: int | None = None,
 ) -> Run:
     image = build(
         init, prog1, prog2, ram_pages, files, disk_server, console, pipes, net, ip
     )
     return run_image(
-        image, ram_pages, max_steps, harts, plug, unplug, input, disk, link
+        image, ram_pages, max_steps, harts, plug, unplug, input, disk, link, clock
     )

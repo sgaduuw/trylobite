@@ -166,6 +166,7 @@ is as it was, since the trap entry saves them all. Trice relies on this
 | 39 | `notify(pid)` | tells process `pid`, without waiting, that the caller wants its attention: its `receive` gives a `NOTE_SIGNAL` notice naming the caller, once however often it was notified since: 0; −2 no such process, −3 `pid` is the caller |
 | 40 | `alarm(until)` | when the `time` CSR reaches `until`, the caller's `receive` gives a `NOTE_ALARM` notice; a later alarm replaces an earlier one, and `NO_ALARM` (−1) cancels it: 0 |
 | 41 | `brk(end)` | makes the caller's heap reach `end`, in whole zeroed pages from `HEAP_START`: the break, the first address past the heap; an `end` inside the heap, or `BRK_QUERY` (0), only asks, since the heap never shrinks; −10 (`E_INVAL`) for an `end` below `HEAP_START` or past `HEAP_MAX` pages, −3 (`E_NOMEM`) when the pages are not there, and then it maps none |
+| 42 | `clock()` | the time of day, from the machine's real-time clock: `a0` whole seconds since 1970-01-01 00:00:00 UTC (Unix time, negative before 1970), `a1` the microseconds past that second, 0 to 999,999; it cannot fail (System tools, The time of day) |
 
 Numbers 9, 11, 12 and 14 are free: console input, blocks and
 files are not system calls but calls to the console server, the disk
@@ -189,7 +190,7 @@ until the table of `NPROC` (27) wraps around.
 ## System tools
 
 `bin/` has tools that look at the system as Unix's do: `ps`, `top`,
-`kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep` and `df`. The kernel
+`kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df` and `date`. The kernel
 only reports; the tools read it with a few calls and format it
 (`kernel/rust/trykern/src/info.rs` and `procinfo.rs`), and `df` asks the file server
 (`FS_STATFS`, docs/filesystem.md).
@@ -207,9 +208,23 @@ interrupts taken), `SI_PAGES` and `SI_FREE` (memory, in pages),
 zombies included), `SI_HARTS` (harts present) and the kernel's version
 as a string from `SI_RELEASE`: `uname -a` says `trylobite 0.1.0
 detrytus`, `uptime` `up 1171367 ticks, 9 processes, 1 hart`, and `free`
-memory in pages and in trytes. The machine has no seconds: its clock,
-the `time` CSR, counts one tick per step (detrytus platform.md, Time),
-so times are in ticks.
+memory in pages and in trytes. The `time` CSR counts one tick per step
+(detrytus platform.md, Time), so times since boot (`uptime`, `ps`,
+`top`, `sleep`) are in ticks.
+
+**The time of day.** `clock` reads the machine's real-time clock
+(detrytus platform.md, The real-time clock): Unix seconds and
+microseconds, in UTC, with no time zones. It is a system call rather
+than a server's: it is two loads from the power page, which the kernel
+maps anyway, with no state to keep and nothing to wait for. trystd's
+`time::SystemTime::now()` calls it, and `time::Utc` turns seconds into
+a date; `bin/date` prints it (`date`, `date +%F_%T`, `date -d
+@SECONDS`). The clock is the host's, unless detrytus runs with
+`--clock SECONDS` (as the tests do), which starts it at a fixed time
+and moves it a microsecond a tick. Ticks stay the clock for intervals:
+how fast ticks pass in real time depends on how the machine runs, and
+the time of day is not steady either. Nothing sets the clock yet, and
+files keep no times.
 
 **Processes.** `proc` fills, for one process, `PI_STATE` (an `ST_`
 value), `PI_PARENT` (`NO_PARENT`, −1, for none), `PI_PAGES` (its four,

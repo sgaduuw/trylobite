@@ -49,7 +49,7 @@ def test_head_says_the_first_lines_of_files_or_its_input(shell):
     )
     assert said(shell, "ls bin | head -n 2\nhead -n 1 < notes\n", on) == (
         "$ ls bin | head -n 2\n"
-        f"{_size('cp')} cp\n{_size('df')} df\n"
+        f"{_size('cp')} cp\n{_size('date')} date\n"
         "$ head -n 1 < notes\none apple\n$ \n"
     )
 

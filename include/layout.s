@@ -37,6 +37,11 @@
         .equ  POWER_PA, -2 * PAGE         # power-off register, for firmware
         .equ  POWER_RAM, 3                # with the power-off register: reads
                                           # how many RAM pages the machine has
+        .equ  POWER_CLOCK, 6              # ... the real-time clock: seconds since
+                                          # 1970-01-01 UTC; reading it latches
+        .equ  POWER_CLOCK_US, 9           # ... the microseconds past that second
+                                          # (detrytus platform.md, The real-time
+                                          # clock)
 
 # --- virtual memory ------------------------------------------------------------
 # Every address space has the same regions, all in root entry 0, a mid
@@ -472,6 +477,15 @@
                                           # outside HEAP_START .. HEAP_START +
                                           # HEAP_MAX * PAGE), E_NOMEM
         .equ  BRK_QUERY, 0
+        .equ  SYS_CLOCK, 42               # clock(): the time of day, from the
+                                          # machine's real-time clock: a0 = whole
+                                          # seconds since 1970-01-01 00:00:00 UTC
+                                          # (Unix time; before 1970, negative),
+                                          # a1 = microseconds past that second,
+                                          # 0 to 999,999. It cannot fail. The
+                                          # time CSR (SI_TIME, SYS_SLEEP) stays
+                                          # the clock for intervals: ticks since
+                                          # boot, which the time of day is not
 
 # Files (docs/filesystem.md) come from the file server, which registers
 # as "fs" with protocol FS_PROTOCOL; a program looks it up once, and

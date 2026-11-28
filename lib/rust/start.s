@@ -113,6 +113,23 @@ sysu:   sys
         band  a0, a0, t0
         ret
 
+# clock(): the time of day (SYS_CLOCK), split for Rust, whose i64 is
+# two limbs: the seconds' low 32 bits as a u32; after it, sys_more(0)
+# is their high part (the seconds >> 32, an i32) and sys_more(1) the
+# microseconds.
+clock:  li    a0, SYS_CLOCK
+        sys
+        li    t0, I32_MASK
+        band  t1, a0, t0
+        sub   a0, a0, t1
+        li    t2, 4294967296           # 2^32: exact, the low bits are gone
+        div   a0, a0, t2
+        la    t0, rt$more
+        sw    a0, 0(t0)
+        sw    a1, 3(t0)
+        mv    a0, t1
+        ret
+
 # sys_more(k): a1 (k = 0), a2 or a3 as the last sys or sysu left it,
 # as an i32.
 sys_more:
