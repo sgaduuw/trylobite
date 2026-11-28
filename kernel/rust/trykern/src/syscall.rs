@@ -9,7 +9,7 @@ use crate::mem::{page_left, user_at};
 use crate::proc::Proc;
 use crate::kdata::{read, write};
 use crate::word::{Word, addr, load_at, load_small_at};
-use crate::{desc, devices, info, ipc, mm, names, procinfo, signal, thread, wait};
+use crate::{desc, devices, info, ipc, jobs, mm, names, procinfo, signal, thread, wait};
 
 /// The caller goes on (resume).
 pub const RESUME: i32 = 0;
@@ -46,7 +46,7 @@ pub extern "C" fn rk_syscall(p: *mut u8) -> i32 {
 
 /// Each call's routine, by its number (SYS_ in include/layout.s): one
 /// indirect call, where a chain of tests took 40 for the last.
-static CALLS: [fn(Proc) -> i32; SYS_ENVIRON as usize + 1] = [
+static CALLS: [fn(Proc) -> i32; SYS_KILLPG as usize + 1] = [
     sys_putc,           // 0
     sys_send,           // 1
     sys_recv,           // 2
@@ -102,6 +102,10 @@ static CALLS: [fn(Proc) -> i32; SYS_ENVIRON as usize + 1] = [
     signal::sys_sigreturn, // 52
     sys_monotonic,      // 53
     sys_environ,        // 54
+    wait::sys_waitpid,  // 55
+    jobs::sys_setpgrp,  // 56
+    jobs::sys_getpgrp,  // 57
+    jobs::sys_killpg,   // 58
 ];
 
 const _: () = assert!(
@@ -119,6 +123,10 @@ const _: () = assert!(
         && SYS_SIGRETURN == 52
         && SYS_MONOTONIC == 53
         && SYS_ENVIRON == 54
+        && SYS_WAITPID == 55
+        && SYS_SETPGRP == 56
+        && SYS_GETPGRP == 57
+        && SYS_KILLPG == 58
 );
 
 /// A number that names no call.

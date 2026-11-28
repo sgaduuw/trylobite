@@ -76,11 +76,19 @@ enum Started<'a> {
 /// It has been said why a command did not start; the status it leaves.
 pub struct Stop(pub i32);
 
-/// A pipeline running in the background.
-pub struct BgJob {
+/// A job: a pipeline's programs, running in the background or stopped.
+pub struct JobEntry {
+    /// Its number, %N; 0 until it has one.
     pub id: u32,
+    /// The process group its programs are in, with job control.
+    pub pgrp: Option<u32>,
     pub children: Vec<Child>,
+    /// How many of its programs (in order) have been waited for.
+    pub done: usize,
     pub text: Vec<u8>,
+    pub stopped: bool,
+    /// The signal that stopped it last.
+    pub stopsig: i32,
 }
 
 impl Shell {
@@ -132,38 +140,52 @@ impl Shell {
     fn pipeline(&mut self, cmds: &[Command], background: bool) -> i32 {
         let mark = self.saves.len();
         let mut children: Vec<Option<Child>> = Vec::new();
+        // With job control, the job's programs are a group of their own
+        // from their first instruction (sh/run.rs: started).
+        let monitor = self.interactive;
+        if monitor {
+            self.set_child_group(process::Group::New, !background);
+        }
         let r = self.stages(cmds, background, &mut children);
+        if monitor {
+            self.set_child_group(process::Group::Same, false);
+        }
+        self.release();
         self.restore_to(mark);
         self.close_strays();
+        let last_ran = children.last().is_some_and(|c| c.is_some());
+        let started: Vec<Child> = children.into_iter().flatten().collect();
+        let pgrp = if monitor { started.first().map(|c| c.id()) } else { None };
+        let job = JobEntry {
+            id: 0,
+            pgrp,
+            children: started,
+            done: 0,
+            text: describe(cmds),
+            stopped: false,
+            stopsig: sys::SIGTSTP,
+        };
         if background {
-            let started: Vec<Child> = children.into_iter().flatten().collect();
-            if let Some(last) = started.last() {
+            if let Some(last) = job.children.last() {
                 self.last_bg = Some(last.id());
-                let id = self.jobs.iter().map(|j| j.id).max().unwrap_or(0) + 1;
+                let id = self.next_job_id();
                 if self.interactive {
                     Out::err().c(b'[').n(id as i32).b(b"] ").n(last.id() as i32).nl();
                 }
-                self.jobs.push(BgJob { id, children: started, text: describe(cmds) });
+                self.jobs.push(JobEntry { id, ..job });
             }
             return match r {
                 Err(Stop(status)) => status,
                 Ok(_) => 0,
             };
         }
-        let n = children.len();
-        let mut status = 0;
-        for (k, child) in children.iter_mut().enumerate() {
-            if let Some(child) = child {
-                let s = self.reap(child);
-                if k + 1 == n {
-                    status = s;
-                }
-            }
-        }
+        let status = if job.children.is_empty() { 0 } else { self.wait_job(job, false) };
         match r {
             Err(Stop(s)) => s,
             Ok(Some(s)) => s, // the last command ran in the shell
-            Ok(None) => status,
+            // A stopped job's status, else the last program's
+            Ok(None) if last_ran || status > 128 => status,
+            Ok(None) => 0,
         }
     }
 
@@ -179,6 +201,7 @@ impl Shell {
         if n == 1 {
             return match self.start(&cmds[0])? {
                 Started::Program(child) => {
+                    self.started(&child);
                     children.push(Some(child));
                     Ok(None)
                 }
@@ -226,7 +249,10 @@ impl Shell {
                     read_end = Some(r.into_raw());
                 }
                 match self.start(cmd)? {
-                    Started::Program(child) => children.push(Some(child)),
+                    Started::Program(child) => {
+                        self.started(&child);
+                        children.push(Some(child));
+                    }
                     Started::Shell(job) => {
                         if background {
                             return say(b"sh: only programs run in the background");
@@ -258,6 +284,8 @@ impl Shell {
             return Err(stop);
         }
         if let Some((job, into, out)) = parked {
+            self.release();
+            self.set_child_group(process::Group::Same, false);
             let _ = fs::dup2(into, sys::STDIN);
             let _ = fs::dup2(out, sys::STDOUT);
             fs::close(into);
@@ -644,26 +672,112 @@ impl Shell {
         Err(last)
     }
 
-    /// Give the console to `child` while it runs, so that Ctrl-C ends it,
-    /// wait for it, and say how it ended if not with 0 (but for a status
-    /// that is tested, or in a script, only a fault or a signal): on
-    /// standard error, since it is about the program, not its output.
-    /// Its status.
-    fn reap(&mut self, child: &mut Child) -> i32 {
-        // A shell whose input is not the console (a remote shell's,
-        // bin/telnetd) leaves the console to whoever has it.
-        let console = crate::on_console();
-        if console {
-            let _ = console::set_foreground(Some(child.id()));
+    /// The console is the shell's, at its prompt: its group's, with
+    /// Ctrl-C and Ctrl-Z as keys. Only a shell with job control, whose
+    /// input is the console, takes it.
+    pub fn take_console(&self) {
+        if self.interactive && crate::on_console() {
+            let _ = console::set_foreground_keys(process::id());
         }
-        let status = child.wait();
+    }
+
+    /// Choose the group the shell's next children join, and whether
+    /// they start stopped.
+    pub fn set_child_group(&mut self, g: process::Group, held: bool) {
+        if (g, held) != self.child_group {
+            self.child_group = (g, held);
+            let _ = process::set_children_group(g, held);
+        }
+    }
+
+    /// A program of a pipeline has started: the first, with job control,
+    /// leads the job's new group, which the rest then join.
+    fn started(&mut self, child: &Child) {
+        let (g, held) = self.child_group;
+        if g == process::Group::New {
+            self.set_child_group(process::Group::Of(child.id()), held);
+            if held {
+                self.held = Some(child.id());
+            }
+        }
+    }
+
+    /// A foreground job's programs have started, stopped: give their
+    /// group the console, then set them going. Before anything of the
+    /// shell's own runs in the pipeline, since it may read from them.
+    fn release(&mut self) {
+        if let Some(g) = self.held.take() {
+            if crate::on_console() {
+                let _ = console::set_foreground(Some(g));
+            }
+            let _ = process::release_group(g);
+        }
+    }
+
+    /// Wait for the programs of a job in the foreground (giving its
+    /// group the console, with job control), saying how each that did
+    /// not exit with 0 ended (but for a status that is tested, or in a
+    /// script, only a fault or a signal): on standard error, since it is
+    /// about the program, not its output. One that stops stops the job,
+    /// which goes on the jobs list. With `cont`, the job was stopped
+    /// (fg): it is sent SIGCONT once it has the console. The status of
+    /// the last program, or 128 and the signal that stopped it.
+    pub fn wait_job(&mut self, mut job: JobEntry, cont: bool) -> i32 {
+        let console = self.interactive && crate::on_console();
+        if console && let Some(g) = job.pgrp {
+            let _ = console::set_foreground(Some(g));
+        }
+        if cont {
+            signal_job(&mut job, sys::SIGCONT);
+            job.stopped = false;
+        }
+        let n = job.children.len();
+        let mut status = 0;
+        let mut stop = None;
+        while job.done < n {
+            let child = &mut job.children[job.done];
+            let r = if self.interactive { child.wait_or_stop() } else { child.wait() };
+            let last = job.done + 1 == n;
+            match r {
+                Ok(s) if s.stopped().is_some() => {
+                    stop = s.stopped();
+                    break;
+                }
+                Ok(s) => {
+                    let code = self.report(&s);
+                    if last {
+                        status = code;
+                    }
+                }
+                Err(_) if last => status = FAILED,
+                Err(_) => {}
+            }
+            job.done += 1;
+        }
         // The console is the shell's again before another program can
         // have this one's number.
         if console {
-            let _ = console::set_foreground(None);
+            self.take_console();
         }
-        let Ok(status) = status else { return FAILED };
-        let (code, said) = describe_status(&status);
+        let Some(sig) = stop else { return status };
+        job.stopped = true;
+        job.stopsig = sig;
+        if job.id == 0 {
+            job.id = self.next_job_id();
+        }
+        Out::err().b(b"\n[").n(job.id as i32).b(b"]+ stopped  ").b(&job.text).nl();
+        self.jobs.push(job); // the current job now
+        128 + sig
+    }
+
+    fn next_job_id(&self) -> u32 {
+        self.jobs.iter().map(|j| j.id).max().unwrap_or(0) + 1
+    }
+
+    /// Say how a program ended, if there is something to say: its
+    /// status.
+    fn report(&self, status: &process::ExitStatus) -> i32 {
+        let (code, said) = describe_status(status);
         if let Some(said) = said {
             let quiet = self.testing > 0 || (!self.interactive && status.code().is_some());
             if !quiet {
@@ -673,16 +787,22 @@ impl Shell {
         code
     }
 
-    /// Say which background jobs have ended, and forget them: before a
-    /// prompt. A job is done when each of its programs has ended, which
-    /// the process table says without waiting.
+    /// Say which jobs have ended, and forget them, and which have
+    /// stopped or gone on since the shell last looked: before a prompt,
+    /// and for `jobs`. The process table says so without waiting.
     pub fn check_jobs(&mut self) {
         let mut k = 0;
         while k < self.jobs.len() {
-            let ended = self.jobs[k].children.iter().all(|c| {
-                os::process(c.id()).is_none_or(|p| p.state == os::State::Zombie)
-            });
+            let job = &mut self.jobs[k];
+            let left = &job.children[job.done..];
+            let state = |c: &Child| os::process(c.id()).map(|p| p.state);
+            let ended = left.iter().all(|c| state(c).is_none_or(|s| s == os::State::Zombie));
             if !ended {
+                let stopped = left.iter().any(|c| state(c) == Some(os::State::Stopped));
+                if stopped && !job.stopped {
+                    Out::err().c(b'[').n(job.id as i32).b(b"] stopped  ").b(&job.text).nl();
+                }
+                job.stopped = stopped;
                 k += 1;
                 continue;
             }
@@ -702,15 +822,36 @@ impl Shell {
         }
     }
 
-    /// Wait for background job `id`, or every one: the last one's status.
+    /// The job a job spec names: %N or N its number, %% %+ or % (or
+    /// none) the current one, the last to stop or start, %- the one
+    /// before, and %TEXT the last whose command starts with TEXT. Its
+    /// place in the list.
+    pub fn find_job(&self, spec: Option<&[u8]>) -> Option<usize> {
+        let n = self.jobs.len();
+        let spec = spec.unwrap_or(b"%");
+        let s = spec.strip_prefix(b"%").unwrap_or(spec);
+        match s {
+            b"" | b"%" | b"+" => n.checked_sub(1),
+            b"-" => n.checked_sub(2),
+            _ => match builtin::parse_number(s) {
+                Some(id) => self.jobs.iter().position(|j| j.id as i32 == id),
+                None if spec.starts_with(b"%") => self.jobs.iter().rposition(|j| j.text.starts_with(s)),
+                None => None,
+            },
+        }
+    }
+
+    /// Wait for background job `id`, or every one that is running: the
+    /// last one's status. A job that stops meanwhile (it read the
+    /// console) is waited for no longer: 128 and the signal.
     pub fn wait_jobs(&mut self, which: Option<WaitFor>) -> i32 {
         let mut status = 0;
         let mut k = 0;
         let mut found = which.is_none();
         while k < self.jobs.len() {
             let hit = match which {
-                None => true,
-                Some(WaitFor::Job(id)) => self.jobs[k].id == id,
+                None => !self.jobs[k].stopped,
+                Some(WaitFor::Job(at)) => k == at,
                 Some(WaitFor::Pid(pid)) => self.jobs[k].children.iter().any(|c| c.id() == pid),
             };
             if !hit {
@@ -718,12 +859,39 @@ impl Shell {
                 continue;
             }
             found = true;
-            let mut job = self.jobs.remove(k);
-            for c in job.children.iter_mut() {
-                if let Ok(s) = c.wait() {
-                    status = describe_status(&s).0;
-                }
+            let interactive = self.interactive;
+            let job = &mut self.jobs[k];
+            if job.stopped {
+                // It would never end: as if it had stopped meanwhile.
+                status = 128 + job.stopsig;
+                k += 1;
+                continue;
             }
+            let mut stopped = None;
+            while job.done < job.children.len() {
+                let c = &mut job.children[job.done];
+                let r = if interactive { c.wait_or_stop() } else { c.wait() };
+                match r {
+                    Ok(s) if s.stopped().is_some() => {
+                        stopped = s.stopped();
+                        break;
+                    }
+                    Ok(s) => status = describe_status(&s).0,
+                    Err(_) => {}
+                }
+                job.done += 1;
+            }
+            if let Some(sig) = stopped {
+                if !job.stopped {
+                    Out::err().c(b'[').n(job.id as i32).b(b"] stopped  ").b(&job.text).nl();
+                }
+                job.stopped = true;
+                job.stopsig = sig;
+                status = 128 + sig;
+                k += 1;
+                continue;
+            }
+            self.jobs.remove(k);
         }
         if !found {
             return NOT_FOUND;
@@ -732,10 +900,23 @@ impl Shell {
     }
 }
 
-/// What `wait` waits for: %N or a process number.
+/// Send each program of a job signal `sig`: its group, if it has one.
+pub fn signal_job(job: &mut JobEntry, sig: i32) {
+    if let Some(g) = job.pgrp {
+        let _ = trystd::signal::kill_group(g, sig);
+        return;
+    }
+    let done = job.done;
+    for c in job.children[done..].iter_mut() {
+        let _ = c.signal(sig);
+    }
+}
+
+/// What `wait` waits for: a job (its place in the list) or a process
+/// number.
 #[derive(Clone, Copy)]
 pub enum WaitFor {
-    Job(u32),
+    Job(usize),
     Pid(u32),
 }
 

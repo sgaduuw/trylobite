@@ -358,6 +358,24 @@ impl Child {
         self.pid as u32
     }
 
+    /// Wait for it to end or stop (SYS_WAITPID, WAIT_UNTRACED), as a
+    /// shell waits for a job: `ExitStatus::stopped` says which. A stop
+    /// is reported once; wait again after SIGCONT.
+    pub fn wait_or_stop(&mut self) -> io::Result<ExitStatus> {
+        if let Some(status) = self.status {
+            return Ok(status);
+        }
+        let how = sys::check(sys::call(sys::SYS_WAITPID, &[self.pid, sys::WAIT_UNTRACED]))?;
+        let status = ExitStatus {
+            how,
+            code: sys::more(0),
+        };
+        if status.stopped().is_none() {
+            self.status = Some(status);
+        }
+        Ok(status)
+    }
+
     /// Wait for it to end (SYS_WAIT), closing its standard input first
     /// if this program holds the pipe to it.
     pub fn wait(&mut self) -> io::Result<ExitStatus> {
@@ -472,6 +490,68 @@ impl ExitStatus {
     pub fn fault(&self) -> Option<i32> {
         (self.how == sys::WAIT_FAULTED).then_some(self.code)
     }
+
+    /// The signal that stopped it, if it has not ended but stopped
+    /// (`Child::wait_or_stop`; std's `ExitStatusExt::stopped_signal`).
+    pub fn stopped(&self) -> Option<i32> {
+        (self.how == sys::WAIT_STOPPED).then_some(self.code)
+    }
+}
+
+/// A process group to join (`set_group`, `set_children_group`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Group {
+    /// A new one, which the process leads: its number is the process's.
+    New,
+    /// The caller's own (for `set_children_group`: as at first).
+    Same,
+    /// Group `g`, which the caller or one it started is in.
+    Of(u32),
+}
+
+impl Group {
+    fn raw(self) -> i32 {
+        match self {
+            Group::New => sys::PGRP_NEW,
+            Group::Same => sys::PGRP_SAME,
+            Group::Of(g) => g as i32,
+        }
+    }
+}
+
+/// The process group of process `pid`, or this process's with None
+/// (getpgrp).
+pub fn group(pid: Option<u32>) -> io::Result<u32> {
+    let pid = pid.map_or(sys::FOR_SELF, |p| p as i32);
+    sys::check(sys::call(sys::SYS_GETPGRP, &[pid])).map(|g| g as u32)
+}
+
+/// Put process `pid`, this one (None) or a child of it, in group `g`
+/// (setpgrp); `Group::Same` is this process's group.
+pub fn set_group(pid: Option<u32>, g: Group) -> io::Result<()> {
+    let pid = pid.map_or(sys::FOR_SELF, |p| p as i32);
+    let g = match g {
+        Group::Same => group(None)? as i32,
+        g => g.raw(),
+    };
+    sys::check(sys::call(sys::SYS_SETPGRP, &[pid, g])).map(|_| ())
+}
+
+/// The group the children this process starts from now on join, from
+/// their first instruction: `Group::New` makes each lead its own, and
+/// `Group::Same` is as at first. The shell starts a job's first program
+/// in a new group and the rest in that one. With `held`, they start
+/// held, stopped until `release_group` (a foreground job's, until its
+/// group has the console); a stop signal meanwhile stops them for real.
+pub fn set_children_group(g: Group, held: bool) -> io::Result<()> {
+    let args = [sys::PGRP_CHILDREN, g.raw(), held as i32];
+    sys::check(sys::call(sys::SYS_SETPGRP, &args)).map(|_| ())
+}
+
+/// Let the held processes of group `g` that this one started go
+/// (`set_children_group`).
+pub fn release_group(g: u32) -> io::Result<()> {
+    sys::check(sys::call(sys::SYS_SETPGRP, &[sys::PGRP_RELEASE, g as i32])).map(|_| ())
 }
 
 impl fmt::Display for ExitStatus {

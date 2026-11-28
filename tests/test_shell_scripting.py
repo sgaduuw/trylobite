@@ -276,7 +276,7 @@ def test_background_jobs_and_wait(shell):
     )
     out = said(shell, typed)
     assert "[1] " in out
-    assert "[1] running  sleep 9000000\n" in out
+    assert "[1]+ running  sleep 9000000\n" in out
     assert "waited 0\n" in out
     assert "hello from a balanced-ternary machine\n" in out
 

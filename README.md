@@ -41,7 +41,8 @@ sea floor, living among the detritus.
   programs run from `$PATH` on the disk with arguments and an
   environment, variables (`export`, `$NAME`, `$?`), `<`, `>` and
   `>>` redirection, `|` pipelines, quoting, line editing with history
-  and Tab completion, and Ctrl-C to end a program.
+  and Tab completion, Ctrl-C to end a program, and job control:
+  Ctrl-Z, `jobs`, `fg`, `bg` and `kill %1`.
 - **A network stack:** a driver for the network device and an IP
   server that speaks ARP, ICMP echo, UDP and TCP, so two machines
   linked over UDP can `ping` each other, pass datagrams and hold TCP
@@ -253,7 +254,8 @@ Every key goes to the machine, as on a serial line: the shell echoes
 what you type and edits the line as a Unix shell does (arrows, Home
 and End, Ctrl-A/E/U/K/W/L, up and down through the last 16 lines, Tab to
 complete a command or a path, twice to list), and Ctrl-C ends the program the shell
-waits for (here the runaway `spin`). `exit` or Ctrl-D (the end of
+waits for (here the runaway `spin`); Ctrl-Z stops it instead, for `fg`
+or `bg` to set going again. `exit` or Ctrl-D (the end of
 input) ends the shell, and init and the machine with it; Ctrl-] stops
 the machine from outside. The terminal is put back as it was afterwards.
 
@@ -396,7 +398,7 @@ while it runs, and the kernel reports each.
 | `user/init.s` | | program 0: starts the console, disk and file servers, then the servers and programs `/etc/init` names, then the shell, `/bin/sh` |
 | `user/fsd.s` | `fs` | the file server: paths, directories, open files, starting programs from the disk |
 | `user/diskd.s` | `disk` | drives the block device, moving blocks by DMA |
-| `user/consd.s` | `console` | drives the console: input, output, Ctrl-C for the foreground program |
+| `user/consd.s` | `console` | drives the console: input, output, Ctrl-C and Ctrl-Z for the foreground job |
 | `user/piped.s` | `pipe` | pipes |
 | `user/netd.s` | `net` | drives the network device: Ethernet frames, moved by DMA |
 | `user/ipd.s` | `ip` | IPv4: answers ARP and pings, sends pings for `bin/ping`, UDP, and TCP connections as descriptors |

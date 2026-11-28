@@ -13,6 +13,15 @@
 //! through sigreturn. A signal whose action is to end the process ends
 //! it at once if any thread lets it in, as kill always has.
 //!
+//! Stop signals (SIGSTOP, and by default SIGTSTP, SIGTTIN and SIGTTOU)
+//! stop the process rather than end it (docs/kernel.md, Job control):
+//! PCB_STOP says so, its parent hears (waitpid with WAIT_UNTRACED, and
+//! SIGCHLD), and each of its threads parks as ST_STOPPED the next time
+//! it would go back to user mode, which rk_signal sees to, as the note
+//! is set for each. A thread blocked in a call stays blocked, and parks
+//! when the call ends. SIGCONT, whatever its action, sets the process
+//! going again: its parked threads are ready once more.
+//!
 //! A thread blocked in a system call when a caught signal comes is woken
 //! with E_INTR, so its handler runs now rather than whenever the call
 //! would have ended: any blocking state but ST_REPLY, where a server
@@ -24,7 +33,7 @@ use crate::layout::*;
 use crate::mem::user_at;
 use crate::proc::Proc;
 use crate::syscall::{RESUME, SCHEDULE};
-use crate::thread;
+use crate::{jobs, thread};
 use crate::kdata;
 use crate::word::{Word, load, load_small_at, store};
 
@@ -33,8 +42,21 @@ fn bit(sig: Word) -> i32 {
     1 << sig as i32
 }
 
-/// Every signal there is, SIGKILL excepted: what a mask may hold.
-const MASKABLE: i32 = ((1i64 << NSIG) - 2) as i32 & !(1 << SIGKILL as i32);
+/// Every signal there is, SIGKILL and SIGSTOP excepted: what a mask
+/// may hold.
+const MASKABLE: i32 =
+    ((1i64 << NSIG) - 2) as i32 & !(1 << SIGKILL as i32) & !(1 << SIGSTOP as i32);
+
+/// The signals that stop a process by default.
+const STOPS: i32 = (1 << SIGSTOP as i32)
+    | (1 << SIGTSTP as i32)
+    | (1 << SIGTTIN as i32)
+    | (1 << SIGTTOU as i32);
+
+/// Whether nothing can change what signal `sig` does: SIGKILL and SIGSTOP.
+fn fixed(sig: Word) -> bool {
+    sig == SIGKILL || sig == SIGSTOP
+}
 
 /// What a signal does to a process.
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -42,6 +64,7 @@ enum Action {
     End,
     Ignore,
     Catch,
+    Stop,
 }
 
 /// What signal `sig` does to process `sp` now.
@@ -49,10 +72,14 @@ fn action(sp: Proc, sig: Word) -> Action {
     let b = bit(sig);
     if sig == SIGKILL {
         Action::End
+    } else if sig == SIGSTOP {
+        Action::Stop
     } else if load_small_at(sp.0, PCB_SIGCATCH) & b != 0 {
         Action::Catch
-    } else if load_small_at(sp.0, PCB_SIGIGN) & b != 0 || sig == SIGCHLD {
+    } else if load_small_at(sp.0, PCB_SIGIGN) & b != 0 || sig == SIGCHLD || sig == SIGCONT {
         Action::Ignore
+    } else if STOPS & b != 0 {
+        Action::Stop
     } else {
         Action::End
     }
@@ -78,22 +105,33 @@ fn each_thread(sp: Proc, mut f: impl FnMut(Proc)) {
 }
 
 /// Send signal `sig` (1 to NSIG - 1) to process `sp`: 0 if it ends,
-/// KILL_CAUGHT if it goes on (caught, ignored, or blocked by every
-/// thread for now).
+/// KILL_STOPPED if it stops, KILL_CAUGHT if it goes on (caught,
+/// ignored, or blocked by every thread for now).
 pub fn post(sp: Proc, sig: Word) -> Word {
     if sp.get(PCB_ENDING) != 0 {
         return 0; // ending already
+    }
+    let b = bit(sig);
+    // A stop and a continue each undo the other, waiting or done.
+    if sig == SIGCONT {
+        sp.set(PCB_SIGPEND, (set_of(sp, PCB_SIGPEND) & !STOPS) as Word);
+        cont(sp);
+    } else if STOPS & b != 0 {
+        sp.set(PCB_SIGPEND, (set_of(sp, PCB_SIGPEND) & !bit(SIGCONT)) as Word);
     }
     let act = action(sp, sig);
     if act == Action::Ignore {
         return KILL_CAUGHT;
     }
-    let b = bit(sig);
     let mut open = false; // whether any thread lets it in
-    each_thread(sp, |t| open |= sig == SIGKILL || set_of(t, PCB_SIGMASK) & b == 0);
+    each_thread(sp, |t| open |= fixed(sig) || set_of(t, PCB_SIGMASK) & b == 0);
     if act == Action::End && open {
         thread::end(sp, WAIT_KILLED, sig);
         return 0;
+    }
+    if act == Action::Stop && open {
+        stop(sp, sig);
+        return KILL_STOPPED;
     }
     sp.set(PCB_SIGPEND, (set_of(sp, PCB_SIGPEND) | b) as Word);
     if !open {
@@ -123,10 +161,50 @@ pub fn post(sp: Proc, sig: Word) -> Word {
 }
 
 /// Whether thread `t` waits in a system call a signal may cut short:
-/// any but a call a server holds (ST_REPLY), and not an ending.
+/// any but a call a server holds (ST_REPLY), and not an ending, nor a
+/// stopped thread, which takes its signals once it goes on.
 fn interruptible(t: Proc) -> bool {
     let s = t.state();
-    s < 0 && ![ST_REPLY, ST_ZOMBIE, ST_DYING].iter().any(|&x| s == x as i32)
+    s < 0 && ![ST_REPLY, ST_ZOMBIE, ST_DYING, ST_STOPPED].iter().any(|&x| s == x as i32)
+}
+
+/// Stop process `sp` by signal `sig`: each thread parks on its way to
+/// user mode (rk_signal), and its parent hears of it.
+fn stop(sp: Proc, sig: Word) {
+    if sp.get(PCB_STOP) != 0 {
+        return; // stopped already
+    }
+    sp.set(PCB_STOP, sig);
+    sp.set(PCB_STOPWAIT, 1);
+    each_thread(sp, |t| t.set(PCB_SIGNOTE, 1));
+    jobs::stopped(sp, sig);
+}
+
+/// Set stopped process `sp` going again: each thread parked is ready,
+/// and each takes the signals waiting for it as it goes.
+fn cont(sp: Proc) {
+    if sp.get(PCB_STOP) == 0 && sp.get(PCB_HELD) == 0 {
+        return;
+    }
+    sp.set(PCB_STOP, 0);
+    sp.set(PCB_HELD, 0);
+    sp.set(PCB_STOPWAIT, 0); // a stop gone before anyone heard of it
+    unpark(sp);
+}
+
+/// Process `sp` may go on (no longer stopped or held): each thread
+/// parked is ready, and each takes the signals waiting for it as it
+/// goes. One still stopped stays parked.
+pub fn unpark(sp: Proc) {
+    if sp.get(PCB_STOP) != 0 || sp.get(PCB_HELD) != 0 {
+        return;
+    }
+    each_thread(sp, |t| {
+        if t.is(ST_STOPPED) {
+            t.ready();
+        }
+        renote(t);
+    });
 }
 
 /// Thread `t` has just gone to sleep in a system call with PCB_SIGNOTE
@@ -153,15 +231,25 @@ fn renote(t: Proc) {
 /// Thread `p` is about to run and its PCB_SIGNOTE is set (resume in
 /// kernel/trap.s): take one signal it does not block and act on it, or
 /// clear the note if there is none. resume then looks again, so each
-/// signal waiting gets its turn, a frame on the one before.
+/// signal waiting gets its turn, a frame on the one before. 1 when the
+/// thread parks instead, its process stopped: another runs (pick), and
+/// the note stays, so that it looks again when it goes on.
 #[unsafe(no_mangle)]
-pub extern "C" fn rk_signal(p: *mut u8) {
+pub extern "C" fn rk_signal(p: *mut u8) -> i32 {
     let t = Proc(p);
     let sp = t.space();
-    let open = set_of(sp, PCB_SIGPEND) & !set_of(t, PCB_SIGMASK);
-    if open == 0 || sp.get(PCB_ENDING) != 0 {
+    if sp.get(PCB_ENDING) != 0 {
         t.set(PCB_SIGNOTE, 0);
-        return;
+        return 0;
+    }
+    if sp.get(PCB_STOP) != 0 || sp.get(PCB_HELD) != 0 {
+        t.set(PCB_STATE, ST_STOPPED);
+        return 1;
+    }
+    let open = set_of(sp, PCB_SIGPEND) & !set_of(t, PCB_SIGMASK);
+    if open == 0 {
+        t.set(PCB_SIGNOTE, 0);
+        return 0;
     }
     let mut sig = 1;
     while open & bit(sig) == 0 {
@@ -171,6 +259,12 @@ pub extern "C" fn rk_signal(p: *mut u8) {
     match action(sp, sig) {
         Action::Ignore => {}
         Action::End => thread::end(sp, WAIT_KILLED, sig),
+        Action::Stop => {
+            // One blocked until now: it stops the process here.
+            stop(sp, sig);
+            t.set(PCB_STATE, ST_STOPPED);
+            return 1;
+        }
         Action::Catch => {
             if !deliver(t, sp, sig) {
                 // Nowhere to put the frame: as a fault would, it ends.
@@ -178,6 +272,7 @@ pub extern "C" fn rk_signal(p: *mut u8) {
             }
         }
     }
+    0
 }
 
 /// Push thread `t`'s registers, pc, coprocessor bank and mask onto its
@@ -266,7 +361,7 @@ pub fn sys_sigaction(p: Proc) -> i32 {
     if sig <= 0 || sig >= NSIG || !(SIG_DFL..=SIG_CATCH).contains(&how) {
         return done(p, E_INVAL);
     }
-    if sig == SIGKILL && how != SIG_DFL {
+    if fixed(sig) && how != SIG_DFL {
         return done(p, E_INVAL);
     }
     let sp = p.space();
@@ -316,12 +411,15 @@ pub fn sys_sigmask(p: Proc) -> i32 {
 
 /// A new process `c` of parent `parent` (spawn): as across fork and
 /// exec, it keeps what its parent ignores and blocks; what the parent
-/// caught is its default again, since the handlers are not there.
+/// caught is its default again, since the handlers are not there. It
+/// joins the group the parent chose for its children (jobs.rs).
 pub fn inherit(c: Proc, parent: Word) {
     if !(0..NPROC).contains(&parent) {
+        c.set(PCB_PGRP, c.pid()); // init, or an orphan: a group of its own
         return;
     }
     let par = Proc::of(parent);
+    jobs::join(c, par.space());
     c.set(PCB_SIGIGN, par.space().get(PCB_SIGIGN));
     c.set(PCB_SIGMASK, par.get(PCB_SIGMASK));
 }

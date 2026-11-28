@@ -87,11 +87,11 @@ def test_what_a_pipeline_cannot_do_is_said(shell):
     )
 
 
-def test_ctrl_c_ends_a_pipeline_one_program_at_a_time(shell):
-    # spin never ends: Ctrl-C kills it, and wc then sees its pipe end.
+def test_ctrl_c_ends_every_program_of_a_pipeline(shell):
+    # spin never ends: Ctrl-C reaches the job's whole group, wc with it.
     out = said(shell, "spin | wc\n\x03hello\n")
     assert out.startswith("$ spin | wc\n")
-    assert "0 0 0\n" in out and "sh: killed" in out
+    assert "0 0 0\n" not in out and out.count("sh: killed") == 2
     assert out.endswith(f"$ hello\n{HELLO}$ \n")
 
 
