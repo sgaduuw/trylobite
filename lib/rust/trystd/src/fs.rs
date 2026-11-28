@@ -47,6 +47,20 @@ impl OwnedFd {
     pub fn set_inherit(&self, inherit: bool) -> io::Result<()> {
         set_inherit(self.0, inherit)
     }
+
+    /// Another descriptor for the same thing, the lowest free one past
+    /// standard error, kept from children, as std's try_clone (dup).
+    pub fn try_clone(&self) -> io::Result<OwnedFd> {
+        for spare in (sys::STDERR + 1)..sys::NDESC {
+            if !is_open(spare) {
+                dup2(self.0, spare)?;
+                let copy = OwnedFd(spare);
+                copy.set_inherit(false)?;
+                return Ok(copy);
+            }
+        }
+        Err(io::Error::from_raw(sys::E_MFILE))
+    }
 }
 
 // --- descriptors by number, as Unix's dup2, close and fcntl ---------------------
