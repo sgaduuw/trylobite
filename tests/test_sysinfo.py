@@ -135,10 +135,11 @@ SPIN = """
 
 def test_load_averages_follow_the_processes_ready_or_running():
     # One process runs throughout: each LOAD_PERIOD the averages move a
-    # share towards 1, the 1-minute one fastest (Unix's calc_load).
+    # share towards 1, the 1-minute one fastest (Unix's calc_load). It
+    # spins a slice past the last period: only a pick takes a sample.
     one = L["LOAD_ONE"]
     program = report(
-        SPIN.format(until=4 * L["LOAD_PERIOD"] + 1000),
+        SPIN.format(until=4 * L["LOAD_PERIOD"] + L["QUANTUM"] + 1000),
         info(),
         word("info", "SI_LOAD1"),
         word("info", "SI_LOAD5"),
@@ -398,6 +399,39 @@ def test_proc_counts_the_ticks_each_process_runs():
 
 
 # --- sleep ---------------------------------------------------------------------
+
+
+def test_a_sleeper_wakes_on_time_beside_a_busy_process():
+    # One hart: the spinner holds it, and only the timer gives it back.
+    # A slice is QUANTUM ticks, but it ends early at the earliest
+    # sleeper's time, so init wakes well before the slice would end.
+    init = f"""
+        .gp   USER_GP
+        li    a0, SYS_SPAWN
+        li    a1, 1
+        sys
+        csrr  s0, time
+        li    t0, {L["QUANTUM"] // 5}
+        add   s0, s0, t0
+        mv    a1, s0
+        li    a0, SYS_SLEEP
+        sys
+        csrr  s1, time
+        sub   s1, s1, s0               # s1: how late it woke
+        li    a0, SYS_KILL
+        li    a3, SIGKILL
+        li    a1, 1
+        li    a2, FOR_SELF
+        sys
+        li    a1, 0
+        li    t0, {L["QUANTUM"] // 4}
+        blt   s1, t0, 1f
+        li    a1, 99                   # woke only when the slice ended
+1:      li    a0, SYS_EXIT
+        sys
+"""
+    spin = "1:      j     1b"
+    assert run(init, spin, harts=1).code_of(0) == 0
 
 
 def test_sleep_waits_for_the_clock_and_is_not_a_deadlock():

@@ -346,7 +346,10 @@ to watch. It waits with `sleep`,
 whose time is absolute, so the screens keep step. A sleeper is woken
 by the hart that next schedules, and a hart with nothing to run sets
 its timer for the earliest sleeper, so sleeping is neither a busy wait
-nor, with nothing else running, a deadlock.
+nor, with nothing else running, a deadlock. A busy hart's slice is
+`QUANTUM` (10,000 ticks, 10 ms at a microsecond a tick) but ends at the
+earliest sleeper's time if that comes first, so a sleeper beside a busy
+process still wakes on time.
 
 `kill [-SIGNAL] PID...` sends each process `SIGTERM`, or the signal
 named (`-INT`, `-SIGUSR1`, `-s HUP`, `-9`), to any process but init

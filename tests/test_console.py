@@ -118,7 +118,7 @@ def test_kill_says_when_a_child_had_ended_already():
         li    a1, 1
         sys
         mv    s1, a0
-        {spin(3000)}
+        {spin(L["QUANTUM"])}
         li    a0, SYS_KILL
         li    a3, SIGKILL
         mv    a1, s1

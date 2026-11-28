@@ -109,7 +109,7 @@ pong: got 2
 trylobite: process 2 exited with code 0
 pong: got 3
 trylobite: process 1 exited with code 0
-trylobite: all processes exited after 9 timer interrupts
+trylobite: all processes exited after 3 timer interrupts
 ```
 
 The shell build boots from a disk. `make` builds `disk.img`, 100
@@ -180,7 +180,7 @@ $ exit
 trylobite: process 8 exited with code 0
 trylobite: process 7 killed
 trylobite: process 0 exited with code 0
-trylobite: all processes exited after 206 timer interrupts
+trylobite: all processes exited after 11 timer interrupts
 ```
 
 The lines starting `trylobite:` are the kernel's log. It opens with
@@ -241,7 +241,7 @@ $ exit
 trylobite: process 8 exited with code 0
 trylobite: process 7 killed
 trylobite: process 0 exited with code 0
-trylobite: all processes exited after 4020 timer interrupts
+trylobite: all processes exited after 201 timer interrupts
 ```
 
 Every key goes to the machine, as on a serial line: the shell echoes
