@@ -213,6 +213,12 @@ impl<const T: usize> Words<T> {
 
     /// The tryte at offset `at`, a code point of a string the call left.
     pub fn tryte(&self, at: i32) -> u8 {
-        self.buf[self.ptr() - self.buf.as_ptr() as usize + at as usize]
+        self.trytes(at, 1)[0]
+    }
+
+    /// `n` trytes from offset `at`: a string the call left.
+    pub fn trytes(&self, at: i32, n: usize) -> &[u8] {
+        let start = self.ptr() - self.buf.as_ptr() as usize + at as usize;
+        &self.buf[start..start + n]
     }
 }

@@ -53,6 +53,11 @@ def test_files_directories_and_processes_from_rust(shell):
         'redirected "into a file\\n"\n'
         "nosuch: no such file or directory\n"
         "still here, process true\n"
+        'os me Some(("rstd", Running))\n'
+        'os init Some(("init", None))\n'
+        "os info true true 0.1.0\n"
+        "os log true\n"
+        "os hart true\n"
         "done\n"
         "$ \n"
     )
@@ -60,8 +65,10 @@ def test_files_directories_and_processes_from_rust(shell):
 
 def test_sockets_from_rust(shell):
     out = session(shell, "rstd net\n", link="loop")
-    assert out.split("still here, process true\n")[1] == (
+    assert out.split("os hart true\n")[1] == (
         "address 10.0.0.2\n"
+        'config 10.0.0.2/24 Some("10.0.0.1")\n'
+        "ping true\n"
         'udp "ping over udp" from port 7\n'
         'tcp "ping over tcp" from 10.0.0.2:7\n'
         "port 9000: connection refused\n"

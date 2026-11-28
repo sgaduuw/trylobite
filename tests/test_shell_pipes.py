@@ -68,8 +68,10 @@ def test_each_program_says_how_it_ended(shell):
     out = said(shell, "hello | fail\nfail | wc\n")
     first, second = out.split("$ fail | wc\n")
     assert first == "$ hello | fail\nsh: exit 3\n"
-    # wc's count and the shell's word on fail may come in either order
-    assert sorted(second.removesuffix("$ \n").splitlines()) == ["0 0 0", "sh: exit 3"]
+    # wc's count and the shell's word on fail may come in either order, and
+    # wc's one write can even land between the shell's parts of its line
+    assert "0 0 0\n" in second
+    assert second.replace("0 0 0\n", "", 1) == "sh: exit 3\n$ \n"
 
 
 def test_what_a_pipeline_cannot_do_is_said(shell):

@@ -338,7 +338,7 @@ $ wc notes more
 ## The host tool
 
 ```bash
-tools/fs.py new disk.img 100 notes.txt bin/*.s bin/*.tc   # programs go in /bin
+tools/fs.py new disk.img 100 notes.txt bin/*.rs   # programs go in /bin
 tools/fs.py ls disk.img
 tools/fs.py ls disk.img bin
 tools/fs.py mkdir disk.img docs
@@ -346,8 +346,7 @@ tools/fs.py put disk.img README.md docs          # into a directory
 tools/fs.py put disk.img notes.txt docs/old      # or at a path
 tools/fs.py cat disk.img docs/old
 tools/fs.py rm disk.img docs/old
-detrytus asm bin/hello.s -o hello.dti
-tools/fs.py put disk.img hello.dti               # a program: /bin/hello
+tools/fs.py put disk.img bin/hello.rs            # built first: /bin/hello
 tools/fs.py mkdir disk.img etc
 tools/fs.py put disk.img etc/init etc/init       # what init starts (kernel.md)
 detrytus run shell.s --disk disk.img
