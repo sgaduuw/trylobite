@@ -8,8 +8,9 @@
 //!   %Cpu0 :   3.1 us,   1.2 sy,  95.7 id
 //!   Mem   :     81 pages total,     70 free,     11 used  (19,683 trytes a page)
 //!
-//! The time of day is the real-time clock's, in UTC, and so is the
-//! uptime (since SI_BOOTED); the load averages are the kernel's. There
+//! The time of day is the real-time clock's, in UTC; the uptime is the
+//! monotonic clock's (time::uptime), which stepping the time of day
+//! does not move; the load averages are the kernel's. There
 //! is a %Cpu line for each hart: its shares of the ticks since the last
 //! screen run in user mode (us), in the kernel (sy) and waiting for
 //! work (id). Then a line per process, with its share of the clock in
@@ -26,7 +27,7 @@
 
 use trystd::prelude::*;
 use trystd::sys::{self, Words};
-use trystd::time::SystemTime;
+use trystd::time::{self, SystemTime};
 
 trystd::main!(run);
 
@@ -111,6 +112,7 @@ const FREE: i32 = i32::MIN;
 /// The machine as two screens in a row saw it: everything a screen shows
 /// is read first, then shown from here, so that the parts agree.
 struct Top {
+    up: u32, // seconds since the machine started
     info: Words<{ sys::SYSINFO as usize + 4 }>,
     clock: i64,
     harts: [Hart; NHART],
@@ -128,6 +130,7 @@ impl Top {
         let proc = Proc { state: FREE, parent: 0, pages: 0, cpu: 0, name: [0; sys::PROC_NAME as usize] };
         Top {
             info: Words::new(),
+            up: 0,
             clock: 0,
             harts: [NO_HART; NHART],
             was_harts: [NO_HART; NHART],
@@ -144,6 +147,7 @@ impl Top {
         self.was_time = self.time;
         self.time = self.info.word_i64(sys::SI_TIME);
         self.clock = SystemTime::now().unix_seconds();
+        self.up = small(time::uptime().as_secs() as i64);
         let hi: Words<{ sys::HARTINFO as usize + 4 }> = Words::new();
         for (k, h) in (-sys::HART_MAX..=sys::HART_MAX).enumerate() {
             self.was_harts[k] = self.harts[k];
@@ -212,7 +216,7 @@ impl Top {
         let (high, low) = ((self.clock >> 32) as u32, self.clock as u32);
         out.clock(((high % 86_400) * 23_296 % 86_400 + low % 86_400) % 86_400);
         out.text(b" up ");
-        let up = small(self.clock - self.info.word_i64(sys::SI_BOOTED));
+        let up = self.up;
         let days = up / 86_400;
         if days > 0 {
             out.num(days as i64, 0);

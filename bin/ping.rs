@@ -1,7 +1,8 @@
 //! ping HOST [COUNT]: send COUNT echo requests (3 if not given) to HOST,
 //! an IPv4 address a.b.c.d or a name to resolve, through the IP server,
-//! one after another, and say for each how many ticks its reply took, or
-//! that none came in time, as Unix's ping -c does. Exit with 0 if any
+//! one after another, and say for each how long its reply took in
+//! milliseconds, by the monotonic clock, or that none came in time, as
+//! Unix's ping -c does. Exit with 0 if any
 //! reply came, 1 if none did, the name has no address or the network
 //! failed, and 2 for bad arguments or no IP server.
 #![no_std]
@@ -9,6 +10,7 @@
 use trystd::io::ErrorKind;
 use trystd::prelude::*;
 use trystd::sys;
+use trystd::time::Instant;
 
 trystd::main!(run);
 
@@ -44,11 +46,13 @@ fn run() -> i32 {
     let mut replies = 0;
     let mut line = Line::new();
     for seq in 1..=count {
+        let sent = Instant::now();
         match net::ping(to, (seq % 65536) as u16, WAIT) {
-            Ok(took) => {
+            Ok(_) => {
+                let took = sent.elapsed();
                 replies += 1;
                 line.str("reply from ").str(host).str(": seq ").num(seq as i64);
-                line.str(", ").num(took as i64).str(" ticks");
+                line.str(", ").millis(took).str(" ms");
             }
             Err(e) if e.kind() == ErrorKind::TimedOut => {
                 line.str("no reply from ").str(host).str(": seq ").num(seq as i64);
