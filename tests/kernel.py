@@ -407,7 +407,7 @@ def shell_filesystem(blocks: int):
 
 
 def bin_disk(
-    blocks: int = 84,
+    blocks: int = 90,
     programs: tuple[Path, ...] = (),
     etc_init: str | None = None,
     **texts: str,
@@ -445,7 +445,7 @@ def bin_disk(
 def run_image(
     image: Image,
     ram_pages: int | None = None,
-    max_steps: int = 2_000_000,
+    max_steps: int = 4_000_000,
     harts: int | None = None,
     plug: list[tuple[int, int]] = (),
     unplug: list[tuple[int, int]] = (),

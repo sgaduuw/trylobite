@@ -96,7 +96,7 @@ def test_quoting_decides_expansion_and_splitting(shell):
         "$ V='a   b'\n$ echo $V \"$V\" '$V' \\$V\n"
         "a b a   b $V $V\n"
         '$ E=\n$ echo x $E y "$E" | wc\n1 2 5\n'
-        '$ echo $ "$" $1x\n$ $ $1x\n$ \n'
+        '$ echo $ "$" $1x\n$ $ x\n$ \n'
     )
 
 

@@ -108,9 +108,9 @@ def test_programs_come_from_the_disk(shell):
     # Only pingpong is in the kernel image; hello is a file, and without
     # it there is no such program. The shell itself is /bin/sh.
     assert "hello from" in session(shell, "hello\n").console
-    bare, _ = shell_filesystem(8)
+    bare, _ = shell_filesystem(12)
     bare.save(path := new_disk())
-    result = session(shell, "hello\npingpong\n", (path, 8))
+    result = session(shell, "hello\npingpong\n", (path, 12))
     assert "sh: no such program: hello\n" in result.console
     assert "pong: got 3" in result.console
 

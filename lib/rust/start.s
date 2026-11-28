@@ -91,6 +91,23 @@ brk:    mv    a1, a0
         band  a0, a0, t0
         ret
 
+# on_stack(top, f, data): call f(data) on another stack, which starts
+# below top (a word address), and come back to this one: for a thread
+# whose half page of stack is too small (trystd::thread::with_stack).
+on_stack:
+        addi  sp, sp, -6
+        sw    ra, 0(sp)
+        sw    s1, 3(sp)
+        mv    s1, sp                   # this stack, kept across the call
+        mv    sp, a0
+        mv    a0, a2
+        jalr  ra, 0(a1)
+        mv    sp, s1
+        lw    ra, 0(sp)
+        lw    s1, 3(sp)
+        addi  sp, sp, 6
+        ret
+
 # sys(n, a, b, c, d, e): system call n with a to e in a1 to a5, each an
 # i32 taken signed (so -1 is FOR_SELF, not 2^32 - 1), and an address
 # below 2^31 as it is: a0 as an i32. sysu(n, a, b, c, d, e) is the same
