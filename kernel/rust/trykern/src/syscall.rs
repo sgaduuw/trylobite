@@ -83,11 +83,17 @@ static CALLS: [fn(Proc) -> i32; SYS_HARTINFO as usize + 1] = [
     sys_alarm,    // 40
     sys_brk,      // 41
     sys_clock,    // 42
-    sys_hartinfo, // 43
+    nocall,       // 43, stepclock (NTP, in review)
+    nocall,       // 44 to 48, the kernel threads' (in review)
+    nocall,       // 45
+    nocall,       // 46
+    nocall,       // 47
+    nocall,       // 48
+    sys_hartinfo, // 49
 ];
 
 const _: () =
-    assert!(SYS_PUTC == 0 && SYS_SEND == 1 && SYS_BRK == 41 && SYS_CLOCK == 42 && SYS_HARTINFO == 43 && SYS_CALL == 23 && SYS_RECEIVE == 24);
+    assert!(SYS_PUTC == 0 && SYS_SEND == 1 && SYS_BRK == 41 && SYS_CLOCK == 42 && SYS_HARTINFO == 49 && SYS_CALL == 23 && SYS_RECEIVE == 24);
 
 /// A number that names no call.
 fn nocall(p: Proc) -> i32 {

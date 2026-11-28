@@ -2138,7 +2138,8 @@ Eelco asked for a top header like modern BSD and GNU tops. The header
 needs numbers the kernel did not keep, so it gained three, each the
 smallest that serves:
 
-- **Per-hart time, `hartinfo` (43).** Each hart counts the ticks it
+- **Per-hart time, `hartinfo` (49, past the numbers NTP and kernel
+  threads take).** Each hart counts the ticks it
   ran processes (`ktrap`, beside `PCB_CPU`) and waited in `idle`; the
   rest is kernel. A stretch under way is counted up to the reading, or
   a hart idle across two screens would put its whole wait in the second

@@ -499,7 +499,7 @@
                                           # time CSR (SI_TIME, SYS_SLEEP) stays
                                           # the clock for intervals: ticks since
                                           # boot, which the time of day is not
-        .equ  SYS_HARTINFO, 43            # hartinfo(hart, buffer): the HI_ words
+        .equ  SYS_HARTINFO, 49            # hartinfo(hart, buffer): the HI_ words
                                           # of hart a1 at a2, one of the middle
                                           # nine (bin/top): 0, E_NOHART (absent,
                                           # or outside them), E_FAULT
