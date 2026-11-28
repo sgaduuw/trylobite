@@ -214,9 +214,28 @@ interrupts taken), `SI_PAGES` and `SI_FREE` (memory, in pages),
 zombies included), `SI_HARTS` (harts present) and the kernel's version
 as a string from `SI_RELEASE`: `uname -a` says `trylobite 0.1.0
 detrytus`, `uptime` `up 1171367 ticks, 9 processes, 1 hart`, and `free`
-memory in pages and in trytes. The `time` CSR counts one tick per step
+memory in pages and in trytes. It also gives `SI_BOOTED`, the real-time
+clock at boot in Unix seconds (so uptime in seconds is `clock()` less
+it), and the load averages `SI_LOAD1`, `SI_LOAD5` and `SI_LOAD15`:
+the processes ready or running, averaged as Unix's `calc_load` does,
+in `LOAD_ONE` (19,683) parts of one process. `pick` samples them every
+`LOAD_PERIOD` (5,000,000) ticks, which is Unix's 5 seconds at a
+microsecond a tick. A busy hart picks every quantum, so periods that
+passed with no pick were ones every hart idled through: they count as
+no load, and only the last as what is runnable at the late pick. The `time` CSR counts one tick per step
 (detrytus platform.md, Time), so times since boot (`uptime`, `ps`,
 `top`, `sleep`) are in ticks.
+
+**Harts.** `hartinfo(hart, buffer)` fills, for one of the middle nine
+harts, `HI_TIME` (the clock as it read the rest), `HI_STARTED` (when
+the kernel started the hart, 0 for hart 0), `HI_USER` (ticks it has run
+processes in user mode: `ktrap` adds each stretch from `resume`, as it
+does to the process's `PI_CPU`) and `HI_IDLE` (ticks it has waited for
+work in `idle`); the rest of `HI_TIME - HI_STARTED` it spent in the
+kernel or waiting for the kernel lock. A stretch still under way counts
+up to `HI_TIME`, so a tool that subtracts two readings gets each hart's
+shares of the time between them; an absent hart is `E_NOHART`. Each
+hart writes only its own counters, `ktrap` before it takes the lock.
 
 **The time of day.** `clock` reads the machine's real-time clock
 (detrytus platform.md, The real-time clock): Unix seconds and
@@ -271,9 +290,28 @@ $ ps
     6     5 run         4       3502 ps
 ```
 
-`top [-n COUNT]` clears the terminal and shows the same table with each
-process's share of the clock since the last screen (`CPU%`), every
-million ticks, until Ctrl-C or COUNT screens; it waits with `sleep`,
+`top [-n COUNT]` clears the terminal and shows a header in the shape
+of GNU top's, then the same table with each process's share of the
+clock since the last screen (`CPU%`), every million ticks, until Ctrl-C
+or COUNT screens (here `spin | top` on three harts):
+
+```
+top - 00:41:47 up 00:01:47, trylobite 0.1.0, load average: 0.24, 0.06, 0.02
+Tasks:  10 total,   2 running,   0 ready,   8 waiting,   0 zombie
+%Cpu-1:  64.8 us,  35.2 sy,   0.0 id
+%Cpu0 :   0.4 us,   1.9 sy,  97.7 id
+%Cpu1 :   7.8 us,   9.1 sy,  83.1 id
+Mem   :  59049 pages total,  58971 free,     78 used  (19,683 trytes a page)
+```
+
+The time of day and the uptime are the real-time clock's (`SI_BOOTED`),
+the load averages the kernel's, and a `%Cpu` line gives each hart's
+shares of the ticks since the last screen in user mode, in the kernel
+and idle (`hartinfo`). It is in Rust, and writes each screen by hand
+into one buffer with 32-bit arithmetic: on detrytus a 64-bit division
+is a helper of some 3,000 steps and core's formatting costs over a
+thousand a number, which made a first version cost a quarter of a hart
+to watch. It waits with `sleep`,
 whose time is absolute, so the screens keep step. A sleeper is woken
 by the hart that next schedules, and a hart with nothing to run sets
 its timer for the earliest sleeper, so sleeping is neither a busy wait

@@ -162,6 +162,46 @@ word_at:
         band  a0, a0, t0
         ret
 
+# word_split(address): the word at an aligned address whole, which may
+# not fit an i32 (a count of ticks): a0 = its low 32 bits, and
+# sys_more(0) the rest, as clock splits its seconds.
+word_split:
+        lw    a0, 0(a0)
+        li    t0, I32_MASK
+        band  t1, a0, t0
+        sub   a0, a0, t1
+        li    t2, 4294967296           # 2^32: exact, the low bits are gone
+        div   a0, a0, t2
+        la    t0, rt$more
+        sw    a0, 0(t0)
+        mv    a0, t1
+        ret
+
+# ticks(): the time CSR, split as word_split splits a word.
+ticks:  csrr  a0, time
+        li    t0, I32_MASK
+        band  t1, a0, t0
+        sub   a0, a0, t1
+        li    t2, 4294967296
+        div   a0, a0, t2
+        la    t0, rt$more
+        sw    a0, 0(t0)
+        mv    a0, t1
+        ret
+
+# sleep_until(low, high): SYS_SLEEP until the time high * 2^32 + low,
+# low a u32 and high an i32: a time of ticks past what an i32 holds.
+sleep_until:
+        li    t0, I32_SIGN
+        bxor  a1, a1, t0
+        sub   a1, a1, t0
+        li    t0, 4294967296
+        mul   a1, a1, t0
+        add   a1, a1, a0
+        li    a0, SYS_SLEEP
+        sys
+        ret
+
 # argc() and argv(): main's arguments, as start passed them.
 argc:   la    t0, rt$argc
         lw    a0, 0(t0)

@@ -433,7 +433,21 @@
         .equ  SI_RELEASE, 20              # the kernel's version, as a string of
         .equ  RELEASE_MAX, 8              # at most RELEASE_MAX code points and 0,
                                           # in the trytes from SI_RELEASE
-        .equ  SYSINFO,   30               # trytes info fills, from SI_TIME - 1
+        .equ  SI_BOOTED, 30               # the time of day at boot, in Unix
+                                          # seconds (SYS_CLOCK; SYS_STEPCLOCK moves
+                                          # it too): uptime in real time is the
+                                          # clock now less this
+        .equ  SI_LOAD1,  33               # load averages: the processes ready or
+        .equ  SI_LOAD5,  36               # running, averaged over 1, 5 and 15
+        .equ  SI_LOAD15, 39               # minutes' worth of ticks, in LOAD_ONE
+                                          # parts of one (Unix's load averages)
+        .equ  SYSINFO,   42               # trytes info fills, from SI_TIME - 1
+        .equ  LOAD_ONE,  19683            # a load of one process, in SI_LOAD_ units
+        .equ  LOAD_PERIOD, 5000000        # ticks between samples of the load: 5 s
+                                          # at a microsecond a tick, as Unix's 5 s
+        .equ  LOAD_EXP1, 18109            # each average keeps this share of itself
+        .equ  LOAD_EXP5, 19358            # (in LOAD_ONE parts) at each sample:
+        .equ  LOAD_EXP15, 19574           # LOAD_ONE * e^(-5 s / 1, 5, 15 min)
 
 # Processes, for bin/ps, bin/top and bin/kill. A process's name is its
 # program's, as Unix's comm: what spawnw's first argument names, without
@@ -498,6 +512,17 @@
                                           # servers and /etc/init's programs may).
                                           # The machine's clock stays as it is;
                                           # the kernel keeps the offset (bin/ntpd)
+        .equ  SYS_HARTINFO, 49            # hartinfo(hart, buffer): the HI_ words
+                                          # of hart a1 at a2, one of the middle
+                                          # nine (bin/top): 0, E_NOHART (absent,
+                                          # or outside them), E_FAULT
+        .equ  HI_TIME,    0               # the time CSR as the call read the rest
+        .equ  HI_STARTED, 3               # the time CSR when the kernel started it
+        .equ  HI_USER,    6               # ticks it has run processes in user mode
+        .equ  HI_IDLE,    9               # ticks it has waited for work (idle);
+                                          # the rest since HI_STARTED it was in
+                                          # the kernel, or waiting for its lock
+        .equ  HARTINFO,  12               # trytes hartinfo fills, from HI_TIME - 1
 
 # Threads (docs/kernel.md, Threads). A thread is a process-table slot of
 # its own, with its own registers, state and messages, running in the
@@ -755,6 +780,7 @@
         .equ  GETC_NONE, -1               # console getc: no more input; any negative
                                           # means none
         .equ  E_NOCHILD, -2               # wait: not a child of the caller
+        .equ  E_NOHART,  -2               # hartinfo: no such hart running the kernel
         .equ  E_NOBLOCK, -2               # disk calls: no such block, or no disk
         .equ  E_NOFS,    -4               # files: no disk, no filesystem on it, or
                                           # no file server

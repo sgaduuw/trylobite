@@ -103,18 +103,39 @@ def test_sleep_waits_its_ticks(shell):
 
 
 def test_top_shows_a_screen_each_period(shell):
-    out = said(shell, "top -n 2\ntop -n 0\n")
+    from tests import kernel
+
+    out = said(shell, "top -n 2\ntop -n 0\n", max_steps=40_000_000)
     screens = out.split("\x1b[H\x1b[2J")
     assert len(screens) == 3
     for screen in screens[1:]:
         lines = screen.splitlines()
         assert re.fullmatch(
-            r"top: up \d+ ticks, 9 processes, \d+ harts?, \d+ of 81 pages free",
+            r"top - \d\d:\d\d:\d\d up \d+:\d\d:\d\d, trylobite 0\.1\.0, "
+            r"load average: \d+\.\d\d, \d+\.\d\d, \d+\.\d\d",
             lines[0],
+        ), lines[0]
+        assert re.fullmatch(
+            r"Tasks: +9 total, +1 running, +0 ready, +8 waiting, +0 zombie", lines[1]
+        ), lines[1]
+        cpus = lines[2 : 2 + kernel.HARTS]
+        for cpu in cpus:
+            m = re.fullmatch(
+                r"%Cpu-?\d *: +([\d.]+) us, +([\d.]+) sy, +([\d.]+) id", cpu
+            )
+            assert m, cpu
+            assert 99.0 <= sum(float(x) for x in m.groups()) <= 100.0, cpu
+        mem = lines[2 + kernel.HARTS]
+        m = re.fullmatch(
+            r"Mem   : +81 pages total, +(\d+) free, +(\d+) used  "
+            r"\(19,683 trytes a page\)",
+            mem,
         )
+        assert m and int(m[1]) + int(m[2]) == 81, mem
+        table = lines[4 + kernel.HARTS :]
         header = "PID PPID STATE PAGES CPU% TIME NAME"
-        assert lines[2].split() == header.split()
-        assert re.fullmatch(r" +8 +7 run +4 +\d+\.\d +\d+ top", lines[11]), lines[11]
+        assert table[0].split() == header.split()
+        assert re.fullmatch(r" +8 +7 run +\d+ +\d+\.\d +\d+ top", table[9]), table[9]
     assert out.endswith("$ top -n 0\nusage: top [-n COUNT]\nsh: exit 2\n$ \n")
 
 

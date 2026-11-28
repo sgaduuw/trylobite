@@ -72,9 +72,27 @@ idle:
         csrw  stimecmp, t1
         addi  t0, t0, IE_TIMER
 2:      csrw  sie, t0
+        addi  t1, tp, HART_MAX         # s2: its entry in the tables of
+        li    t2, 3                    # what harts do with their time
+        mul   s2, t1, t2
+        la    t1, hart_waits           # it waits from now (hartinfo)
+        add   t1, t1, s2
+        csrr  t2, time
+        sw    t2, 0(t1)
         call  klock_give
         wfi
         call  klock_take
+        la    t1, hart_waits           # the ticks it waited, under the lock
+        add   t1, t1, s2               # as hartinfo reads them
+        lw    t0, 0(t1)
+        sw    zero, 0(t1)
+        csrr  t2, time
+        sub   t0, t2, t0
+        la    t1, hart_idle
+        add   t1, t1, s2
+        lw    t2, 0(t1)
+        add   t2, t2, t0
+        sw    t2, 0(t1)
         lw    t0, 0(s1)                # in case nobody woke it on purpose
         beqz  t0, 4f
         sw    zero, 0(s1)

@@ -93,6 +93,162 @@ def test_info_wants_a_whole_aligned_buffer_of_its_own():
     assert said(run(program)) == [L["E_FAULT"]] * 3
 
 
+def test_stepping_the_clock_moves_the_boot_time_with_it():
+    # Init's child steps the clock; uptime in seconds must not jump.
+    init = report(
+        """
+        li    a0, SYS_STEPCLOCK
+        li    a1, 3600
+        li    a2, 0
+        sys""",
+        info(),
+        word("info", "SI_BOOTED"),
+        data=WORDS,
+    )
+    spawn = """
+        li    a0, SYS_SPAWN
+        li    a1, 1
+        sys
+        mv    a1, a0
+        li    a0, SYS_WAIT
+        sys
+        li    a0, SYS_EXIT
+        li    a1, 0
+        sys"""
+    assert said(run(spawn, init, clock=1_800_000_000)) == [0, 0, 1_800_003_600]
+
+
+def test_info_says_when_it_booted():
+    # The real-time clock at boot, which uptime in seconds counts from:
+    # with --clock fixed, a microsecond a tick, boot is well under a second.
+    program = report(info(), word("info", "SI_BOOTED"), data=WORDS)
+    assert said(run(program, clock=1_800_000_000)) == [0, 1_800_000_000]
+
+
+SPIN = """
+        csrr  t0, time                 # spin until the time CSR passes {until}
+        li    t1, {until}
+1:      csrr  t0, time
+        blt   t0, t1, 1b
+        li    a0, 0"""
+
+
+def test_load_averages_follow_the_processes_ready_or_running():
+    # One process runs throughout: each LOAD_PERIOD the averages move a
+    # share towards 1, the 1-minute one fastest (Unix's calc_load).
+    one = L["LOAD_ONE"]
+    program = report(
+        SPIN.format(until=4 * L["LOAD_PERIOD"] + 1000),
+        info(),
+        word("info", "SI_LOAD1"),
+        word("info", "SI_LOAD5"),
+        word("info", "SI_LOAD15"),
+        data=WORDS,
+    )
+    _, _, load1, load5, load15 = said(run(program, max_steps=25_000_000))
+    loads = [0, 0, 0]
+    for _ in range(5):  # at time 0 and after each of four periods
+        for k, e in enumerate(("LOAD_EXP1", "LOAD_EXP5", "LOAD_EXP15")):
+            exp, old = L[e], loads[k]
+            up = one - 1 if one > old else 0
+            loads[k] = (old * exp + one * (one - exp) + up) // one
+    assert [load1, load5, load15] == loads
+    assert 0.3 < load1 / one < 0.4 and load15 < load5 < load1
+
+
+HART = """
+.align 1
+hinfo:  .words HARTINFO / 3
+"""
+
+
+def hartinfo(hart: str, at: str = "hinfo") -> str:
+    return f"""
+        li    a0, SYS_HARTINFO
+        li    a1, {hart}
+        la    a2, {at}
+        sys"""
+
+
+def test_hartinfo_counts_each_harts_user_and_idle_ticks():
+    # Spin until tick 500,000 (boot takes about 150,000), then sleep for
+    # 1,000,000: hart 0, the only one, has run the spin in user mode and
+    # waited out the sleep idle, and the three parts it reports never add
+    # up past the time it has run.
+    program = report(
+        SPIN.format(until=500_000),
+        """
+        csrr  a1, time
+        li    t0, 1000000
+        add   a1, a1, t0
+        li    a0, SYS_SLEEP
+        sys""",
+        hartinfo("0"),
+        """
+        lw    t0, hinfo + HI_USER
+        li    t1, 300000
+        cmp   a0, t0, t1               # 1: the spin, after boot""",
+        """
+        lw    t0, hinfo + HI_IDLE
+        li    t1, 990000
+        cmp   a0, t0, t1               # 1: about the sleep""",
+        """
+        lw    t0, hinfo + HI_TIME
+        lw    t1, hinfo + HI_STARTED
+        sub   t0, t0, t1
+        lw    t1, hinfo + HI_USER
+        sub   t0, t0, t1
+        lw    t1, hinfo + HI_IDLE
+        sub   t0, t0, t1
+        cmp   a0, t0, zero             # 1: some ticks left for the kernel""",
+        hartinfo("1"),  # absent with one hart
+        hartinfo("5"),  # outside the middle nine
+        hartinfo("0", "hinfo + 1"),  # not aligned
+        data=WORDS + HART,
+    )
+    result = run(program, harts=1, max_steps=5_000_000)
+    assert said(result) == [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        L["E_NOHART"],
+        L["E_NOHART"],
+        L["E_FAULT"],
+    ]
+
+
+def test_hartinfo_tells_harts_apart():
+    # On three harts init sleeps; the others, never given work, are idle
+    # nearly all the time since they started.
+    program = report(
+        """
+        csrr  a1, time
+        li    t0, 2000000
+        add   a1, a1, t0
+        li    a0, SYS_SLEEP
+        sys""",
+        hartinfo("1"),
+        """
+        lw    t0, hinfo + HI_TIME
+        lw    t1, hinfo + HI_STARTED
+        sub   t0, t0, t1
+        li    t1, 100
+        div   t0, t0, t1
+        li    t1, 95
+        mul   t0, t0, t1               # 95% of its time
+        lw    t1, hinfo + HI_IDLE
+        cmp   a0, t1, t0               # 1: idle more than that""",
+        """
+        lw    a0, hinfo + HI_USER""",
+        hartinfo("-1"),
+        data=WORDS + HART,
+    )
+    assert said(run(program, harts=3, max_steps=5_000_000)) == [0, 0, 1, 0, 0]
+
+
 # --- the log -----------------------------------------------------------------
 
 

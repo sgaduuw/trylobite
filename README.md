@@ -342,7 +342,7 @@ floating point on detrytus's binary coprocessor), `rsqrt` (square
 roots printed with `{}`, a program of two blocks for core's float
 formatting) and `rsort` (standard input's lines sorted, as Unix's
 `sort`, in `Vec`s and `String`s on the heap) are written in Rust, and
-so are `date`, `tee`, `xargs`, `fetch` and `httpd`, an HTTP/1.0 client and
+so are `date`, `top`, `tee`, `xargs`, `fetch` and `httpd`, an HTTP/1.0 client and
 server (`httpd -n 1 notes | fetch -` serves a file to itself), and
 `ntpd`, which sets the clock from an NTP server (`ntpd -n pool.ntp.org`
 shows how far off it is; `/etc/init` may start it to keep it right). They
@@ -434,7 +434,7 @@ emulator, so trylobite has never run on hardware.
 | `kernel/data.s` | the process table, buffers, messages |
 | `kernel/pagetables.s` | the boot address space and the kernel's shared leaf table |
 | `user/` | programs built into the kernel image: `demo-init`, `ping` and `pong` for the demo; `init`, `sh`, `pingpong` and the servers `fsd`, `diskd`, `consd`, `piped`, `netd` and `ipd` for the shell |
-| `bin/` | programs for the disk, each assembled on its own: `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `cp`, `mv`, `touch`, the system tools `ps`, `top`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`, and `ping`, `ifconfig`, `host` and `nc` for the network; and in Rust, `rhello`, `recho`, `rfact`, `rmandel`, `rsqrt`, `rsort`, `date`, `tee`, `xargs`, `fetch`, `httpd` and `ntpd` |
+| `bin/` | programs for the disk, each assembled on its own: `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `cp`, `mv`, `touch`, the system tools `ps`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`, and `ping`, `ifconfig`, `host` and `nc` for the network; and in Rust, `rhello`, `recho`, `rfact`, `rmandel`, `rsqrt`, `rsort`, `date`, `top`, `tee`, `xargs`, `fetch`, `httpd` and `ntpd` |
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
 | `shell.s` | an 81-page machine starting the shell and its servers |
 | `docs/` | the kernel and the filesystem, described |
