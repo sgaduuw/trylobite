@@ -512,3 +512,19 @@ directory with anything in it.
   over, keeping an old root is most of one.
 - Inline data: a small file's trytes as an item in the tree instead of
   a block of its own.
+
+## Credits
+
+The design borrows its ideas, not its code, from others' work:
+
+- **bcachefs**, by Kent Overstreet and its contributors: one B-tree of
+  keyed items for inodes, directory entries and extents, extents keyed
+  by where they end, and a superblock that commits a transaction. Eelco
+  pointed us at it, and at its move from C to Rust, which showed how a
+  filesystem's format can live in one Rust crate. Nothing here is
+  read from its sources or shares its on-disk format.
+- **btrfs** and Ohad Rodeh's "B-trees, Shadowing, and Clones" (ACM
+  Transactions on Storage, 2008), the copy-on-write ("shadowing")
+  B-tree that btrfs is built on: copying each changed node up to the
+  root and keeping no free map, found again by walking the tree.
+- **Linux's relatime**, for when reading moves the access time.
