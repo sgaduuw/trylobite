@@ -2673,3 +2673,39 @@ POSIX sh, kept reasonable.
   beyond `&`, `jobs` and `wait`. `$((...))` has no `?:`. The image is
   some 99,000 trytes, five pages more than the environment's shell.
 
+### 2026-11-28 · Timer slices of 10 ms, ended early for sleepers
+
+`top` showed a process that only spins spending about a third of its
+time in the kernel. A trace of `spin` (`detrytus run --trace --no-jit`,
+PCs counted by label) put it at 352 kernel steps for every 500-tick
+slice, 44% of the hart: `ktrap` and `resume` save and restore every
+register (about 145 steps between them), and `rk_pick` takes some 150
+even on its path for one ready process (the time, the sleeper and load
+checks). Making that path shorter could save perhaps half; making the
+slice longer saves nearly all of it.
+
+- **`QUANTUM` is 10,000 ticks**, 10 ms at a microsecond a tick, the
+  slice classic Unix used (HZ 100). A spinning process now spends 3.5%
+  of its hart in the kernel, and `make benchmark` takes 505 million steps
+  instead of 841 million (its three Rust programs are busy throughout).
+  Interactivity does not suffer in practice: the emulator runs some 80
+  million ticks a second, so a slice is well under a millisecond of real
+  time, and the live console paces only idle time.
+- **A slice ends no later than the earliest sleeper's time.** Only a
+  pick wakes sleepers and alarms, so with long slices a busy hart would
+  make them up to 10 ms late; `resume` arms `stimecmp` at the earlier of
+  the slice's end and `next_wake` (while `sleepers` says one may wait).
+  A stale `next_wake` (a sleeper killed early) costs one extra pick.
+  `test_a_sleeper_wakes_on_time_beside_a_busy_process` pins it.
+- **No fast path in `on_timer`.** Resuming the same process without a
+  pick when nothing else is ready would save `rk_pick`'s 150 steps, but
+  load sampling and hart leaving rely on a busy hart picking every
+  slice; at 10,000 ticks the saving is under 1.5% and not worth the
+  second path.
+- **Tests that counted on short slices** now say how long they spin in
+  terms of `QUANTUM`: pong spins `QUANTUM` rounds (three steps each) so
+  the demo is still preempted, the kill test lets its child end first,
+  the load test spins a slice past its last period, and the hart that
+  comes back in the hot-plug test does so at time 250,000 (it leaves at
+  its next pick, up to a slice after being asked) with work lasting past
+  it.
