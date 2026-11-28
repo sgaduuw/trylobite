@@ -25,8 +25,8 @@ unclear, that is a detrytus change, made there, not worked around here.
 ```sh
 tools/install-detrytus
 uv sync
-make kernel      # kernel/trykern.s, the kernel's Rust part (tools/kernel.py)
-uv run pytest    # builds kernel/trykern.s itself first
+make kernel      # kernel/trykern.s and user/fsd-rust.s, the Rust of the kernel and file server
+uv run pytest    # builds both itself first
 uv run ruff check tests tools
 uv run ruff format --check tests tools
 detrytus run demo.s --ram-pages 40
@@ -187,16 +187,30 @@ pipe.
   `register` once it is ready, and a client calls `lookup`, with
   `LOOKUP_WAIT` when it may start before its server, and checks the
   version. Never give a server a fixed process number.
-- **Files are the file server's, not the kernel's.** `user/fsd.s` is
-  a program that registers as `fs`; a file call is a `SYS_CALL` to the
-  process `lookup` gives (the shell keeps it in `sh_fs`; tests write
-  `CALL_FS`, which `tests/kernel.py` expands, and pass `files=True` to
-  `run`). The server shares its build's symbol
-  table, so its labels all start with `fs_`. Each call starts on a fresh
-  stack, so a failure anywhere just jumps to a reply tail. A call that
-  changes the disk gathers and checks everything first, then changes
-  its windows and marks them dirty; `fs_reply` writes them back before
-  replying, so a window is never left dirty between calls.
+- **Files are the file server's, not the kernel's.** The server is
+  Rust, `user/rust/fsd`, a program that registers as `fs`; a file call is
+  a `SYS_CALL` to the process `lookup` gives (the shell keeps it in
+  `sh_fs`; tests write `CALL_FS`, which `tests/kernel.py` expands, and
+  pass `files=True` to `run`). The format itself is the
+  `lib/rust/tryfs` crate, which the host's disk tool
+  (`tools/rust/tryfs`, run by `tools/fs.py`) shares, so a format change
+  is made once, there, with its cargo tests (`cargo test --release
+  --features std` in `lib/rust/tryfs`). `tools/server.py` builds the
+  server with `detrytus ll` into `user/fsd-rust.s` (not committed), which
+  `user/fsd.s` includes after its stubs; the tests build it once per run
+  with the kernel (`tests/conftest.py`), and `make kernel` builds both.
+  The server shares its build's symbol table, so its translated labels
+  all start with `fs$`, its assembly ones with `fs_`. Its image is
+  `FS_PAGES` (4) pages (the `IMAGE_PAGES` word), so programs after it in
+  a build sit `FS_PAGES - 1` pages further on (`shell.s`,
+  `tests/kernel.py`), and each extra page costs two of RAM, one for the
+  image and one for the process. `tools/server.py` refuses a build whose
+  image outgrows that or whose deepest call chain outgrows the stack
+  below `V_USER`: keep op methods `#[inline(never)]`, paths on the
+  stack only in the call that uses them, and no recursion but the
+  mount's walk. Every call that changes the disk is a transaction
+  (`Fs::commit` or `Fs::abort`): change only through tryfs, and never
+  reply before the commit.
 - **Devices are their drivers', not the kernel's.** The disk server,
   `user/diskd.s` (labels `dk_`), drives the block device: `SYS_DRIVE` maps its registers at `V_DEVICE`, `SYS_ARM` lets
   it interrupt once, and the interrupt reaches the server as a

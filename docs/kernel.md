@@ -721,14 +721,18 @@ host itself, and answers names at 10.0.0.3 from the host's resolver
 
 ## Files
 
-The disk can hold a filesystem, shaped like a Unix one: inodes, nested
-directories with `.` and `..`, and files reached by path through file
-descriptors ([`docs/filesystem.md`](filesystem.md)). The kernel knows
-nothing of it: a process, the **file server** (`user/fsd.s`), reads it
-into its block windows and answers `call`s to open files and to make and
+The disk can hold a filesystem, shaped like a Unix one: inodes with
+permissions, owners and times, nested directories with `.` and `..`,
+and files reached by path through file descriptors, all kept in one
+copy-on-write B-tree ([`docs/filesystem.md`](filesystem.md)). The
+kernel knows nothing of it: a process, the **file server**
+(`user/rust/fsd`, in Rust on the `lib/rust/tryfs` crate that the host's
+disk tool shares, with `user/fsd.s` its start), reads it into its block
+windows and answers `call`s to open files and to make and
 remove files and directories, and descriptor calls to read, write and
 list what was opened, keeping each open file and each process's current
-directory; it writes what a call changed before it replies. It registers
+directory; each call that changes something is a transaction, on the
+disk before the reply or not at all. It registers
 as `fs`, protocol `FS_PROTOCOL`, and clients find it by that name. It
 also starts program files: a program from the disk is the file server's
 doing, not the kernel's (`spawnw`). `tools/fs.py` makes and changes

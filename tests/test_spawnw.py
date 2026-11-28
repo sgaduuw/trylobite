@@ -49,8 +49,8 @@ def disk_blocks(blocks: int = 5, **files: list[int] | str):
         else:
             made.write_trytes(name, contents)
     made.save(path)
-    first = {name: node.direct[0] for name, node in made.listdir()}
-    every = {name: made.block_list(node) for name, node in made.listdir()}
+    every = {name: made.stat(name).data for name, _ in made.listdir()}
+    first = {name: blocks[0] for name, blocks in every.items()}
     return (path, blocks), first, every
 
 
