@@ -3,8 +3,9 @@
 //! What std is to a Rust program on Unix, this is on trylobite: files
 //! and directories (`fs`), standard I/O and the I/O traits (`io`), the
 //! program's arguments and current directory (`env`), child processes
-//! (`process`) and sockets (`net`), each a thin, safe layer over the
-//! kernel's calls and its servers (docs/kernel.md), with `alloc`'s
+//! (`process`), sockets (`net`) and the time of day (`time`), each a
+//! thin, safe layer over the kernel's calls and its servers
+//! (docs/kernel.md), with `alloc`'s
 //! `Vec`, `String` and `Box` over the heap (`heap`). It is written in
 //! Rust alone: no C library sits under it. The names follow std's, so
 //! that a program reads as one for std does; where trylobite differs,
@@ -48,13 +49,14 @@ pub mod io;
 pub mod net;
 pub mod process;
 pub mod sys;
+pub mod time;
 
 pub use alloc::{boxed, format, string, vec};
 
 /// What most programs use, brought in with `use trystd::prelude::*`.
 pub mod prelude {
     pub use crate::io::{self, BufRead, Read, Seek, Write};
-    pub use crate::{env, fs, net, process};
+    pub use crate::{env, fs, net, process, time};
     pub use crate::{eprint, eprintln, print, println};
     pub use alloc::borrow::ToOwned;
     pub use alloc::boxed::Box;

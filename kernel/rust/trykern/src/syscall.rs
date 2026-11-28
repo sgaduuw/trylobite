@@ -7,7 +7,7 @@ use crate::console::{putc, putn, puts, putw};
 use crate::layout::*;
 use crate::mem::{page_left, user_at};
 use crate::proc::Proc;
-use crate::word::Word;
+use crate::word::{Word, addr, load_at};
 use crate::{desc, devices, info, ipc, mm, names, procinfo, wait};
 
 /// The caller goes on (resume).
@@ -39,7 +39,7 @@ pub extern "C" fn rk_syscall(p: *mut u8) -> i32 {
 
 /// Each call's routine, by its number (SYS_ in include/layout.s): one
 /// indirect call, where a chain of tests took 40 for the last.
-static CALLS: [fn(Proc) -> i32; SYS_BRK as usize + 1] = [
+static CALLS: [fn(Proc) -> i32; SYS_CLOCK as usize + 1] = [
     sys_putc,     // 0
     sys_send,     // 1
     sys_recv,     // 2
@@ -82,10 +82,11 @@ static CALLS: [fn(Proc) -> i32; SYS_BRK as usize + 1] = [
     sys_notify,   // 39
     sys_alarm,    // 40
     sys_brk,      // 41
+    sys_clock,    // 42
 ];
 
 const _: () =
-    assert!(SYS_PUTC == 0 && SYS_SEND == 1 && SYS_BRK == 41 && SYS_CALL == 23 && SYS_RECEIVE == 24);
+    assert!(SYS_PUTC == 0 && SYS_SEND == 1 && SYS_BRK == 41 && SYS_CLOCK == 42 && SYS_CALL == 23 && SYS_RECEIVE == 24);
 
 /// A number that names no call.
 fn nocall(p: Proc) -> i32 {
@@ -305,6 +306,16 @@ fn sys_brk(p: Proc) -> i32 {
         mm::rk_sys_brk(p.0);
         RESUME
     }
+}
+
+/// clock(): the real-time clock's seconds in a0 and microseconds in a1.
+/// Reading the seconds latches the microseconds for this hart, so the
+/// two are one moment: nothing else runs on this hart between the loads.
+fn sys_clock(p: Proc) -> i32 {
+    let power = addr(V_POWER);
+    let seconds = load_at(power, POWER_CLOCK);
+    p.set(PCB_A1, load_at(power, POWER_CLOCK_US));
+    done(p, seconds)
 }
 
 /// The caller's result is `r`, and it goes on.

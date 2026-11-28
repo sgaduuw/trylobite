@@ -2103,3 +2103,31 @@ Booting from a disk). trylobite's side:
   run` boots it. Loading `shell.s` as a file stays for tests and the
   benchmark, so their step counts do not include the ROM's.
 
+### 2026-11-28 · The time of day: a system call over the real-time clock
+
+detrytus gained a real-time clock (platform.md, The real-time clock),
+and the kernel passes it on with one call, `clock()`: seconds since
+1970 in `a0`, microseconds in `a1`.
+
+- **A system call, not a time server.** A microkernel moves drivers
+  out, and Minix does keep its clock driver in user space, but there it
+  only sets the kernel's time at boot; the kernel still answers "what
+  time is it". Here there is nothing to drive: the clock is two loads
+  from the power page the kernel already maps for RAM size and power
+  off, it cannot block and keeps no state, and a server would cost every
+  reader a call and a reply for it. Rejected: a "time" server (an IPC
+  round trip per read, and one more process at boot), and mapping the
+  power page into every process (it also holds power off).
+- **Unix time, UTC.** Calendars and formats are the library's
+  (`trystd::time::Utc`, Hinnant's day algorithms), as on Unix, and
+  there are no time zones yet: `date` says UTC.
+- **Ticks stay the clock for intervals.** `sleep`, `alarm`, `uptime`
+  and CPU times keep counting the `time` CSR: it is steady and is what
+  the scheduler runs on. So trystd has `SystemTime` and no `Instant`.
+- **The seconds reach Rust whole.** Rust's `i32` results from
+  `lib/rust/start.s` would end in 2038 (signed) or 2106 (unsigned), so
+  the `clock` stub hands over the low 32 bits and the high part
+  separately, and trystd joins them into an `i64`.
+- **Later:** setting the clock (an offset the kernel keeps, for a
+  `date -s`), file modification times in the filesystem, and time zones.
+
