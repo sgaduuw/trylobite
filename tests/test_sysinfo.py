@@ -93,6 +93,31 @@ def test_info_wants_a_whole_aligned_buffer_of_its_own():
     assert said(run(program)) == [L["E_FAULT"]] * 3
 
 
+def test_stepping_the_clock_moves_the_boot_time_with_it():
+    # Init's child steps the clock; uptime in seconds must not jump.
+    init = report(
+        """
+        li    a0, SYS_STEPCLOCK
+        li    a1, 3600
+        li    a2, 0
+        sys""",
+        info(),
+        word("info", "SI_BOOTED"),
+        data=WORDS,
+    )
+    spawn = """
+        li    a0, SYS_SPAWN
+        li    a1, 1
+        sys
+        mv    a1, a0
+        li    a0, SYS_WAIT
+        sys
+        li    a0, SYS_EXIT
+        li    a1, 0
+        sys"""
+    assert said(run(spawn, init, clock=1_800_000_000)) == [0, 0, 1_800_003_600]
+
+
 def test_info_says_when_it_booted():
     # The real-time clock at boot, which uptime in seconds counts from:
     # with --clock fixed, a microsecond a tick, boot is well under a second.

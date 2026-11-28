@@ -14,13 +14,14 @@ from tests.test_files import report, said
 NOW = 1795829400
 
 # clock(): print the seconds, then the microseconds.
-CLOCK = report(
+CLOCK_STEPS = (
     """
         li    a0, SYS_CLOCK
         sys
         mv    s0, a1""",
     "        mv    a0, s0",
 )
+CLOCK = report(*CLOCK_STEPS)
 
 
 @pytest.fixture(scope="module")
@@ -83,3 +84,85 @@ def test_date_formats_and_other_moments(shell):
         "sh: exit 2\n"
         "$ \n"
     )
+
+
+# --- setting the clock ----------------------------------------------------------
+
+E_INVAL, E_PERM = -10, -21  # include/layout.s
+
+
+def step(seconds: int, micros: int) -> str:
+    return f"""
+        li    a0, SYS_STEPCLOCK
+        li    a1, {seconds}
+        li    a2, {micros}
+        sys"""
+
+
+def spawn_wait(program: int) -> str:
+    return f"""
+        li    a0, SYS_SPAWN
+        li    a1, {program}
+        sys
+        mv    a1, a0
+        li    a0, SYS_WAIT
+        sys
+        li    a0, 0"""
+
+
+def renamed(program: str, suffix: str) -> str:
+    """A report program whose labels do not clash with another's in the
+    same build."""
+    return re.sub(
+        r"\b(putn|digits|digits_end|statbuf|buf|buf_end)\b", rf"\1{suffix}", program
+    )
+
+
+def test_init_s_children_step_the_clock_and_the_rest_may_not():
+    # Init (0) may not, having no parent; its child (program 1) may, and
+    # every process then reads the moved clock; program 1's own child
+    # (program 2) may not.
+    init = renamed(report(step(1, 0), spawn_wait(1)), "_i")
+    child = report(
+        step(3600, 900_000),
+        step(0, 200_000),  # microseconds carry into the seconds
+        step(0, 1_000_000),
+        step(1, -1),
+        step(-1, 1),
+        step(-2, -100_000),
+        *CLOCK_STEPS,
+        spawn_wait(2),
+    )
+    grandchild = renamed(report(step(1, 0), *CLOCK_STEPS), "_g")
+    result = run(init, child, grandchild, clock=NOW)
+    (
+        init_r,
+        ok1,
+        ok2,
+        big,
+        mixed1,
+        mixed2,
+        back,
+        secs,
+        micros,
+        denied,
+        secs2,
+        _micros2,
+        _,
+        _,
+    ) = said(result)
+    assert (init_r, ok1, ok2, big, mixed1, mixed2, back) == (
+        E_PERM,
+        0,
+        0,
+        E_INVAL,
+        E_INVAL,
+        E_INVAL,
+        0,
+    ), result.console
+    assert denied == E_PERM
+    # Moved by 3600.9 + 0.2 - 2.1 = 3599 seconds, a microsecond a tick
+    # since boot besides.
+    ticks = (secs - NOW - 3599) * 1_000_000 + micros
+    assert 0 < ticks < 2_000_000, (secs, micros)
+    assert 0 <= secs2 - secs <= 2

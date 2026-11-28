@@ -433,9 +433,10 @@
         .equ  SI_RELEASE, 20              # the kernel's version, as a string of
         .equ  RELEASE_MAX, 8              # at most RELEASE_MAX code points and 0,
                                           # in the trytes from SI_RELEASE
-        .equ  SI_BOOTED, 30               # the real-time clock at boot, in Unix
-                                          # seconds (SYS_CLOCK): uptime in real
-                                          # time is the clock now less this
+        .equ  SI_BOOTED, 30               # the time of day at boot, in Unix
+                                          # seconds (SYS_CLOCK; SYS_STEPCLOCK moves
+                                          # it too): uptime in real time is the
+                                          # clock now less this
         .equ  SI_LOAD1,  33               # load averages: the processes ready or
         .equ  SI_LOAD5,  36               # running, averaged over 1, 5 and 15
         .equ  SI_LOAD15, 39               # minutes' worth of ticks, in LOAD_ONE
@@ -502,6 +503,15 @@
                                           # time CSR (SI_TIME, SYS_SLEEP) stays
                                           # the clock for intervals: ticks since
                                           # boot, which the time of day is not
+        .equ  SYS_STEPCLOCK, 43           # stepclock(seconds, micros): move the
+                                          # time of day (SYS_CLOCK) by a1 seconds
+                                          # and a2 microseconds, -999,999 to
+                                          # 999,999, of the same sign as a1 (or
+                                          # either when a1 is 0): 0; E_INVAL,
+                                          # E_PERM (not a child of init: only the
+                                          # servers and /etc/init's programs may).
+                                          # The machine's clock stays as it is;
+                                          # the kernel keeps the offset (bin/ntpd)
         .equ  SYS_HARTINFO, 49            # hartinfo(hart, buffer): the HI_ words
                                           # of hart a1 at a2, one of the middle
                                           # nine (bin/top): 0, E_NOHART (absent,

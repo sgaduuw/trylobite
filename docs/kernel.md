@@ -167,6 +167,7 @@ is as it was, since the trap entry saves them all. Trice relies on this
 | 40 | `alarm(until)` | when the `time` CSR reaches `until`, the caller's `receive` gives a `NOTE_ALARM` notice; a later alarm replaces an earlier one, and `NO_ALARM` (−1) cancels it: 0 |
 | 41 | `brk(end)` | makes the caller's heap reach `end`, in whole zeroed pages from `HEAP_START`: the break, the first address past the heap; an `end` inside the heap, or `BRK_QUERY` (0), only asks, since the heap never shrinks; −10 (`E_INVAL`) for an `end` below `HEAP_START` or past `HEAP_MAX` pages, −3 (`E_NOMEM`) when the pages are not there, and then it maps none |
 | 42 | `clock()` | the time of day, from the machine's real-time clock: `a0` whole seconds since 1970-01-01 00:00:00 UTC (Unix time, negative before 1970), `a1` the microseconds past that second, 0 to 999,999; it cannot fail (System tools, The time of day) |
+| 43 | `stepclock(seconds, micros)` | moves the time of day `clock` gives by `seconds` and `micros` (−999,999 to 999,999, of the seconds' sign when they are not 0): 0; −10 (`E_INVAL`) for micros out of range or of the other sign, −21 (`E_PERM`) for a caller that is not init's child: only the servers and the programs `/etc/init` names may (The time of day) |
 | 44 | `thread(entry, stack, arg, tp)` | starts a thread of the caller's process at `entry`, with `sp` = `stack`, `a0` = `arg`, `tp` = `tp` and the caller's `gp` (Threads): its number; −1 (`E_NOSLOT`) |
 | 45 | `thread_exit(code)` | ends the calling thread alone, its code kept for `join`; −21 (`E_PERM`) in a process's first thread |
 | 46 | `join(tid, how)` | `a0` 0 and `a1` the code thread `tid` gave `thread_exit`, once it has: `JOIN_WAIT` (0) waits, `JOIN_POLL` (1) gives −19 (`E_BUSY`) while it runs; −2 (`E_NOCHILD`) for what is not another thread of the caller's process, or was joined, −10 (`E_INVAL`) for the caller itself or another `how` |
@@ -247,8 +248,25 @@ a date; `bin/date` prints it (`date`, `date +%F_%T`, `date -d
 `--clock SECONDS` (as the tests do), which starts it at a fixed time
 and moves it a microsecond a tick. Ticks stay the clock for intervals:
 how fast ticks pass in real time depends on how the machine runs, and
-the time of day is not steady either. Nothing sets the clock yet, and
-files keep no times.
+the time of day is not steady either.
+
+`stepclock` moves it. The machine's clock cannot be set, so the kernel
+keeps an offset from it, which `clock` adds, and a step changes the
+offset; it is gone at power off, as the machine has no battery to keep
+it. Only init's children may step it, the servers and the programs
+`/etc/init` names, which the person who wrote that file chose: what
+the shell runs may not (`E_PERM`), as on Unix only root may. `bin/ntpd`
+keeps the clock right over the network (SNTP, RFC 4330): started from
+`/etc/init` (the repository's starts it), it asks
+`pool.ntp.org`, or the server it is given, steps the clock by the
+offset it finds, says so on the console the first time and for a step
+of 128 ms or more, and asks again every 1,024,000,000 ticks (about 17
+minutes on a live machine; 64,000,000 after a failure, which it reports
+once three have come in a row). `ntpd -q SERVER`
+steps the clock once and exits, and `ntpd -n SERVER`, which anyone may
+run, only prints the offset, the round trip and the server's stratum.
+It steps rather than slews: the clock jumps, and may go back. Files
+keep no times yet.
 
 **Processes.** `proc` fills, for one process, `PI_STATE` (an `ST_`
 value), `PI_PARENT` (`NO_PARENT`, −1, for none), `PI_PAGES` (its four,
@@ -643,12 +661,14 @@ Init reads at most 729 characters of it (`INIT_TAB`) and keeps at most
 cannot follow (`init: /etc/init: no server named www`, `init: cannot
 start /bin/nothing`). Without `/etc/init`, or without a file server to
 read it, init starts every server and no program, so a disk with no
-`/etc` boots as one with the `etc/init` that `make` puts on `disk.img`:
+`/etc` starts the same servers as the `etc/init` that `make` puts on
+`disk.img`, which also starts `bin/ntpd`:
 
 ```text
 pipe
 net
 ip
+/bin/ntpd
 ```
 
 Then:

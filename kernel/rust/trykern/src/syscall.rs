@@ -7,6 +7,7 @@ use crate::console::{putc, putn, puts, putw};
 use crate::layout::*;
 use crate::mem::{page_left, user_at};
 use crate::proc::Proc;
+use crate::kdata::{read, write};
 use crate::word::{Word, addr, load_at};
 use crate::{desc, devices, info, ipc, mm, names, procinfo, thread, wait};
 
@@ -83,7 +84,7 @@ static CALLS: [fn(Proc) -> i32; SYS_HARTINFO as usize + 1] = [
     sys_alarm,          // 40
     sys_brk,            // 41
     sys_clock,          // 42
-    nocall,             // 43, kept for stepclock (a pull request of its own)
+    sys_stepclock,      // 43
     thread::sys_thread, // 44
     thread::sys_texit,  // 45
     thread::sys_join,   // 46
@@ -97,6 +98,7 @@ const _: () = assert!(
         && SYS_SEND == 1
         && SYS_BRK == 41
         && SYS_CLOCK == 42
+        && SYS_STEPCLOCK == 43
         && SYS_CALL == 23
         && SYS_RECEIVE == 24
         && SYS_THREAD == 44
@@ -324,14 +326,54 @@ fn sys_brk(p: Proc) -> i32 {
     }
 }
 
-/// clock(): the real-time clock's seconds in a0 and microseconds in a1.
-/// Reading the seconds latches the microseconds for this hart, so the
-/// two are one moment: nothing else runs on this hart between the loads.
+/// clock(): the time of day, seconds in a0 and microseconds in a1: the
+/// real-time clock plus the offset stepclock keeps. Reading the seconds
+/// latches the microseconds for this hart, so the two are one moment:
+/// nothing else runs on this hart between the loads.
 fn sys_clock(p: Proc) -> i32 {
     let power = addr(V_POWER);
-    let seconds = load_at(power, POWER_CLOCK);
-    p.set(PCB_A1, load_at(power, POWER_CLOCK_US));
+    let mut seconds = load_at(power, POWER_CLOCK) + read::clock_secs();
+    let mut micros = load_at(power, POWER_CLOCK_US) + read::clock_us();
+    if micros >= MICROS {
+        micros -= MICROS;
+        seconds += 1;
+    }
+    p.set(PCB_A1, micros);
     done(p, seconds)
+}
+
+/// A second in microseconds.
+const MICROS: Word = 1_000_000;
+
+/// stepclock(seconds, micros): move the time of day by a1 seconds and a2
+/// microseconds, both of one sign. The machine's clock cannot be set
+/// (detrytus platform.md, The real-time clock), so the kernel keeps an
+/// offset from it, its microseconds always 0..MICROS. Only init's
+/// children may (and their threads): the servers and the programs
+/// /etc/init names, not what the shell runs.
+fn sys_stepclock(p: Proc) -> i32 {
+    let (s, us) = (p.get(PCB_A1), p.get(PCB_A2));
+    // Init is process 0; a thread asks as its process does.
+    if p.space().get(PCB_PARENT) != 0 {
+        return done(p, E_PERM);
+    }
+    if us <= -MICROS || us >= MICROS || (s < 0 && us > 0) || (s > 0 && us < 0) {
+        return done(p, E_INVAL);
+    }
+    let mut secs = read::clock_secs() + s;
+    let mut micros = read::clock_us() + us;
+    if micros >= MICROS {
+        micros -= MICROS;
+        secs += 1;
+    } else if micros < 0 {
+        micros += MICROS;
+        secs -= 1;
+    }
+    // Boot moved with the clock, so uptime (SI_BOOTED) stays true.
+    write::booted(read::booted() + secs - read::clock_secs());
+    write::clock_secs(secs);
+    write::clock_us(micros);
+    done(p, 0)
 }
 
 fn sys_hartinfo(p: Proc) -> i32 {

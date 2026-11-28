@@ -148,25 +148,27 @@ init: started fs, process 3
 init: started pipe, process 4
 init: started net, process 5
 init: started ip, process 6
+init: started /bin/ntpd, process 7
 init: starting sh
 $ ls
-34 notes.txt
 bin/
+etc/
+34 notes.txt
 $ cat notes.txt
 Ternary computers count in trits.
 $ fail
-trylobite: process 8 exited with code 3
+trylobite: process 9 exited with code 3
 sh: exit 3
 $ echo "one   arg" two
 one   arg two
-trylobite: process 9 exited with code 0
-$ hello | upper | wc
 trylobite: process 10 exited with code 0
+$ hello | upper | wc
 trylobite: process 11 exited with code 0
-1 5 38
 trylobite: process 12 exited with code 0
-$ cat notes.txt | upper > shout
+1 5 38
 trylobite: process 13 exited with code 0
+$ cat notes.txt | upper > shout
+trylobite: process 14 exited with code 0
 $ cat shout
 TERNARY COMPUTERS COUNT IN TRITS.
 $ mkdir docs
@@ -174,9 +176,10 @@ $ cd docs
 $ pwd
 /docs
 $ exit
-trylobite: process 7 exited with code 0
+trylobite: process 8 exited with code 0
+trylobite: process 7 killed
 trylobite: process 0 exited with code 0
-trylobite: all processes exited after 139 timer interrupts
+trylobite: all processes exited after 206 timer interrupts
 ```
 
 The lines starting `trylobite:` are the kernel's log. It opens with
@@ -221,18 +224,21 @@ init: started fs, process 3
 init: started pipe, process 4
 init: started net, process 5
 init: started ip, process 6
+init: started /bin/ntpd, process 7
 init: starting sh
 $ ls
-34 notes.txt
 bin/
+etc/
+34 notes.txt
 $ echo typed live
 typed live
-trylobite: process 8 exited with code 0
+trylobite: process 9 exited with code 0
 $ spin
-trylobite: process 9 killed
+trylobite: process 10 killed
 sh: killed
 $ exit
-trylobite: process 7 exited with code 0
+trylobite: process 8 exited with code 0
+trylobite: process 7 killed
 trylobite: process 0 exited with code 0
 trylobite: all processes exited after 4020 timer interrupts
 ```
@@ -336,8 +342,10 @@ floating point on detrytus's binary coprocessor), `rsqrt` (square
 roots printed with `{}`, a program of two blocks for core's float
 formatting) and `rsort` (standard input's lines sorted, as Unix's
 `sort`, in `Vec`s and `String`s on the heap) are written in Rust, and
-so are `date`, `top`, `tee`, `xargs`, and `fetch` and `httpd`, an HTTP/1.0 client and
-server (`httpd -n 1 notes | fetch -` serves a file to itself). They
+so are `date`, `top`, `tee`, `xargs`, `fetch` and `httpd`, an HTTP/1.0 client and
+server (`httpd -n 1 notes | fetch -` serves a file to itself), and
+`ntpd`, which sets the clock from an NTP server (`ntpd -n pool.ntp.org`
+shows how far off it is; `/etc/init` may start it to keep it right). They
 are translated from rustc's LLVM IR by `detrytus ll` (detrytus
 docs/rust.md) and built on trystd (`lib/rust/trystd`), the system
 library: files, standard I/O, processes, sockets and the time of day with std's names,
@@ -426,7 +434,7 @@ emulator, so trylobite has never run on hardware.
 | `kernel/data.s` | the process table, buffers, messages |
 | `kernel/pagetables.s` | the boot address space and the kernel's shared leaf table |
 | `user/` | programs built into the kernel image: `demo-init`, `ping` and `pong` for the demo; `init`, `sh`, `pingpong` and the servers `fsd`, `diskd`, `consd`, `piped`, `netd` and `ipd` for the shell |
-| `bin/` | programs for the disk, each assembled on its own: `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `cp`, `mv`, `touch`, the system tools `ps`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`, and `ping`, `ifconfig`, `host` and `nc` for the network; and in Rust, `rhello`, `recho`, `rfact`, `rmandel`, `rsqrt`, `rsort`, `date`, `top`, `tee`, `xargs`, `fetch` and `httpd` |
+| `bin/` | programs for the disk, each assembled on its own: `hello`, `fail`, `spin`, `echo`, `upper`, `wc`, the file tools `head`, `grep`, `cp`, `mv`, `touch`, the system tools `ps`, `kill`, `free`, `uptime`, `uname`, `dmesg`, `sleep`, `df`, and `ping`, `ifconfig`, `host` and `nc` for the network; and in Rust, `rhello`, `recho`, `rfact`, `rmandel`, `rsqrt`, `rsort`, `date`, `top`, `tee`, `xargs`, `fetch`, `httpd` and `ntpd` |
 | `demo.s` | the kernel for a 40-page machine, with init, ping and pong |
 | `shell.s` | an 81-page machine starting the shell and its servers |
 | `docs/` | the kernel and the filesystem, described |

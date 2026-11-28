@@ -13,6 +13,8 @@ unsafe extern "C" {
     static names: u8;
     static sleepers: u8;
     static next_wake: u8;
+    static clock_secs: u8;
+    static clock_us: u8;
     static nready: u8;
     static nidle: u8;
     static irq_armed: u8;
@@ -49,7 +51,7 @@ pub mod read {
     use crate::word::{Word, load};
     word_of!(
         ticks, ram_pages, free_count, log_base, log_pos, sleepers, next_wake, irq_armed, free_head,
-        fresh_page, next_slot, nprog, nready, nidle, booted, next_load
+        fresh_page, next_slot, nprog, nready, nidle, booted, next_load, clock_secs, clock_us
     );
 }
 
@@ -67,7 +69,7 @@ pub mod write {
     use crate::word::{Word, store};
     set_word_of!(
         sleepers, next_wake, ram_pages, free_count, free_head, fresh_page, next_slot, irq_armed,
-        nready, nidle, booted, next_load
+        nready, nidle, booted, next_load, clock_secs, clock_us
     );
 }
 
