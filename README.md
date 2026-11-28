@@ -72,11 +72,13 @@ this installs it at the commit [`detrytus.rev`](detrytus.rev) pins:
 tools/install-detrytus
 ```
 
-Part of the kernel is Rust, which needs the same toolchain with
-`rust-src` and the `riscv32imac-unknown-none-elf` target (`rustup
-component add rust-src`, `rustup target add
-riscv32imac-unknown-none-elf`). Build it once, and again after
-changing it:
+Part of the kernel is Rust, and so are the programs. They are built
+with the exact release [`rust-toolchain.toml`](rust-toolchain.toml)
+pins, with `rust-src` and the `riscv32imac-unknown-none-elf` target,
+which rustup installs by itself the first time; the same release and
+no paths of the machine building them make them the same everywhere,
+so `make benchmark` counts the same steps on every machine. Build the
+kernel's part once, and again after changing it:
 
 ```bash
 make kernel
@@ -355,8 +357,8 @@ by `detrytus ll` (detrytus docs/rust.md) and built on trystd
 (`lib/rust/trystd`), the system library: files, standard I/O,
 processes, sockets, the time of day and the kernel's reports on the
 machine with std's names, over the kernel's calls, in Rust alone.
-Building them needs `rustup component add rust-src` and `rustup target
-add riscv32imac-unknown-none-elf`.
+Building them needs rustup, which installs the Rust that
+`rust-toolchain.toml` pins.
 
 The kernel asks the machine how much RAM it has (detrytus' RAM size
 register), so `--ram-pages` can be anything from enough for the
