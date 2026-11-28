@@ -2485,3 +2485,33 @@ running a line, the built-ins), over trystd.
   standard input keeps it, where reading a script (`sh < script`) starts.
 - **Still 60 characters a line**, as the tests pin; a longer line is a
   constant now (`LINE_MAX`).
+
+### 2026-11-28 · A monotonic clock, and trystd's Instant
+
+trystd had `SystemTime` but no `Instant`: the kernel's only steady
+clock was the time CSR, which counts steps, and how many a second
+depends on the emulator and on whether the machine is idle. The time of
+day is real time but jumps when ntpd steps it. detrytus gained a
+monotonic clock (platform.md, The monotonic clock: seconds and
+nanoseconds since the machine started, from the host's `Instant`), and
+`monotonic()`, call 53, reads it.
+
+- **A system call, not a server**, as `clock`: two loads from the power
+  page, with nothing to keep. The kernel adds no offset: nothing may
+  step it.
+- **Nanoseconds**, as std's `Instant` counts, and Rust's `Duration`
+  holds them as they come.
+- **`thread::sleep(Duration)` waits real time** by sleeping a tick a
+  microsecond, the live console's idle pace, and again for whatever the
+  monotonic clock says is left. A kernel sleep on the monotonic clock
+  would need a timer on it; the time CSR is the only timer there is.
+  Without a live console idle ticks take no time and the loop spins,
+  which is why ntpd's poll and top's period stay in ticks: they run in
+  every test, where a real-time wait would burn the host's time.
+- **`sleep TICKS` stays**; a unit (`2s`, `250ms`, `1.5s`, `us`) asks
+  for real time. `ping` reports milliseconds, `uptime` and `top` count
+  the uptime by the monotonic clock rather than `clock()` less
+  `SI_BOOTED`, and ntpd keeps when it heard from each source as an
+  `Instant` and measures round trips by it, so a step no longer needs
+  them adjusted. NTP_STATUS still carries Unix seconds, worked out when
+  asked.

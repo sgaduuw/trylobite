@@ -885,6 +885,22 @@ impl Line {
         self.bytes(&digits[k..])
     }
 
+    /// `d` in milliseconds, to the microsecond: 12.345. Done in u32s
+    /// below about 71 minutes, as `num_right` divides.
+    pub fn millis(&mut self, d: crate::time::Duration) -> &mut Line {
+        let secs = d.as_secs();
+        let micros = d.subsec_nanos() / 1000;
+        if secs < 4000 {
+            let us = secs as u32 * 1_000_000 + micros;
+            self.num((us / 1000) as i64).byte(b'.');
+            let frac = us % 1000;
+            self.byte(b'0' + (frac / 100) as u8).byte(b'0' + (frac / 10 % 10) as u8);
+            self.byte(b'0' + (frac % 10) as u8)
+        } else {
+            self.num((secs * 1000 + (micros / 1000) as u64) as i64)
+        }
+    }
+
     /// What `e` says went wrong.
     pub fn error(&mut self, e: &Error) -> &mut Line {
         self.str(e.description())
