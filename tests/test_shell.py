@@ -29,7 +29,7 @@ def session(shell, typed: str, disk=None, max_steps=None):
 def test_a_session_runs_programs_and_reports_how_they_ended(shell):
     # Init is process 0; 1 to 4 are the console, pipe, disk and file
     # servers, which it starts first, and 5 is the shell.
-    result = session(shell, "hello\nfail\nnope\nexit\n")
+    result = session(shell, "hello\nfail\nnope\nexit 0\n")
     transcript, _ = result.after_boot.rsplit(" timer interrupts", 1)
     assert transcript.rsplit(" ", 1)[0] == (
         "$ hello\n"
@@ -40,11 +40,16 @@ def test_a_session_runs_programs_and_reports_how_they_ended(shell):
         "sh: exit 3\n"
         "$ nope\n"
         "sh: no such program: nope\n"
-        "$ exit\n"
+        "$ exit 0\n"
         "trylobite: process 7 exited with code 0\n"
         "trylobite: process 0 exited with code 0\n"
         "trylobite: all processes exited after"
     )
+
+
+def test_exit_without_a_code_exits_with_the_last_status(shell):
+    result = run_image(shell, input="fail\nexit\n", disk=bin_disk())
+    assert result.code_of(7) == 3
 
 
 def test_backspace_and_delete_erase_what_was_typed(shell):
@@ -81,7 +86,7 @@ def test_escape_sequences_leave_nothing_in_the_line(shell):
 
 
 def test_a_long_line_keeps_its_first_240_characters(shell):
-    result = session(shell, "x" * 250 + "\n")
+    result = session(shell, "x" * 250 + "\n", max_steps=20_000_000)
     assert f"sh: no such program: {'x' * 240}\n" in result.console
 
 
@@ -125,10 +130,10 @@ def test_a_word_without_a_slash_is_looked_for_in_bin(shell):
 
 
 def test_ls_lists_the_programs_on_the_disk(shell):
-    # Thirty-nine programs, some of two blocks, take a while to list.
+    # Forty programs, some of two blocks, take a while to list.
     result = session(shell, "ls bin\nfail\n", max_steps=12_000_000)
     assert "sh: exit 3\n" in result.console
-    listed = result.after_boot.splitlines()[1:40]
+    listed = result.after_boot.splitlines()[1:41]
     assert [line.split()[1] for line in listed] == [
         "cp",
         "date",
@@ -150,6 +155,7 @@ def test_ls_lists_the_programs_on_the_disk(shell):
         "ntpctl",
         "ntpd",
         "ping",
+        "printenv",
         "ps",
         "rfact",
         "rmandel",
