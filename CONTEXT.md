@@ -2520,6 +2520,35 @@ a build also carried the machine's paths.
   earlier took the other one's core (an undefined symbol). Each rustc
   release and commit builds in a directory of its own now.
 
+### 2026-11-28 · DHCP, telnet and a remote shell
+
+Eelco asked for networking extras: a telnet client, a simple remote
+shell, and DHCP.
+
+- **Broadcasts in ipd, UDP only.** DHCP needs a datagram to everyone
+  out (255.255.255.255, ff:ff:ff:ff:ff:ff, no route, no ARP) and in.
+  ipd takes UDP to 255.255.255.255 as if to its own address, checking
+  the checksum over the address the packet carried (`ip_pseudoat`).
+  Nothing else to everyone is taken, and the echo service never answers
+  a broadcast, so two machines cannot echo each other forever.
+- **The client asks from the address it has**, not 0.0.0.0 as RFC 2131
+  says. Changing to 0.0.0.0 first would cut off ntpd and everything else
+  for the length of the exchange, and with no server at all (loop and
+  udp links, CI) the machine would have to put 10.0.0.2 back. Servers
+  answer to everyone either way, and detrytus' does not look at the
+  source. `dhcp -d` runs from `/etc/init`, which makes the shell pid 9.
+- **telnetd connects the shell through pipes**, not by handing it the
+  connection directly. Telnet needs CR LF going out and IAC negotiation
+  coming in, and the shell should not have to know about either. A
+  relay thread each way also lets Ctrl-C reach the remote shell's
+  program as SIGINT (to the shell's children, found with `os::processes`),
+  while a shell with no child gets the key, which drops the line.
+  The shell only touches the console's foreground when its standard
+  input is the console, so a remote session does not take local Ctrl-C.
+- **Opt-in, since there is no login yet.** `/etc/init` has `/bin/telnetd`
+  commented out, and detrytus' `--forward` only listens on the host's
+  127.0.0.1. Users and permissions will give it a login.
+
 ### 2026-11-28 · A monotonic clock, and trystd's Instant
 
 trystd had `SystemTime` but no `Instant`: the kernel's only steady

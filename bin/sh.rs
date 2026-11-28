@@ -21,8 +21,9 @@
 //! input (as init starts it) opens the console as its standard input,
 //! output and error, which the programs it starts inherit; one started
 //! with them (sh from the shell) keeps its own. It gives each program it
-//! waits for the console's foreground, for Ctrl-C; at the prompt Ctrl-C
-//! drops the line. Its own complaints go to standard error, so they
+//! waits for the console's foreground, for Ctrl-C, if its standard input
+//! is the console (a remote shell's is a connection, bin/telnetd); at
+//! the prompt Ctrl-C drops the line. Its own complaints go to standard error, so they
 //! reach the console whatever a command redirects. It catches SIGPIPE,
 //! so that a built-in writing to a pipe whose reader has gone carries on,
 //! while the programs it starts have SIGPIPE's default.
@@ -32,6 +33,7 @@
 //! pages of a program over half a page, and no sixth.
 #![no_std]
 
+use core::sync::atomic::{AtomicBool, Ordering};
 use trystd::prelude::*;
 use trystd::{console, fs, signal, sys};
 
@@ -56,6 +58,13 @@ trystd::main!(sh);
 pub const LINE_MAX: usize = 60;
 pub const PROMPT: &[u8] = b"$ ";
 
+/// Whether standard input is the console, as the shell started.
+static ON_CONSOLE: AtomicBool = AtomicBool::new(false);
+
+pub fn on_console() -> bool {
+    ON_CONSOLE.load(Ordering::Relaxed)
+}
+
 /// The editor's history is a kilotryte: in the image, not on the stack.
 static mut EDITOR: Editor = Editor::new();
 
@@ -69,6 +78,7 @@ fn sh() -> i32 {
             let _ = fs::dup2(con, sys::STDERR);
         }
     }
+    ON_CONSOLE.store(io::is_terminal(sys::STDIN), Ordering::Relaxed);
     // Only this function touches it, and only from here on.
     let editor = unsafe { &mut *core::ptr::addr_of_mut!(EDITOR) };
     let mut runner = run::Runner::new();

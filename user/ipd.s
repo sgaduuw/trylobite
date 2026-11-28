@@ -17,7 +17,9 @@
 # finds no free slot is dropped, as UDP allows. A datagram to port 7
 # that no process has bound is sent straight back: the echo service.
 # A send to a host whose Ethernet address is not known waits for ARP;
-# one such send waits at a time.
+# one such send waits at a time. A datagram to 255.255.255.255 goes to
+# every host on the wire, with no ARP, and one to 255.255.255.255 comes
+# to its port as if to our own address, as DHCP needs (bin/dhcp).
 #
 # TCP: a connection is a descriptor this server gives (SYS_GIVE), its
 # handle the connection's number: IP_CONNECT makes one, IP_LISTEN and
@@ -49,6 +51,7 @@
         .equ  IPD_ARP, 1               # ip_pstate: waiting for the hop's address
         .equ  IPD_ECHO, 2              # ... for the echo reply
         .equ  IPD_LIMIT, 4294967296    # 2^32: addresses are below it
+        .equ  IPD_EVERYONE, 4294967295 # 255.255.255.255, the broadcast address
         .equ  IPD_ADDR, 167772162      # 10.0.0.2
         .equ  IPD_GATEWAY, 167772161   # 10.0.0.1
         .equ  IPD_NAMESERVER, 167772163 # 10.0.0.3
@@ -577,7 +580,7 @@ ip_arp:
 1:      j     ip_wait                  # which carries on what waited for it
 
 # ip_ipv4: an IPv4 packet in frame s1, s2 long. Only ICMP, UDP and TCP to
-# our own address are for us. ICMP: answer an echo request, and take the
+# our own address are for us, and UDP to everyone. ICMP: answer an echo request, and take the
 # reply the ping waits for.
 ip_ipv4:
         li    t0, IPD_IHDR
@@ -602,9 +605,15 @@ ip_ipv4:
         addi  a0, s1, IPD_IDST
         li    a1, 4
         call  ip_getn
+        sw    a0, ip_idst              # for the UDP checksum
         lw    t0, ip_addr
+        beq   a0, t0, 1f
+        li    t0, IPD_EVERYONE         # to everyone: UDP only
         bne   a0, t0, ip_wait
-        addi  a0, s1, IPD_HDR
+        lt    t0, IPD_PROTO(s1)
+        li    t1, IPD_UDP
+        bne   t0, t1, ip_wait
+1:      addi  a0, s1, IPD_HDR
         mv    a1, s3
         li    a2, 0
         call  ip_sum
@@ -753,13 +762,18 @@ ip_usend:
         blez  a0, ip_answer
         li    t0, IPD_LIMIT
         bge   a0, t0, ip_answer
-        call  ip_route
+        li    t0, IPD_EVERYONE         # to everyone: no hop to ask ARP for
+        bne   a0, t0, 2f
+        li    a1, IPD_BROADCAST
+        li    a2, IPD_BROADCAST
+        j     3f
+2:      call  ip_route
         li    a5, E_NOROUTE
         bltz  a0, ip_answer
         mv    s4, a0                   # s4: the hop
         call  ip_lookup
         bltz  a0, 1f
-        call  ip_myport
+3:      call  ip_myport
         mv    a3, a0
         call  ip_uout
         mv    a5, a0
@@ -887,7 +901,8 @@ ip_udp:
         mv    a0, s3
         mv    a1, s6
         li    a3, IPD_UDP
-        call  ip_pseudo
+        lw    a4, ip_idst              # to us, or to everyone
+        call  ip_pseudoat
         mv    a0, s5
         mv    a1, s6
         call  ip_sum
@@ -984,6 +999,9 @@ ip_keep:
 ip_uecho:
         li    t0, IPD_ECHOPORT
         bne   s4, t0, ip_wait
+        lw    t0, ip_idst              # not to everyone: no storms
+        lw    t1, ip_addr
+        bne   t0, t1, ip_wait
         li    t0, IPD_TX
         addi  t0, t0, IPD_CLIENT
         li    t1, 0
@@ -1200,16 +1218,19 @@ ip_rearm:
 
 # ip_pseudo: a2 = the sum of the pseudo-header for a UDP datagram or
 # TCP segment (protocol a3) a1 long between us and address a0, for
-# ip_sum to start from. Clobbers a0, t0, t1.
+# ip_sum to start from; ip_pseudoat with our end's address a4 in place
+# of ours (255.255.255.255 for a datagram to everyone). Clobbers a4, t0,
+# t1.
 ip_pseudo:
+        lw    a4, ip_addr
+ip_pseudoat:
         li    t1, 65536
         div   a2, a0, t1
         rem   t0, a0, t1
         add   a2, a2, t0
-        lw    a0, ip_addr
-        div   t0, a0, t1
+        div   t0, a4, t1
         add   a2, a2, t0
-        rem   t0, a0, t1
+        rem   t0, a4, t1
         add   a2, a2, t0
         add   a2, a2, a3
         add   a2, a2, a1
@@ -2924,6 +2945,7 @@ ip_slen:    .word 0                    # how long,
 ip_shop:    .word 0                    # the hop ARP is asked about,
 ip_sdead:   .word 0                    # and until when
 ip_usport:  .word 0                    # ip_uout's source port
+ip_idst:    .word 0                    # the packet looked at: to whom
 ip_ephem:   .word IPD_EPHEMERAL        # the port bind(0) tries next
 ip_qnext:   .word 0                    # the next kept datagram's number
 ip_uport:   .words NPROC               # each process's port, 0 for none,
