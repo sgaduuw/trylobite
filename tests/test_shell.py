@@ -125,14 +125,15 @@ def test_a_word_without_a_slash_is_looked_for_in_bin(shell):
 
 
 def test_ls_lists_the_programs_on_the_disk(shell):
-    # Thirty-nine programs, some of two blocks, take a while to list.
+    # Forty-two programs, some of two blocks, take a while to list.
     result = session(shell, "ls bin\nfail\n", max_steps=12_000_000)
     assert "sh: exit 3\n" in result.console
-    listed = result.after_boot.splitlines()[1:40]
+    listed = result.after_boot.splitlines()[1:43]
     assert [line.split()[1] for line in listed] == [
         "cp",
         "date",
         "df",
+        "dhcp",
         "dmesg",
         "echo",
         "fail",
@@ -161,6 +162,8 @@ def test_ls_lists_the_programs_on_the_disk(shell):
         "spin",
         "stty",
         "tee",
+        "telnet",
+        "telnetd",
         "top",
         "touch",
         "uname",

@@ -24,6 +24,9 @@ pub struct Ipv4Addr(u32);
 
 impl Ipv4Addr {
     pub const UNSPECIFIED: Ipv4Addr = Ipv4Addr(0);
+    /// 255.255.255.255: every host on the wire. A datagram to it goes
+    /// out to everyone, and one to it comes in as if to us.
+    pub const BROADCAST: Ipv4Addr = Ipv4Addr(u32::MAX);
     pub const LOCALHOST: Ipv4Addr = Ipv4Addr::new(127, 0, 0, 1);
 
     pub const fn new(a: u8, b: u8, c: u8, d: u8) -> Ipv4Addr {
@@ -380,6 +383,16 @@ impl UdpSocket {
         buf[..len].copy_from_slice(&got[HEADER..HEADER + len]);
         Ok((len, from))
     }
+}
+
+/// The interface's Ethernet address, from the network server
+/// (NT_ADDRESS), as six octets.
+pub fn mac_address() -> io::Result<[u8; 6]> {
+    sys::NET.call(sys::NT_ADDRESS, &[])?;
+    let (hi, lo) = (sys::more(0) as u32, sys::more(1) as u32);
+    let [_, a, b, c] = hi.to_be_bytes();
+    let [_, d, e, f] = lo.to_be_bytes();
+    Ok([a, b, c, d, e, f])
 }
 
 /// The machine's own address (IP_ADDRESS).
