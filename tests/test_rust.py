@@ -108,7 +108,7 @@ def test_sort_in_rust_on_the_heap(shell):
     # (trystd's heap). 600 lines take the heap past a page.
     fruit = "pear\napple\nfig\napple\n"
     words = [f"line {(k * 7919) % 1000}" for k in range(600)]
-    on = bin_disk(64, fruit=fruit, many="".join(f"{w}\n" for w in words))
+    on = bin_disk(90, fruit=fruit, many="".join(f"{w}\n" for w in words))
     result = run_image(
         shell,
         input="rsort < fruit\nrsort -r -u < fruit\nrsort -x\nrsort < many > sorted\n",
