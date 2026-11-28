@@ -142,6 +142,7 @@ impl Error {
             sys::E_PERM => "not allowed",
             sys::E_PIPE => "broken pipe",
             sys::E_INTR => "interrupted",
+            sys::E_2BIG => "environment too large",
             sys::E_TIMEDOUT => "timed out",
             sys::E_NOROUTE => "no route to host",
             sys::E_REFUSED => "connection refused",
