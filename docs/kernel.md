@@ -893,6 +893,29 @@ a small way, and say what fails on standard error as `NAME: why`:
   fixed string (Unix's `grep -F`), and exits with 1 when none did. Each
   reads standard input when no file is named, so it works in a pipe:
   `ls bin | grep e | head -n 2`.
+- `sort [-bfnru] [-t C] [-k N[,M]] [-o FILE] [FILE]...` sorts lines,
+  stably, by code point, number (`-n`) or either case (`-f`), by a key
+  of fields (`-t : -k 2,2n`); `-o` writes once every input is read, so
+  `sort -o f f` is safe. `diff [-u] FILE1 FILE2` says the changes from
+  one file to the other, as diff's own lines (`2c2`, `< `, `---`, `> `)
+  or as a unified diff, a shortest edit script (Myers), exiting with 1
+  when they differ; `-` for either is standard input.
+- `less [FILE]` pages through a file, or standard input, on the
+  console: Space and `b` a screen, `j` and `k` a row, `g` and `G` the
+  ends, `/TEXT` and `?TEXT` search, `q` quits. Long lines wrap at the
+  console's width. Its keys come from the console even when standard
+  input is a pipe (`ps | less`), through a descriptor of its own
+  (`CN_OPEN`); with standard output not the console it just copies.
+- `find [PATH]... [-name PATTERN] [-type f|d] [-maxdepth N]` says the
+  paths under each PATH that pass the tests, PATTERN in the shell's
+  `*`, `?` and `[...]`. `tar -c|-t|-x [-v] [-f ARCHIVE] [PATH]...`
+  makes, lists or takes apart an archive in POSIX ustar format, a
+  tryte for each byte, so an archive of text files is a tar file any
+  tar reads once its trytes are written out as bytes; files are
+  archived as 0644 and directories 0755, from time 0, until the
+  filesystem keeps modes and times. Both walk a tree with the paths
+  still to visit on the heap: a program has nine descriptors and half a
+  page of stack, too few for one open directory and a frame per level.
 - `cp FROM TO` copies a file, and `mv FROM TO` renames one, or a
   directory (`FS_RENAME`), replacing a file of that name; both take
   several names and a directory last (`cp a b dir`) to copy or move

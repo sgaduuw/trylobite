@@ -2485,3 +2485,46 @@ running a line, the built-ins), over trystd.
   standard input keeps it, where reading a script (`sh < script`) starts.
 - **Still 60 characters a line**, as the tests pin; a longer line is a
   constant now (`LINE_MAX`).
+
+### 2026-11-28 · less, find, diff, sort and tar
+
+Eelco asked for a pager and more everyday tools. Each is a Rust program
+of `bin/` over trystd, written as the others are (Unix's options in a
+small way, `NAME: what: why` on standard error, io::Line, no core::fmt),
+and each uses the heap, since each holds a whole input or a list of
+paths: six pages while it runs.
+
+- **less takes its keys from the console, not standard input,** when
+  standard input is the text (`ps | less`), as Unix's opens /dev/tty: a
+  descriptor of its own from `console::open` (`CN_OPEN`). To tell, trystd
+  gained `io::is_terminal(fd)`, which asks IO_WINSIZE: only the console
+  answers it, even when it does not know its size, while the file and
+  pipe servers say `E_INVAL`. It reads its whole input first, then draws
+  each screen as vi does (alternate screen, a buffer written at once),
+  and takes the console's foreground so Ctrl-C is a key.
+- **sort has its own merge sort.** The slice's `sort_by` (driftsort)
+  inlines the comparison into a dozen parts and made sort 26,000 trytes;
+  a bottom-up merge sort through a second buffer, also stable, made it
+  15,000. `rsort` stays, as the heap's demonstration and the benchmark's
+  program.
+- **diff is Myers' O(ND)** after the lines both files start and end with
+  are set aside, keeping each pass's furthest points for the way back:
+  memory grows as the square of the number of changes, fine for the
+  files this machine holds. Lines compare by an FNV hash first.
+- **find and tar walk with a stack on the heap, not a recursion.** A
+  first version recursed with each level's directory open and a
+  512-tryte record in its frame; ten directories deep it faulted. A
+  process has nine descriptors and the lower half of its page as stack,
+  so each directory's names are now read whole and the directory closed,
+  and the paths still to visit wait on a Vec.
+- **tar writes ustar with a tryte for each byte.** An archive of text is
+  then a real tar file once its trytes are bytes (the tests open it
+  with Python's tarfile, and extract one Python made). Program files are
+  archived raw, trytes beyond 255 and all, which only this tar reads
+  back. The filesystem has no modes, owners or times yet (the COW
+  B-tree rewrite brings them), so tar writes 0644 or 0755, owner 0 and
+  time 0, and find has no -mtime or -perm; both should learn them from
+  the new `stat`.
+- `bin_disk` is 72 blocks now and CI's disk 100: the five programs take
+  seven blocks more.
+

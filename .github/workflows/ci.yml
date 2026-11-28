@@ -34,7 +34,7 @@ jobs:
       - name: Use files from the shell
         run: |
           printf 'hello, disk\n' > notes
-          make BLOCKS=84
+          make BLOCKS=100
           tools/fs.py put disk.img notes
           tools/fs.py mkdir disk.img docs
           tools/fs.py put disk.img notes docs/again
