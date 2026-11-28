@@ -454,6 +454,13 @@ foreground process it is an ordinary code point, and one that ended
 nothing (the process had ended already) waits in the buffer for the next
 foreground process.
 
+Input reaches a reader as typed, one code point per key, unechoed: the
+server cooks nothing, so a program that edits a screen, as `vi` does,
+reads keys straight from standard input and draws with ANSI sequences on
+standard output. Any process may name `NO_FOREGROUND`; `vi` does, so
+that a Ctrl-C reaches it as a key instead of ending it with a file
+unsaved, and the shell names the next program it runs as usual.
+
 ## The disk
 
 A block is one page, and a process's own page holds its code, so blocks

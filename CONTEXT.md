@@ -2204,3 +2204,37 @@ call and 32-bit arithmetic, a screen costs about 70,000 steps, against
 the assembly's 9,000 and the first version's 250,000. trystd gained
 `sys::ticks`, `sys::sleep_until` and `Words::word_i64`/`tryte` for it:
 a tick count passes 2^31 after half an hour of a live console.
+
+### 2026-11-28 · vi, a screen editor, with no console changes
+
+Eelco asked for a vi-like editor. `bin/vi.rs` is Rust over trystd: the
+file is read whole into a `Vec` of lines and written back whole with
+`:w`, through the file server as any program's files are. It has core
+vi (normal, insert and `:` modes; hjkl and arrows, words, `gg`/`G`,
+`x`, `dd`, `D`, `yy`/`p`, `J`, `r`, `i a I A o O`, a one-level `u`
+that redoes when pressed again, counts, `:w [FILE]`, `:q`, `:q!`,
+`:wq`, `:x`, `ZZ`, `:N`), not ex's ranges, searches or registers.
+
+- **No raw mode was needed.** The console server already hands each
+  key over as typed, without echo (the shell echoes for itself), and
+  passes ANSI sequences out untouched; detrytus' live console puts the
+  host terminal in raw mode. So the editor needs nothing new from the
+  console server or the kernel.
+- **Ctrl-C.** The shell makes each program the console's foreground,
+  and Ctrl-C would kill the editor with its file unsaved. The editor
+  names `NO_FOREGROUND` itself, which any process may, and reads Ctrl-C
+  as a key that cancels. A dedicated "raw" call was rejected as more
+  protocol for the same effect.
+- **Keys are read a byte at a time.** Whatever the editor reads past
+  `:wq` would be lost to the shell (tests type a whole session ahead).
+  With no way to ask whether more input waits, an escape is the Escape
+  key at once; if `[` or `O` follows, the bytes were an arrow's
+  sequence, and the editor takes back what the Escape did (insert mode
+  resumes where it was). Nothing in normal mode starts with `[`.
+- **Size.** The console has no size to ask, so the screen is 24 by 80.
+  Asking the terminal (ESC [ 6 n after moving to the far corner) would
+  hang when input is a file, as in the tests.
+- **Drawing.** Every key redraws the screen into one buffer, written at
+  once, numbers formatted by hand, not with core::fmt (top's lesson).
+- **Later:** search (`/`), `cw`/`dw` and other operator-motion pairs,
+  multi-level undo, asking the terminal its size in a live session.
